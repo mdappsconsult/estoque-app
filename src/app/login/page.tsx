@@ -61,7 +61,7 @@ export default function LoginPage() {
       }
 
       login(usuario);
-      router.push('/');
+      window.location.href = '/';
     } catch (err: any) {
       setErro(err?.message || 'Erro ao verificar código');
     } finally {
