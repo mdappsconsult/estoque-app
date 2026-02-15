@@ -5,6 +5,7 @@ import { Archive, Loader2, QrCode, CheckCircle, X, AlertCircle } from 'lucide-re
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Badge from '@/components/ui/Badge';
+import QRScanner from '@/components/QRScanner';
 import { useAuth } from '@/hooks/useAuth';
 import { getItemByTokenQR, baixarItem } from '@/lib/services/itens';
 
@@ -23,19 +24,20 @@ export default function BaixaDiariaPage() {
 
   const localId = usuario?.local_padrao_id;
 
-  const escanearBaixa = async () => {
-    if (!tokenInput.trim() || !usuario || !localId) return;
+  const escanearBaixa = async (codigo?: string) => {
+    const token = codigo || tokenInput.trim();
+    if (!token || !usuario || !localId) return;
     setProcessando(true);
     try {
-      const item = await getItemByTokenQR(tokenInput.trim());
+      const item = await getItemByTokenQR(token);
       if (!item) {
-        setResultados(prev => [{ token_qr: tokenInput, nome: '?', success: false, error: 'Não encontrado' }, ...prev]);
+        setResultados(prev => [{ token_qr: token, nome: '?', success: false, error: 'Não encontrado' }, ...prev]);
       } else {
         await baixarItem(item.id, localId, usuario.id);
         setResultados(prev => [{ token_qr: item.token_qr, nome: item.produto?.nome || '', success: true }, ...prev]);
       }
     } catch (err: any) {
-      setResultados(prev => [{ token_qr: tokenInput, nome: '?', success: false, error: err?.message || 'Erro' }, ...prev]);
+      setResultados(prev => [{ token_qr: token, nome: '?', success: false, error: err?.message || 'Erro' }, ...prev]);
     } finally {
       setTokenInput('');
       setProcessando(false);
@@ -61,17 +63,18 @@ export default function BaixaDiariaPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
+        <QRScanner onScan={(code) => escanearBaixa(code)} label="Abrir câmera para escanear" />
         <div className="flex gap-2">
           <Input
-            placeholder="Escanear QR do item"
+            placeholder="Ou digite o código QR"
             value={tokenInput}
             onChange={(e) => setTokenInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && escanearBaixa()}
             disabled={!localId}
             autoFocus
           />
-          <Button variant="primary" onClick={escanearBaixa} disabled={processando || !localId || !tokenInput.trim()}>
+          <Button variant="primary" onClick={() => escanearBaixa()} disabled={processando || !localId || !tokenInput.trim()}>
             {processando ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
           </Button>
         </div>

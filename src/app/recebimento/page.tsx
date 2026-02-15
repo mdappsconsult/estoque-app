@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import QRScanner from '@/components/QRScanner';
 import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
@@ -38,11 +39,12 @@ export default function RecebimentoPage() {
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ divergencias: number } | null>(null);
 
-  const escanear = async () => {
-    if (!tokenInput.trim()) return;
+  const escanear = async (codigo?: string) => {
+    const tk = codigo || tokenInput.trim();
+    if (!tk) return;
     setErro('');
     try {
-      const item = await getItemByTokenQR(tokenInput.trim());
+      const item = await getItemByTokenQR(tk);
       if (!item) { setErro('Item não encontrado'); return; }
       if (itensRecebidos.find(i => i.id === item.id)) { setErro('Já escaneado'); return; }
       setItensRecebidos(prev => [...prev, { id: item.id, token_qr: item.token_qr, nome: item.produto?.nome || '' }]);
@@ -100,11 +102,12 @@ export default function RecebimentoPage() {
 
       {selecionada && (
         <>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Escanear QR do item recebido</label>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
+            <label className="block text-sm font-medium text-gray-700">Escanear QR do item recebido</label>
+            <QRScanner onScan={(code) => escanear(code)} label="Abrir câmera" />
             <div className="flex gap-2">
-              <Input placeholder="Código QR" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && escanear()} />
-              <Button variant="primary" onClick={escanear}><QrCode className="w-4 h-4" /></Button>
+              <Input placeholder="Ou digite o código QR" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && escanear()} />
+              <Button variant="primary" onClick={() => escanear()}><QrCode className="w-4 h-4" /></Button>
             </div>
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>

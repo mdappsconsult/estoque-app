@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Search, Loader2, QrCode, Clock, MapPin, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import QRScanner from '@/components/QRScanner';
 import Badge from '@/components/ui/Badge';
 import { getItemByTokenQR, ItemCompleto } from '@/lib/services/itens';
 import { getRastreioItem, AuditoriaCompleta } from '@/lib/services/auditoria';
@@ -15,14 +16,16 @@ export default function RastreioQRPage() {
   const [timeline, setTimeline] = useState<AuditoriaCompleta[]>([]);
   const [erro, setErro] = useState('');
 
-  const buscar = async () => {
-    if (!token.trim()) return;
+  const buscar = async (codigo?: string) => {
+    const t = codigo || token.trim();
+    if (!t) return;
+    setToken(t);
     setBuscando(true);
     setItem(null);
     setTimeline([]);
     setErro('');
     try {
-      const result = await getItemByTokenQR(token.trim());
+      const result = await getItemByTokenQR(t);
       if (!result) { setErro('Item não encontrado'); setBuscando(false); return; }
       setItem(result);
       const audit = await getRastreioItem(result.id);
@@ -45,10 +48,11 @@ export default function RastreioQRPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
+        <QRScanner onScan={(code) => buscar(code)} label="Escanear com câmera" />
         <div className="flex gap-2">
-          <Input placeholder="Código QR do item" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && buscar()} />
-          <Button variant="primary" onClick={buscar} disabled={buscando}>
+          <Input placeholder="Ou digite o código QR" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && buscar()} />
+          <Button variant="primary" onClick={() => buscar()} disabled={buscando}>
             {buscando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
           </Button>
         </div>
