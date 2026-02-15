@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { QrCode, Loader2, Search, Package, MapPin, Clock, Tag } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import QRScanner from '@/components/QRScanner';
 import Badge from '@/components/ui/Badge';
 import { getItemByTokenQR, ItemCompleto } from '@/lib/services/itens';
 
@@ -33,13 +34,15 @@ export default function QRCodePage() {
   const [item, setItem] = useState<ItemCompleto | null>(null);
   const [naoEncontrado, setNaoEncontrado] = useState(false);
 
-  const buscar = async () => {
-    if (!token.trim()) return;
+  const buscar = async (codigo?: string) => {
+    const t = codigo || token.trim();
+    if (!t) return;
+    setToken(t);
     setBuscando(true);
     setItem(null);
     setNaoEncontrado(false);
     try {
-      const result = await getItemByTokenQR(token.trim());
+      const result = await getItemByTokenQR(t);
       if (result) {
         setItem(result);
       } else {
@@ -62,15 +65,16 @@ export default function QRCodePage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
+        <QRScanner onScan={(code) => buscar(code)} label="Abrir câmera para escanear" />
         <div className="flex gap-2">
           <Input
-            placeholder="Digite ou escaneie o código QR"
+            placeholder="Ou digite o código QR"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && buscar()}
           />
-          <Button variant="primary" onClick={buscar} disabled={buscando || !token.trim()}>
+          <Button variant="primary" onClick={() => buscar()} disabled={buscando || !token.trim()}>
             {buscando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
           </Button>
         </div>
