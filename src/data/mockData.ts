@@ -1,0 +1,120 @@
+import { Produto, Grupo } from '@/types';
+
+export const grupos: Grupo[] = [
+  { id: '1', nome: 'Baldes', cor: '#ef4444' },
+  { id: '2', nome: 'Caixas', cor: '#3b82f6' },
+  { id: '3', nome: 'Sacos', cor: '#22c55e' },
+  { id: '4', nome: 'Potes', cor: '#f59e0b' },
+];
+
+export const produtos: Produto[] = [
+  {
+    id: '1',
+    nome: 'Balde açaí',
+    medida: '11',
+    unidadeMedida: 'l',
+    grupos: ['Baldes'],
+    marca: 'Açaí Premium',
+    fornecedor: 'Distribuidora Norte',
+    sif: '12345',
+    conservacao: [
+      {
+        id: '1',
+        tipo: 'resfriado',
+        status: 'ativo',
+        dias: 0,
+        horas: 0,
+        minutos: 0,
+      }
+    ],
+    validadeDias: 7,
+    validadeHoras: 0,
+    validadeMinutos: 0,
+    exibirHorarioEtiqueta: false,
+    contagemDoDia: true,
+    status: 'ativo',
+    criadoEm: new Date('2024-01-15'),
+    atualizadoEm: new Date('2024-01-15'),
+  },
+  {
+    id: '2',
+    nome: 'Balde Cupuaçu',
+    medida: '11',
+    unidadeMedida: 'l',
+    grupos: ['Baldes'],
+    marca: 'Frutas da Amazônia',
+    fornecedor: 'Distribuidora Norte',
+    conservacao: [
+      {
+        id: '2',
+        tipo: 'resfriado',
+        status: 'ativo',
+        dias: 0,
+        horas: 0,
+        minutos: 0,
+      }
+    ],
+    validadeDias: 7,
+    validadeHoras: 0,
+    validadeMinutos: 0,
+    exibirHorarioEtiqueta: false,
+    contagemDoDia: true,
+    status: 'ativo',
+    criadoEm: new Date('2024-01-15'),
+    atualizadoEm: new Date('2024-01-15'),
+  },
+  {
+    id: '3',
+    nome: 'Caixa açaí',
+    medida: '5',
+    unidadeMedida: 'kg',
+    grupos: ['Caixas'],
+    marca: 'Açaí Premium',
+    fornecedor: 'Distribuidora Sul',
+    conservacao: [
+      {
+        id: '3',
+        tipo: 'congelado',
+        status: 'ativo',
+        dias: 30,
+        horas: 0,
+        minutos: 0,
+      }
+    ],
+    validadeDias: 30,
+    validadeHoras: 0,
+    validadeMinutos: 0,
+    exibirHorarioEtiqueta: false,
+    contagemDoDia: false,
+    status: 'ativo',
+    criadoEm: new Date('2024-01-16'),
+    atualizadoEm: new Date('2024-01-16'),
+  },
+  {
+    id: '4',
+    nome: 'Caixa cupuaçu',
+    medida: '5',
+    unidadeMedida: 'kg',
+    grupos: ['Caixas'],
+    marca: 'Frutas da Amazônia',
+    fornecedor: 'Distribuidora Sul',
+    conservacao: [
+      {
+        id: '4',
+        tipo: 'congelado',
+        status: 'ativo',
+        dias: 30,
+        horas: 0,
+        minutos: 0,
+      }
+    ],
+    validadeDias: 30,
+    validadeHoras: 0,
+    validadeMinutos: 0,
+    exibirHorarioEtiqueta: false,
+    contagemDoDia: false,
+    status: 'ativo',
+    criadoEm: new Date('2024-01-16'),
+    atualizadoEm: new Date('2024-01-16'),
+  },
+];

@@ -1,65 +1,65 @@
-import Image from "next/image";
+'use client';
+
+import {
+  QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users
+} from 'lucide-react';
+import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
+import Link from 'next/link';
+import { useAuth } from '@/hooks/useAuth';
+
+const features = [
+  { title: 'Escanear QR', description: 'Ações por item.', icon: QrCode, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/qrcode' },
+  { title: 'Entrada de Compra', description: 'Lote de compra + etiquetas.', icon: PackageCheck, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/entrada-compra' },
+  { title: 'Produção', description: 'Lote de produção + etiquetas.', icon: ChefHat, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/producao' },
+  { title: 'Etiquetas', description: 'Impressão de QR.', icon: QrCode, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/etiquetas' },
+  { title: 'Separar por Loja', description: 'Warehouse → Store.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/separar-por-loja' },
+  { title: 'Viagem / Aceite', description: 'Aceite do motorista.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/viagem-aceite' },
+  { title: 'Receber Entrega', description: 'Conferência por QR.', icon: Store, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/recebimento' },
+  { title: 'Transf. Loja → Loja', description: 'Emergencial com aceite.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/transferencia-loja' },
+  { title: 'Aceites Pendentes', description: 'Aceitar/recusar.', icon: ClipboardCheck, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/aceites-pendentes' },
+  { title: 'Baixa Diária', description: 'Baixa por QR.', icon: Archive, iconBg: 'bg-orange-100', iconColor: 'text-orange-600', href: '/baixa-diaria' },
+  { title: 'Perdas / Descarte', description: 'Descarte com motivo.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/perdas' },
+  { title: 'Contagem', description: 'Inventário por produto.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem' },
+  { title: 'Estoque', description: 'Leitura atual.', icon: Boxes, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/estoque' },
+  { title: 'Validades', description: 'Itens próximos do vencimento.', icon: Timer, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/validades' },
+  { title: 'Divergências', description: 'Pendências de envio.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/divergencias' },
+  { title: 'Rastreio por QR', description: 'Linha do tempo.', icon: Search, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/rastreio-qr' },
+  { title: 'Dashboard Admin', description: 'Visão gerencial.', icon: BarChart3, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/dashboard-admin' },
+  { title: 'Relatórios', description: 'Exportar dados.', icon: FileText, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/relatorios' },
+  { title: 'Produtos', description: 'Cadastro.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/produtos' },
+  { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
+  { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
+  { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
+];
 
 export default function Home() {
+  const { usuario } = useAuth();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="max-w-7xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">
+          {usuario ? `Olá, ${usuario.nome}` : 'Home'}
+        </h1>
+        <p className="text-gray-500 mt-1">Acesso rápido às operações do dia</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        {features.map((f) => (
+          <Link key={f.href} href={f.href} className="block">
+            <Card className="flex flex-col h-full" hoverable>
+              <CardHeader
+                icon={<f.icon className={`w-7 h-7 ${f.iconColor}`} />}
+                iconBg={f.iconBg}
+              >
+                <CardTitle>{f.title}</CardTitle>
+                <CardDescription>{f.description}</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
