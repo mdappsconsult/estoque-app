@@ -7,6 +7,7 @@ import {
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
+import { hasAccess } from '@/lib/permissions';
 
 const features = [
   { title: 'Escanear QR', description: 'Ações por item.', icon: QrCode, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/qrcode' },
@@ -46,7 +47,7 @@ export default function Home() {
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        {features.map((f) => (
+        {features.filter((f) => usuario ? hasAccess(usuario.perfil, f.href) : true).map((f) => (
           <Link key={f.href} href={f.href} className="block">
             <Card className="flex flex-col h-full" hoverable>
               <CardHeader

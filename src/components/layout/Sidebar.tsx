@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { hasAccess } from '@/lib/permissions';
 
 const menuItems: { name: string; href: string; icon: any; badge?: string }[] = [
   { name: 'Início', href: '/', icon: Home },
@@ -68,6 +70,16 @@ const menuExpandable = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState<string[]>([]);
+  const { usuario } = useAuth();
+  const perfil = usuario?.perfil || '';
+
+  const filteredMenuItems = menuItems.filter(item => hasAccess(perfil, item.href));
+  const filteredMenuExpandable = menuExpandable
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => hasAccess(perfil, item.href)),
+    }))
+    .filter(section => section.items.length > 0);
 
   const toggleExpand = (name: string) => {
     setExpanded(prev => 
@@ -87,7 +99,7 @@ export default function Sidebar() {
 
       {/* Menu principal */}
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-        {menuItems.map((item) => {
+        {filteredMenuItems.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
@@ -115,7 +127,7 @@ export default function Sidebar() {
         <div className="my-4 border-t border-gray-200" />
 
         {/* Menus expansíveis */}
-        {menuExpandable.map((section) => {
+        {filteredMenuExpandable.map((section) => {
           const isExpanded = expanded.includes(section.name);
           const hasActiveChild = section.items.some(item => pathname === item.href);
           

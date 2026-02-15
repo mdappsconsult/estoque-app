@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import MobileHeader from "../components/layout/MobileHeader";
+import AuthGuard from "@/components/auth/AuthGuard";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -18,10 +18,9 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={`${inter.className} bg-gray-50`}>
-        <MobileHeader />
-        <main className="p-4 min-h-[calc(100vh-3.5rem)]">
+        <AuthGuard>
           {children}
-        </main>
+        </AuthGuard>
       </body>
     </html>
   );
