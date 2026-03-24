@@ -23,6 +23,9 @@ export default function ProducaoPage() {
     table: 'produtos',
     orderBy: { column: 'nome', ascending: true },
   });
+  const produtosProducao = produtos.filter(
+    (p) => !p.origem || p.origem === 'PRODUCAO' || p.origem === 'AMBOS'
+  );
   const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
 
@@ -177,7 +180,21 @@ export default function ProducaoPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <Select label="Produto" required options={[{ value: '', label: 'Selecione...' }, ...produtos.map(p => ({ value: p.id, label: p.nome }))]} value={form.produto_id} onChange={(e) => setForm({ ...form, produto_id: e.target.value })} />
+        <Select
+          label="Produto"
+          required
+          options={[
+            { value: '', label: 'Selecione...' },
+            ...produtosProducao.map((p) => ({ value: p.id, label: p.nome })),
+          ]}
+          value={form.produto_id}
+          onChange={(e) => setForm({ ...form, produto_id: e.target.value })}
+        />
+        {produtosProducao.length === 0 && (
+          <p className="text-sm text-amber-600">
+            Nenhum produto marcado para produção. Cadastre com origem &quot;Produção&quot; ou &quot;Compra e produção&quot;.
+          </p>
+        )}
         <Input label="Quantidade" type="number" min="1" value={form.quantidade} onChange={(e) => setForm({ ...form, quantidade: e.target.value })} required />
         <Select label="Local" required options={[{ value: '', label: 'Selecione...' }, ...warehouses.map(l => ({ value: l.id, label: l.nome }))]} value={form.local_id} onChange={(e) => setForm({ ...form, local_id: e.target.value })} />
         <Input

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Search, Edit2, Trash2, Snowflake, Thermometer, Loader2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -8,27 +8,21 @@ import Select from '@/components/ui/Select';
 import ProdutoModal from '@/components/produtos/ProdutoModal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
+import { Produto } from '@/types/database';
 
-interface ProdutoComGrupos {
-  id: string;
-  nome: string;
-  medida: string | null;
-  unidade_medida: string;
-  marca: string | null;
-  fornecedor: string | null;
-  sif: string | null;
-  validade_dias: number;
-  validade_horas: number;
-  validade_minutos: number;
-  exibir_horario_etiqueta: boolean;
-  contagem_do_dia: boolean;
-  status: string;
+interface ProdutoComGrupos extends Produto {
   grupos: { id: string; nome: string; cor: string }[];
   conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
 }
 
+const LABEL_ORIGEM: Record<string, string> = {
+  COMPRA: 'Compra',
+  PRODUCAO: 'Produção',
+  AMBOS: 'Ambos',
+};
+
 export default function ProdutosPage() {
-  const { data: produtosRaw, loading, refetch } = useRealtimeQuery<any>({
+  const { data: produtosRaw, loading, refetch } = useRealtimeQuery<ProdutoComGrupos>({
     table: 'produtos',
     select: '*',
     orderBy: { column: 'nome', ascending: true },
@@ -45,25 +39,31 @@ export default function ProdutosPage() {
             .eq('produto_id', produto.id);
           return {
             ...produto,
+            origem: (produto.origem as Produto['origem']) ?? 'AMBOS',
+            estoque_minimo: produto.estoque_minimo ?? 0,
+            custo_referencia: produto.custo_referencia ?? null,
             grupos: (gruposData || []).map((pg: any) => pg.grupos),
             conservacoes: conservacoesData || [],
-          };
+          } as ProdutoComGrupos;
         })
       );
       return result;
     },
   });
 
-  const produtos = produtosRaw as ProdutoComGrupos[];
+  const produtos = produtosRaw;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filtroUnidade, setFiltroUnidade] = useState('todos');
+  const [filtroOrigem, setFiltroOrigem] = useState<string>('todos');
   const [modalOpen, setModalOpen] = useState(false);
   const [produtoEditando, setProdutoEditando] = useState<ProdutoComGrupos | null>(null);
 
-  const produtosFiltrados = produtos.filter(produto =>
-    produto.nome.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const produtosFiltrados = produtos.filter((produto) => {
+    if (!produto.nome.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (filtroOrigem !== 'todos' && (produto.origem || 'AMBOS') !== filtroOrigem) return false;
+    return true;
+  });
 
   const handleCriarProduto = () => {
     setProdutoEditando(null);
@@ -97,12 +97,17 @@ export default function ProdutosPage() {
             medida: produtoData.medida,
             unidade_medida: produtoData.unidadeMedida,
             marca: produtoData.marca,
+            fornecedor: produtoData.fornecedor,
             sif: produtoData.sif,
+            origem: produtoData.origem,
+            estoque_minimo: produtoData.estoqueMinimo,
+            custo_referencia: produtoData.custoReferencia,
             validade_dias: produtoData.validadeDias,
             validade_horas: produtoData.validadeHoras,
             validade_minutos: produtoData.validadeMinutos,
             exibir_horario_etiqueta: produtoData.exibirHorarioEtiqueta,
             contagem_do_dia: produtoData.contagemDoDia,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', produtoEditando.id);
         if (updateError) throw updateError;
@@ -128,7 +133,11 @@ export default function ProdutosPage() {
             medida: produtoData.medida,
             unidade_medida: produtoData.unidadeMedida,
             marca: produtoData.marca,
+            fornecedor: produtoData.fornecedor,
             sif: produtoData.sif,
+            origem: produtoData.origem,
+            estoque_minimo: produtoData.estoqueMinimo,
+            custo_referencia: produtoData.custoReferencia,
             validade_dias: produtoData.validadeDias,
             validade_horas: produtoData.validadeHoras,
             validade_minutos: produtoData.validadeMinutos,
@@ -153,6 +162,7 @@ export default function ProdutosPage() {
       }
 
       setModalOpen(false);
+      await refetch();
     } catch (error) {
       console.error('Erro ao salvar produto:', error);
       alert('Erro ao salvar produto');
@@ -177,7 +187,7 @@ export default function ProdutosPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-4">
           <div className="w-64">
             <Select
               options={[
@@ -189,7 +199,20 @@ export default function ProdutosPage() {
               onChange={(e) => setFiltroUnidade(e.target.value)}
             />
           </div>
-          <div className="flex-1 relative">
+          <div className="w-56">
+            <Select
+              label="Origem"
+              options={[
+                { value: 'todos', label: 'Todas as origens' },
+                { value: 'COMPRA', label: 'Só compra' },
+                { value: 'PRODUCAO', label: 'Só produção' },
+                { value: 'AMBOS', label: 'Compra e produção' },
+              ]}
+              value={filtroOrigem}
+              onChange={(e) => setFiltroOrigem(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 relative min-w-[200px]">
             <Input placeholder="Buscar produto pelo nome" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
             <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
@@ -201,6 +224,9 @@ export default function ProdutosPage() {
           <thead>
             <tr className="border-b border-gray-200">
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Produto</th>
+              <th className="text-left px-4 py-4 text-sm font-medium text-gray-500">Origem</th>
+              <th className="text-right px-4 py-4 text-sm font-medium text-gray-500">Mín.</th>
+              <th className="text-right px-4 py-4 text-sm font-medium text-gray-500">Ref. R$</th>
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Grupos</th>
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Validades</th>
               <th className="text-right px-6 py-4 text-sm font-medium text-gray-500">Ações</th>
@@ -212,6 +238,20 @@ export default function ProdutosPage() {
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-500">Produto</span>
                   <p className="font-semibold text-gray-900">{produto.nome}</p>
+                </td>
+                <td className="px-4 py-4 text-sm text-gray-700">
+                  {LABEL_ORIGEM[produto.origem] || produto.origem}
+                </td>
+                <td className="px-4 py-4 text-right text-sm tabular-nums text-gray-800">
+                  {produto.estoque_minimo ?? 0}
+                </td>
+                <td className="px-4 py-4 text-right text-sm tabular-nums text-gray-800">
+                  {produto.custo_referencia != null
+                    ? Number(produto.custo_referencia).toLocaleString('pt-BR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })
+                    : '—'}
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-500">Grupos</span>

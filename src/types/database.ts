@@ -13,6 +13,9 @@ export type Database = {
           marca: string | null;
           fornecedor: string | null;
           sif: string | null;
+          origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
+          estoque_minimo: number;
+          custo_referencia: number | null;
           validade_dias: number;
           validade_horas: number;
           validade_minutos: number;
@@ -30,6 +33,9 @@ export type Database = {
           marca?: string | null;
           fornecedor?: string | null;
           sif?: string | null;
+          origem?: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
+          estoque_minimo?: number;
+          custo_referencia?: number | null;
           validade_dias?: number;
           validade_horas?: number;
           validade_minutos?: number;
@@ -47,6 +53,9 @@ export type Database = {
           marca?: string | null;
           fornecedor?: string | null;
           sif?: string | null;
+          origem?: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
+          estoque_minimo?: number;
+          custo_referencia?: number | null;
           validade_dias?: number;
           validade_horas?: number;
           validade_minutos?: number;

@@ -21,7 +21,11 @@ interface ProdutoEditando {
   medida: string | null;
   unidade_medida: string;
   marca: string | null;
+  fornecedor: string | null;
   sif: string | null;
+  origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
+  estoque_minimo: number;
+  custo_referencia: number | null;
   validade_dias: number;
   validade_horas: number;
   validade_minutos: number;
@@ -53,15 +57,22 @@ const tiposConservacao = [
   { value: 'quente', label: 'Quente' },
 ];
 
+type TipoCadastro = 'INDUSTRIA' | 'FORNECEDOR';
+
 export default function ProdutoModal({ isOpen, onClose, produto, onSave }: ProdutoModalProps) {
   const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [tipoCadastro, setTipoCadastro] = useState<TipoCadastro>('FORNECEDOR');
   const [formData, setFormData] = useState({
     nome: '',
     medida: '',
     unidadeMedida: 'l',
     grupoIds: [] as string[],
     marca: '',
+    fornecedorPreferencial: '',
     sif: '',
+    origem: 'AMBOS' as 'COMPRA' | 'PRODUCAO' | 'AMBOS',
+    estoqueMinimo: 0,
+    custoReferencia: '' as string,
     conservacaoTipo: 'resfriado',
     conservacaoStatus: 'ativo',
     validadeDias: 0,
@@ -91,13 +102,18 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
 
   useEffect(() => {
     if (produto) {
+      setTipoCadastro(produto.origem === 'COMPRA' ? 'FORNECEDOR' : 'INDUSTRIA');
       setFormData({
         nome: produto.nome,
         medida: produto.medida || '',
         unidadeMedida: produto.unidade_medida,
         grupoIds: produto.grupos.map(g => g.id),
         marca: produto.marca || '',
+        fornecedorPreferencial: produto.fornecedor || '',
         sif: produto.sif || '',
+        origem: produto.origem || 'AMBOS',
+        estoqueMinimo: produto.estoque_minimo ?? 0,
+        custoReferencia: produto.custo_referencia != null ? String(produto.custo_referencia) : '',
         conservacaoTipo: produto.conservacoes[0]?.tipo || 'resfriado',
         conservacaoStatus: produto.conservacoes[0]?.status || 'ativo',
         validadeDias: produto.validade_dias,
@@ -107,13 +123,18 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         contagemDoDia: produto.contagem_do_dia,
       });
     } else {
+      setTipoCadastro('FORNECEDOR');
       setFormData({
         nome: '',
         medida: '',
         unidadeMedida: 'l',
         grupoIds: [],
         marca: '',
+        fornecedorPreferencial: '',
         sif: '',
+        origem: 'COMPRA',
+        estoqueMinimo: 0,
+        custoReferencia: '',
         conservacaoTipo: 'resfriado',
         conservacaoStatus: 'ativo',
         validadeDias: 0,
@@ -148,13 +169,31 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    const custoRefParsed = formData.custoReferencia.trim();
+    const custoParsed = Number.parseFloat(custoRefParsed.replace(',', '.'));
+    const custoReferenciaNum =
+      custoRefParsed === '' || !Number.isFinite(custoParsed) ? null : Math.max(0, custoParsed);
+
+    const origemFinal: 'COMPRA' | 'PRODUCAO' | 'AMBOS' =
+      tipoCadastro === 'FORNECEDOR'
+        ? formData.origem === 'AMBOS'
+          ? 'AMBOS'
+          : 'COMPRA'
+        : formData.origem === 'AMBOS'
+          ? 'AMBOS'
+          : 'PRODUCAO';
+
     const produtoData = {
       nome: formData.nome,
       medida: formData.medida,
       unidadeMedida: formData.unidadeMedida,
       grupoIds: formData.grupoIds,
       marca: formData.marca,
+      fornecedor: formData.fornecedorPreferencial.trim() || null,
       sif: formData.sif,
+      origem: origemFinal,
+      estoqueMinimo: Math.max(0, Math.floor(Number(formData.estoqueMinimo) || 0)),
+      custoReferencia: custoReferenciaNum,
       conservacoes: [{
         tipo: formData.conservacaoTipo,
         status: formData.conservacaoStatus,
@@ -212,10 +251,108 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
             </div>
           </div>
 
+          {/* Tipo de cadastro */}
+          <div className="rounded-xl border border-gray-200 p-3">
+            <p className="text-sm font-semibold text-gray-900 mb-3">Tipo de cadastro</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTipoCadastro('INDUSTRIA');
+                  setFormData((prev) => ({
+                    ...prev,
+                    origem: prev.origem === 'AMBOS' ? 'AMBOS' : 'PRODUCAO',
+                  }));
+                }}
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  tipoCadastro === 'INDUSTRIA'
+                    ? 'border-red-300 bg-red-50 text-red-700'
+                    : 'border-gray-200 bg-white text-gray-600'
+                }`}
+              >
+                Produto da indústria
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTipoCadastro('FORNECEDOR');
+                  setFormData((prev) => ({
+                    ...prev,
+                    origem: prev.origem === 'AMBOS' ? 'AMBOS' : 'COMPRA',
+                  }));
+                }}
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  tipoCadastro === 'FORNECEDOR'
+                    ? 'border-red-300 bg-red-50 text-red-700'
+                    : 'border-gray-200 bg-white text-gray-600'
+                }`}
+              >
+                Produto de fornecedor
+              </button>
+            </div>
+          </div>
+
+          {/* Estoque / compra */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">
+              {tipoCadastro === 'FORNECEDOR' ? 'Compra e estoque mínimo' : 'Estoque mínimo'}
+            </h3>
+            {tipoCadastro === 'FORNECEDOR' && (
+              <p className="text-xs text-gray-500 -mt-2">
+                Fornecedor e custo sugerem valores na <strong>Entrada de compra</strong>; cada NF registra o valor real no lote.
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Estoque mínimo (unidades com QR)"
+                type="number"
+                min={0}
+                value={formData.estoqueMinimo}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, estoqueMinimo: parseInt(e.target.value, 10) || 0 }))
+                }
+              />
+              {tipoCadastro === 'FORNECEDOR' ? (
+                <Input
+                  label="Custo de referência (R$ / unidade)"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Ex: 12,90"
+                  value={formData.custoReferencia}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, custoReferencia: e.target.value }))}
+                />
+              ) : (
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 flex items-center">
+                  Sem custo de referência para produto de produção.
+                </div>
+              )}
+            </div>
+            {tipoCadastro === 'FORNECEDOR' ? (
+              <Input
+                label="Fornecedor preferencial"
+                placeholder="Nome usual na compra (opcional)"
+                value={formData.fornecedorPreferencial}
+                onChange={(e) => setFormData((prev) => ({ ...prev, fornecedorPreferencial: e.target.value }))}
+              />
+            ) : (
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={formData.origem === 'AMBOS'}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, origem: e.target.checked ? 'AMBOS' : 'PRODUCAO' }))
+                  }
+                  className="rounded border-gray-300"
+                />
+                Também permitir compra deste produto (origem: ambos)
+              </label>
+            )}
+          </div>
+
           {/* Organização de grupos */}
           <div>
             <h3 className="text-sm font-semibold text-gray-900 mb-4">
-              Organização de grupos e Origem do produto
+              Organização de grupos
             </h3>
             
             <div className="mb-4">
@@ -255,8 +392,8 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
 
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Marca ou fornecedor"
-                placeholder="Nome da marca ou fornecedor"
+                label="Marca"
+                placeholder="Marca do produto"
                 value={formData.marca}
                 onChange={(e) => setFormData(prev => ({ ...prev, marca: e.target.value }))}
               />

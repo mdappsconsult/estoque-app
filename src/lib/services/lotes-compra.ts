@@ -88,5 +88,17 @@ export async function criarLoteCompra(
     },
   });
 
+  // Atualiza custo de referência no cadastro (última compra registrada)
+  const { error: erroCustoRef } = await supabase
+    .from('produtos')
+    .update({
+      custo_referencia: lote.custo_unitario,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', lote.produto_id);
+  if (erroCustoRef) {
+    console.warn('Não foi possível atualizar custo_referencia do produto:', erroCustoRef.message);
+  }
+
   return { loteCompra, itensGerados: lote.quantidade };
 }
