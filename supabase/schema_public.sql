@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   nome TEXT NOT NULL,
   telefone TEXT NOT NULL UNIQUE,
-  perfil TEXT NOT NULL CHECK (perfil IN ('ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_STORE', 'DRIVER')),
+  perfil TEXT NOT NULL CHECK (perfil IN ('ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER')),
   local_padrao_id UUID REFERENCES public.locais(id),
   status TEXT NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()

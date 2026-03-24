@@ -340,7 +340,13 @@ export type Database = {
           id: string;
           nome: string;
           telefone: string;
-          perfil: 'ADMIN_MASTER' | 'MANAGER' | 'OPERATOR_WAREHOUSE' | 'OPERATOR_STORE' | 'DRIVER';
+          perfil:
+            | 'ADMIN_MASTER'
+            | 'MANAGER'
+            | 'OPERATOR_WAREHOUSE'
+            | 'OPERATOR_WAREHOUSE_DRIVER'
+            | 'OPERATOR_STORE'
+            | 'DRIVER';
           local_padrao_id: string | null;
           status: 'ativo' | 'inativo';
           created_at: string;
@@ -349,7 +355,13 @@ export type Database = {
           id?: string;
           nome: string;
           telefone: string;
-          perfil: 'ADMIN_MASTER' | 'MANAGER' | 'OPERATOR_WAREHOUSE' | 'OPERATOR_STORE' | 'DRIVER';
+          perfil:
+            | 'ADMIN_MASTER'
+            | 'MANAGER'
+            | 'OPERATOR_WAREHOUSE'
+            | 'OPERATOR_WAREHOUSE_DRIVER'
+            | 'OPERATOR_STORE'
+            | 'DRIVER';
           local_padrao_id?: string | null;
           status?: 'ativo' | 'inativo';
           created_at?: string;
@@ -358,7 +370,13 @@ export type Database = {
           id?: string;
           nome?: string;
           telefone?: string;
-          perfil?: 'ADMIN_MASTER' | 'MANAGER' | 'OPERATOR_WAREHOUSE' | 'OPERATOR_STORE' | 'DRIVER';
+          perfil?:
+            | 'ADMIN_MASTER'
+            | 'MANAGER'
+            | 'OPERATOR_WAREHOUSE'
+            | 'OPERATOR_WAREHOUSE_DRIVER'
+            | 'OPERATOR_STORE'
+            | 'DRIVER';
           local_padrao_id?: string | null;
           status?: 'ativo' | 'inativo';
         };

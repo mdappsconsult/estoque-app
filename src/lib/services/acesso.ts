@@ -15,6 +15,8 @@ const CREDENCIAIS_OPERACIONAIS: CredencialOperacional[] = [
     senha: '123456',
     nome: 'Leonardo',
     telefone: '550000000001',
+    // OPERATOR_WAREHOUSE: compatível com o CHECK do Postgres no Supabase (sem migration).
+    // Rotas de motorista também liberam OPERATOR_WAREHOUSE em permissions.ts.
     perfil: 'OPERATOR_WAREHOUSE',
   },
   {
@@ -24,6 +26,13 @@ const CREDENCIAIS_OPERACIONAIS: CredencialOperacional[] = [
     telefone: '550000000002',
     perfil: 'ADMIN_MASTER',
   },
+  {
+    login: 'ludmilla',
+    senha: '123456',
+    nome: 'Ludmilla',
+    telefone: '550000000003',
+    perfil: 'MANAGER',
+  },
 ];
 
 function normalizarLogin(login: string): string {
@@ -31,7 +40,12 @@ function normalizarLogin(login: string): string {
 }
 
 async function buscarLocalPadraoParaPerfil(perfil: Usuario['perfil']): Promise<string | null> {
-  if (perfil === 'OPERATOR_WAREHOUSE') {
+  // Gerente operacional no estoque/indústria: mesmo local padrão que operador (baixa, perdas, etc.).
+  if (
+    perfil === 'OPERATOR_WAREHOUSE' ||
+    perfil === 'OPERATOR_WAREHOUSE_DRIVER' ||
+    perfil === 'MANAGER'
+  ) {
     const { data } = await supabase
       .from('locais')
       .select('id')

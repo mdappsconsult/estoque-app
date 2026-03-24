@@ -13,6 +13,7 @@ const perfilLabel: Record<string, string> = {
   ADMIN_MASTER: 'Admin Master',
   MANAGER: 'Gerente',
   OPERATOR_WAREHOUSE: 'Operador Indústria',
+  OPERATOR_WAREHOUSE_DRIVER: 'Indústria + motorista',
   OPERATOR_STORE: 'Operador Loja',
   DRIVER: 'Motorista',
 };

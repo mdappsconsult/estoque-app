@@ -63,20 +63,18 @@ export default function EtiquetasPage() {
   });
 
   const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'impressas'>('pendentes');
-  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>(() => {
-    if (typeof window === 'undefined') return '60x60';
-
-    const salvo = window.localStorage.getItem(FORMATO_IMPRESSAO_STORAGE_KEY);
-    if (salvo === '60x60' || salvo === '58x40' || salvo === '50x30') {
-      return salvo;
-    }
-    return '60x60';
-  });
+  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x60');
   const [printing, setPrinting] = useState(false);
   const [erroImpressao, setErroImpressao] = useState('');
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    const salvo = window.localStorage.getItem(FORMATO_IMPRESSAO_STORAGE_KEY);
+    if (salvo === '60x60' || salvo === '58x40' || salvo === '50x30') {
+      setFormatoImpressao(salvo);
+    }
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(FORMATO_IMPRESSAO_STORAGE_KEY, formatoImpressao);
   }, [formatoImpressao]);
 

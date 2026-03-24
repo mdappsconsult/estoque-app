@@ -48,12 +48,59 @@ export async function getItens(filtros?: {
   return data || [];
 }
 
+const ITEM_SELECT_COMPLETO =
+  '*, produto:produtos(id, nome, medida, unidade_medida), local_atual:locais!local_atual_id(id, nome, tipo), lote_compra:lotes_compra(id, fornecedor, lote_fornecedor)';
+
+/** Extrai token útil quando o QR veio como URL ou texto bruto. */
+export function normalizarCodigoQrScaneado(raw: string): string {
+  const s = raw.trim();
+  if (!s) return '';
+  try {
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      const u = new URL(s);
+      const q =
+        u.searchParams.get('q') ||
+        u.searchParams.get('token') ||
+        u.searchParams.get('token_qr') ||
+        u.searchParams.get('id');
+      if (q?.trim()) return q.trim();
+      const parts = u.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last) return decodeURIComponent(last);
+    }
+  } catch {
+    // não é URL válida
+  }
+  return s;
+}
+
 export async function getItemByTokenQR(tokenQR: string): Promise<ItemCompleto | null> {
   const { data, error } = await supabase
     .from('itens')
-    .select('*, produto:produtos(id, nome, medida, unidade_medida), local_atual:locais!local_atual_id(id, nome, tipo), lote_compra:lotes_compra(id, fornecedor, lote_fornecedor)')
+    .select(ITEM_SELECT_COMPLETO)
     .eq('token_qr', tokenQR)
     .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data;
+}
+
+/** Resolve item pelo conteúdo do QR (token completo) ou pelo token curto da etiqueta. */
+export async function getItemPorCodigoEscaneado(raw: string): Promise<ItemCompleto | null> {
+  const token = normalizarCodigoQrScaneado(raw);
+  if (!token) return null;
+
+  const porQr = await getItemByTokenQR(token);
+  if (porQr) return porQr;
+
+  const short = token.replace(/\s/g, '').toUpperCase();
+  if (short.length < 4 || short.length > 16) return null;
+
+  const { data, error } = await supabase
+    .from('itens')
+    .select(ITEM_SELECT_COMPLETO)
+    .eq('token_short', short)
+    .maybeSingle();
+
   if (error && error.code !== 'PGRST116') throw error;
   return data;
 }

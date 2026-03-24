@@ -3,7 +3,8 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-import { hasAccess } from '@/lib/permissions';
+import { hasAccessWithMap } from '@/lib/permissions';
+import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import MobileHeader from '@/components/layout/MobileHeader';
 import { ShieldX } from 'lucide-react';
 
@@ -11,6 +12,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { usuario, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const permissionsMap = useEffectivePermissionsMap();
   const isLoginPage = pathname === '/login';
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   // No access
-  if (!hasAccess(usuario.perfil, pathname)) {
+  if (!hasAccessWithMap(usuario.perfil, pathname, permissionsMap)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="text-center max-w-sm">

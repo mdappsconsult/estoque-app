@@ -2,12 +2,13 @@
 
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
-  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield
 } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
-import { hasAccess } from '@/lib/permissions';
+import { hasAccessWithMap } from '@/lib/permissions';
+import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 
 const features = [
   { title: 'Escanear QR', description: 'Ações por item.', icon: QrCode, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/qrcode' },
@@ -32,10 +33,12 @@ const features = [
   { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
   { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
+  { title: 'Permissões', description: 'Quem acessa cada tela (admin).', icon: Shield, iconBg: 'bg-red-50', iconColor: 'text-red-600', href: '/configuracoes/permissoes' },
 ];
 
 export default function Home() {
   const { usuario } = useAuth();
+  const permissionsMap = useEffectivePermissionsMap();
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -47,7 +50,7 @@ export default function Home() {
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        {features.filter((f) => usuario ? hasAccess(usuario.perfil, f.href) : true).map((f) => (
+        {features.filter((f) => usuario ? hasAccessWithMap(usuario.perfil, f.href, permissionsMap) : true).map((f) => (
           <Link key={f.href} href={f.href} className="block">
             <Card className="flex flex-col h-full" hoverable>
               <CardHeader

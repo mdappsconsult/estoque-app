@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Truck, Loader2, QrCode, CheckCircle, X, Store } from 'lucide-react';
+import { Truck, Loader2, QrCode, CheckCircle, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
+import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import { getItemByTokenQR } from '@/lib/services/itens';
+import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
 import { criarViagem } from '@/lib/services/viagens';
 import { Local } from '@/types/database';
@@ -33,19 +34,49 @@ export default function SepararPorLojaPage() {
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
 
-  const escanear = async () => {
-    if (!tokenInput.trim()) return;
+  const processarEscaneamento = async (codigo?: string) => {
+    const raw = (codigo ?? tokenInput).trim();
+    if (!raw) return;
+    if (!origemId) {
+      setErro('Selecione a origem (indústria) antes de escanear.');
+      return;
+    }
     setErro('');
     try {
-      const item = await getItemByTokenQR(tokenInput.trim());
-      if (!item) { setErro('Item não encontrado'); return; }
-      if (item.estado !== 'EM_ESTOQUE') { setErro('Item não está em estoque'); return; }
-      if (item.local_atual_id !== origemId) { setErro('Item não está no local de origem'); return; }
-      if (itensEscaneados.find(i => i.id === item.id)) { setErro('Item já escaneado'); return; }
+      const item = await getItemPorCodigoEscaneado(raw);
+      if (!item) {
+        setErro('Item não encontrado. Confira se o QR é o token completo ou o código curto da etiqueta.');
+        return;
+      }
+      if (item.estado !== 'EM_ESTOQUE') {
+        setErro('Item não está em estoque');
+        return;
+      }
+      if (item.local_atual_id !== origemId) {
+        setErro('Item não está no local de origem selecionado');
+        return;
+      }
 
-      setItensEscaneados(prev => [...prev, { id: item.id, token_qr: item.token_qr, produto_nome: item.produto?.nome || '' }]);
+      let adicionou = false;
+      setItensEscaneados((prev) => {
+        if (prev.some((i) => i.id === item.id)) {
+          return prev;
+        }
+        adicionou = true;
+        return [
+          ...prev,
+          { id: item.id, token_qr: item.token_qr, produto_nome: item.produto?.nome || '' },
+        ];
+      });
+
+      if (!adicionou) {
+        setErro('Item já escaneado nesta separação');
+        return;
+      }
       setTokenInput('');
-    } catch { setErro('Erro ao buscar item'); }
+    } catch (err: unknown) {
+      setErro(err instanceof Error ? err.message : 'Erro ao buscar item');
+    }
   };
 
   const removerItem = (id: string) => {
@@ -112,11 +143,19 @@ export default function SepararPorLojaPage() {
 
       {origemId && destinoId && (
         <>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Escanear QR</label>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
+            <label className="block text-sm font-medium text-gray-700">Escanear QR do item</label>
+            <QRScanner onScan={(code) => void processarEscaneamento(code)} label="Abrir câmera" />
             <div className="flex gap-2">
-              <Input placeholder="Código QR do item" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && escanear()} />
-              <Button variant="primary" onClick={escanear}><QrCode className="w-4 h-4" /></Button>
+              <Input
+                placeholder="Ou digite o código / token curto"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
+              />
+              <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
+                <QrCode className="w-4 h-4" />
+              </Button>
             </div>
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>

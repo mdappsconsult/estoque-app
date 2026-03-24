@@ -51,7 +51,7 @@ export default function LoginPage() {
 
           <Input
             label="Usuário"
-            placeholder="Ex.: leonardo ou marco"
+            placeholder="Ex.: leonardo, ludmilla ou marco"
             value={usuarioLogin}
             onChange={(e) => setUsuarioLogin(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && entrar()}
@@ -79,7 +79,8 @@ export default function LoginPage() {
 
           <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 space-y-1">
             <p className="font-medium text-gray-700">Acessos configurados:</p>
-            <p><span className="font-semibold">Leonardo</span> / 123456 (produção)</p>
+            <p><span className="font-semibold">Leonardo</span> / 123456 (indústria)</p>
+            <p><span className="font-semibold">Ludmilla</span> / 123456 (gerente)</p>
             <p><span className="font-semibold">Marco</span> / 654321 (administrador)</p>
           </div>
         </div>

@@ -22,7 +22,8 @@ import {
 import clsx from 'clsx';
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { hasAccess } from '@/lib/permissions';
+import { hasAccessWithMap } from '@/lib/permissions';
+import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 
 const menuItems: { name: string; href: string; icon: any; badge?: string }[] = [
   { name: 'Início', href: '/', icon: Home },
@@ -63,6 +64,7 @@ const menuExpandable = [
     icon: Settings,
     items: [
       { name: 'Perfil', href: '/configuracoes/perfil' },
+      { name: 'Permissões', href: '/configuracoes/permissoes' },
     ]
   },
 ];
@@ -72,12 +74,13 @@ export default function Sidebar() {
   const [expanded, setExpanded] = useState<string[]>([]);
   const { usuario } = useAuth();
   const perfil = usuario?.perfil || '';
+  const permissionsMap = useEffectivePermissionsMap();
 
-  const filteredMenuItems = menuItems.filter(item => hasAccess(perfil, item.href));
+  const filteredMenuItems = menuItems.filter(item => hasAccessWithMap(perfil, item.href, permissionsMap));
   const filteredMenuExpandable = menuExpandable
     .map(section => ({
       ...section,
-      items: section.items.filter(item => hasAccess(perfil, item.href)),
+      items: section.items.filter(item => hasAccessWithMap(perfil, item.href, permissionsMap)),
     }))
     .filter(section => section.items.length > 0);
 

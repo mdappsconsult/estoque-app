@@ -15,6 +15,7 @@ const PERFIS = [
   { value: 'ADMIN_MASTER', label: 'Admin Master' },
   { value: 'MANAGER', label: 'Gerente' },
   { value: 'OPERATOR_WAREHOUSE', label: 'Operador Indústria' },
+  { value: 'OPERATOR_WAREHOUSE_DRIVER', label: 'Indústria + motorista' },
   { value: 'OPERATOR_STORE', label: 'Operador Loja' },
   { value: 'DRIVER', label: 'Motorista' },
 ];
@@ -24,6 +25,7 @@ const perfilBadge = (perfil: string) => {
     ADMIN_MASTER: 'error',
     MANAGER: 'warning',
     OPERATOR_WAREHOUSE: 'info',
+    OPERATOR_WAREHOUSE_DRIVER: 'info',
     OPERATOR_STORE: 'success',
     DRIVER: 'default',
   };

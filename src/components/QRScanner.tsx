@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Camera, CameraOff, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 
@@ -12,49 +12,67 @@ interface QRScannerProps {
 export default function QRScanner({ onScan, label = 'Escanear QR Code' }: QRScannerProps) {
   const [aberto, setAberto] = useState(false);
   const [erro, setErro] = useState('');
-  const scannerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+
+  const reactId = useId();
+  const readerId = `qr-scanner-${reactId.replace(/:/g, '')}`;
 
   useEffect(() => {
     if (!aberto) return;
 
-    let scanner: any = null;
+    let cancelado = false;
+    const live = { current: null as import('html5-qrcode').Html5Qrcode | null };
 
-    const iniciar = async () => {
+    const parar = async () => {
+      const sc = live.current;
+      live.current = null;
+      if (!sc) return;
+      try {
+        await sc.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        sc.clear();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    (async () => {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
-        scanner = new Html5Qrcode('qr-reader');
-        scannerRef.current = scanner;
+        if (cancelado) return;
+
+        const scanner = new Html5Qrcode(readerId, false);
+        live.current = scanner;
 
         await scanner.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 250, height: 250 } },
           (decodedText: string) => {
-            onScan(decodedText);
-            // não fecha automático — permite escanear vários
+            onScanRef.current(decodedText);
           },
-          () => {} // ignore errors durante scan
+          () => {}
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
+        if (cancelado) return;
         console.error('QR Scanner error:', err);
+        const msg = err instanceof Error ? err.message : '';
         setErro(
-          err?.message?.includes('NotAllowedError') || err?.message?.includes('Permission')
+          msg.includes('NotAllowedError') || msg.includes('Permission')
             ? 'Permissão da câmera negada. Libere nas configurações do navegador.'
             : 'Não foi possível abrir a câmera. Verifique as permissões.'
         );
       }
-    };
-
-    iniciar();
+    })();
 
     return () => {
-      if (scanner) {
-        scanner.stop().catch(() => {});
-        scanner.clear().catch(() => {});
-      }
-      scannerRef.current = null;
+      cancelado = true;
+      void parar();
     };
-  }, [aberto, onScan]);
+  }, [aberto, readerId]);
 
   const fechar = () => {
     setAberto(false);
@@ -63,7 +81,7 @@ export default function QRScanner({ onScan, label = 'Escanear QR Code' }: QRScan
 
   if (!aberto) {
     return (
-      <Button variant="secondary" onClick={() => setAberto(true)} className="w-full">
+      <Button variant="secondary" onClick={() => setAberto(true)} className="w-full" type="button">
         <Camera className="w-4 h-4 mr-2" />
         {label}
       </Button>
@@ -73,12 +91,12 @@ export default function QRScanner({ onScan, label = 'Escanear QR Code' }: QRScan
   return (
     <div className="relative bg-black rounded-xl overflow-hidden">
       <div className="flex items-center justify-between p-3 bg-gray-900">
-        <span className="text-white text-sm font-medium">📷 Câmera</span>
-        <button onClick={fechar} className="text-white/70 hover:text-white">
+        <span className="text-white text-sm font-medium">Câmera</span>
+        <button type="button" onClick={fechar} className="text-white/70 hover:text-white" aria-label="Fechar câmera">
           <X className="w-5 h-5" />
         </button>
       </div>
-      <div id="qr-reader" ref={containerRef} className="w-full" />
+      <div id={readerId} className="w-full min-h-[200px]" />
       {erro && (
         <div className="p-4 bg-red-900/80 text-white text-sm text-center">
           <CameraOff className="w-5 h-5 mx-auto mb-1" />

@@ -30,5 +30,5 @@ export function isManager(usuario: Usuario | null): boolean {
 }
 
 export function isDriver(usuario: Usuario | null): boolean {
-  return usuario?.perfil === 'DRIVER';
+  return usuario?.perfil === 'DRIVER' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
 }
