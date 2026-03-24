@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { LoteCompra, LoteCompraInsert, ItemInsert } from '@/types/database';
+import { LoteCompra, LoteCompraInsert, Item, ItemInsert, EtiquetaInsert } from '@/types/database';
 import { gerarTokenQR, gerarTokenShort } from './itens';
 import { registrarAuditoria } from './auditoria';
 
@@ -23,6 +23,16 @@ export async function criarLoteCompra(
   dataValidade: string | null,
   usuarioId: string
 ): Promise<{ loteCompra: LoteCompra; itensGerados: number }> {
+  if (lote.quantidade <= 0) {
+    throw new Error('Quantidade de entrada deve ser maior que zero');
+  }
+  if (lote.custo_unitario < 0) {
+    throw new Error('Custo unitário não pode ser negativo');
+  }
+  if (!dataValidade) {
+    throw new Error('Data de validade é obrigatória para gerar etiquetas');
+  }
+
   // 1. Criar o lote de compra
   const { data: loteCompra, error } = await supabase
     .from('lotes_compra')
@@ -46,10 +56,26 @@ export async function criarLoteCompra(
     });
   }
 
-  const { error: insertError } = await supabase.from('itens').insert(itens);
+  const { data: itensCriados, error: insertError } = await supabase.from('itens').insert(itens).select();
   if (insertError) throw insertError;
 
-  // 3. Auditoria
+  // 3. Gerar etiquetas tokenizáveis vinculadas ao item (id da etiqueta = id do item).
+  const etiquetas: EtiquetaInsert[] = ((itensCriados || []) as Item[]).map((item) => ({
+    id: item.id,
+    produto_id: item.produto_id,
+    data_producao: item.data_producao || new Date().toISOString(),
+    data_validade: item.data_validade || dataValidade,
+    lote: lote.lote_fornecedor || null,
+    impressa: false,
+    excluida: false,
+  }));
+
+  if (etiquetas.length > 0) {
+    const { error: etiquetasError } = await supabase.from('etiquetas').insert(etiquetas);
+    if (etiquetasError) throw etiquetasError;
+  }
+
+  // 4. Auditoria
   await registrarAuditoria({
     usuario_id: usuarioId,
     local_id: lote.local_id,

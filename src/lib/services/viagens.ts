@@ -43,6 +43,17 @@ export async function criarViagem(viagem: ViagemInsert): Promise<Viagem> {
 }
 
 export async function aceitarViagem(id: string, motoristaId: string): Promise<void> {
+  const { data: viagem, error: viagemError } = await supabase
+    .from('viagens')
+    .select('id, status')
+    .eq('id', id)
+    .single();
+  if (viagemError) throw viagemError;
+  if (!viagem) throw new Error('Viagem não encontrada');
+  if (viagem.status !== 'PENDING') {
+    throw new Error('Somente viagens pendentes podem ser aceitas');
+  }
+
   await supabase
     .from('viagens')
     .update({ status: 'ACCEPTED', motorista_id: motoristaId })
@@ -56,6 +67,20 @@ export async function aceitarViagem(id: string, motoristaId: string): Promise<vo
 }
 
 export async function iniciarViagem(id: string, motoristaId: string): Promise<void> {
+  const { data: viagem, error: viagemError } = await supabase
+    .from('viagens')
+    .select('id, status, motorista_id')
+    .eq('id', id)
+    .single();
+  if (viagemError) throw viagemError;
+  if (!viagem) throw new Error('Viagem não encontrada');
+  if (viagem.status !== 'ACCEPTED') {
+    throw new Error('Somente viagens aceitas podem ser iniciadas');
+  }
+  if (viagem.motorista_id !== motoristaId) {
+    throw new Error('Somente o motorista que aceitou pode iniciar a viagem');
+  }
+
   await supabase.from('viagens').update({ status: 'IN_TRANSIT' }).eq('id', id);
 
   // Despachar todas as transferências da viagem

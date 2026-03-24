@@ -122,6 +122,7 @@ export async function descartarItem(itemId: string, motivo: string, localId: str
   const { data: item } = await supabase.from('itens').select('*').eq('id', itemId).single();
   if (!item) throw new Error('Item não encontrado');
   if (item.estado !== 'EM_ESTOQUE') throw new Error('Item não está em estoque');
+  if (item.local_atual_id !== localId) throw new Error('Item não está neste local');
 
   await supabase.from('itens').update({ estado: 'DESCARTADO' }).eq('id', itemId);
   await supabase.from('perdas').insert({ item_id: itemId, motivo, local_id: localId, usuario_id: usuarioId });

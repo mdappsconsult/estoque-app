@@ -30,17 +30,6 @@ export default function EntradaCompraPage() {
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ itens: number } | null>(null);
 
-  const produtoSelecionado = produtos.find(p => p.id === form.produto_id);
-
-  const calcularValidade = () => {
-    if (!produtoSelecionado) return '';
-    const now = new Date();
-    now.setDate(now.getDate() + produtoSelecionado.validade_dias);
-    now.setHours(now.getHours() + produtoSelecionado.validade_horas);
-    now.setMinutes(now.getMinutes() + produtoSelecionado.validade_minutos);
-    return now.toISOString().slice(0, 16);
-  };
-
   const handleProdutoChange = (produtoId: string) => {
     setForm(f => ({ ...f, produto_id: produtoId }));
     const p = produtos.find(pr => pr.id === produtoId);
@@ -122,13 +111,13 @@ export default function EntradaCompraPage() {
           value={form.local_id}
           onChange={(e) => setForm({ ...form, local_id: e.target.value })}
         />
-        <Input label="Data de Validade" type="date" value={form.data_validade} onChange={(e) => setForm({ ...form, data_validade: e.target.value })} />
+        <Input label="Data de Validade" type="date" value={form.data_validade} onChange={(e) => setForm({ ...form, data_validade: e.target.value })} required />
 
         <Button
           variant="primary"
           className="w-full"
           onClick={handleSubmit}
-          disabled={saving || !form.produto_id || !form.quantidade || !form.custo_unitario || !form.local_id}
+          disabled={saving || !form.produto_id || !form.quantidade || !form.custo_unitario || !form.local_id || !form.data_validade}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
           Registrar Compra

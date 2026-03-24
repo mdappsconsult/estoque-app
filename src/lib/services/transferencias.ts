@@ -10,6 +10,23 @@ export interface TransferenciaCompleta extends Transferencia {
   itens?: { id: string; item_id: string; recebido: boolean; item?: { id: string; token_qr: string; produto?: { nome: string } } }[];
 }
 
+type TransferenciaComItensMinimo = Pick<Transferencia, 'id' | 'origem_id' | 'destino_id' | 'status'> & {
+  transferencia_itens: { item_id: string }[];
+};
+
+async function getTransferenciaComItensMinimo(id: string): Promise<TransferenciaComItensMinimo> {
+  const { data, error } = await supabase
+    .from('transferencias')
+    .select('id, origem_id, destino_id, status, transferencia_itens(item_id)')
+    .eq('id', id)
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error('Transferência não encontrada');
+
+  return data as TransferenciaComItensMinimo;
+}
+
 export async function getTransferencias(filtros?: {
   status?: Transferencia['status'];
   origem_id?: string;
@@ -64,6 +81,29 @@ export async function criarTransferencia(
   transferencia: TransferenciaInsert,
   itemIds: string[]
 ): Promise<Transferencia> {
+  if (itemIds.length === 0) {
+    throw new Error('A transferência precisa de pelo menos 1 item');
+  }
+
+  // Blindagem no service: itens precisam estar EM_ESTOQUE e no local de origem.
+  const { data: itens, error: itensError } = await supabase
+    .from('itens')
+    .select('id, local_atual_id, estado')
+    .in('id', itemIds);
+  if (itensError) throw itensError;
+
+  const itensValidos = itens || [];
+  if (itensValidos.length !== itemIds.length) {
+    throw new Error('Um ou mais itens não foram encontrados');
+  }
+
+  const itemInvalido = itensValidos.find(
+    (item) => item.estado !== 'EM_ESTOQUE' || item.local_atual_id !== transferencia.origem_id
+  );
+  if (itemInvalido) {
+    throw new Error('Todos os itens devem estar em estoque no local de origem');
+  }
+
   const { data, error } = await supabase
     .from('transferencias')
     .insert(transferencia)
@@ -93,6 +133,11 @@ export async function criarTransferencia(
 }
 
 export async function aceitarTransferencia(id: string, usuarioId: string): Promise<void> {
+  const transferencia = await getTransferenciaComItensMinimo(id);
+  if (transferencia.status !== 'AWAITING_ACCEPT') {
+    throw new Error('Somente transferências aguardando aceite podem ser aceitas');
+  }
+
   await supabase
     .from('transferencias')
     .update({ status: 'ACCEPTED', aceito_por: usuarioId })
@@ -106,15 +151,28 @@ export async function aceitarTransferencia(id: string, usuarioId: string): Promi
 }
 
 export async function despacharTransferencia(id: string, usuarioId: string): Promise<void> {
-  // Buscar itens da transferência
-  const { data: transItens } = await supabase
-    .from('transferencia_itens')
-    .select('item_id')
-    .eq('transferencia_id', id);
+  const transferencia = await getTransferenciaComItensMinimo(id);
+  if (transferencia.status !== 'ACCEPTED') {
+    throw new Error('A transferência precisa estar aceita antes do despacho');
+  }
 
   // Marcar itens como EM_TRANSFERENCIA
-  const itemIds = (transItens || []).map(ti => ti.item_id);
+  const itemIds = (transferencia.transferencia_itens || []).map(ti => ti.item_id);
   if (itemIds.length > 0) {
+    // Garantir que os itens ainda estão no estado correto antes de despachar.
+    const { data: itensAtuais, error: itensError } = await supabase
+      .from('itens')
+      .select('id, estado, local_atual_id')
+      .in('id', itemIds);
+    if (itensError) throw itensError;
+
+    const inconsistente = (itensAtuais || []).find(
+      (item) => item.estado !== 'EM_ESTOQUE' || item.local_atual_id !== transferencia.origem_id
+    );
+    if (inconsistente) {
+      throw new Error('Há itens fora do local/estado esperado para despacho');
+    }
+
     await supabase
       .from('itens')
       .update({ estado: 'EM_TRANSFERENCIA' })
@@ -140,11 +198,15 @@ export async function receberTransferencia(
   localDestinoId: string,
   usuarioId: string
 ): Promise<{ divergencias: { tipo: 'FALTANTE' | 'EXCEDENTE'; item_id: string }[] }> {
-  // Buscar itens esperados
-  const { data: transItens } = await supabase
-    .from('transferencia_itens')
-    .select('item_id')
-    .eq('transferencia_id', transferenciaId);
+  const transferencia = await getTransferenciaComItensMinimo(transferenciaId);
+  if (transferencia.status !== 'IN_TRANSIT') {
+    throw new Error('Somente transferências em trânsito podem ser recebidas');
+  }
+  if (transferencia.destino_id !== localDestinoId) {
+    throw new Error('Local de recebimento não corresponde ao destino da transferência');
+  }
+
+  const transItens = transferencia.transferencia_itens || [];
 
   const esperados = new Set((transItens || []).map(ti => ti.item_id));
   const recebidos = new Set(itensRecebidosIds);

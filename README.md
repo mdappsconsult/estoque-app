@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Controle de Estoque - QR Unitario
 
-## Getting Started
+PWA de controle de estoque por unidade, com rastreio por QR do inicio ao fim.
 
-First, run the development server:
+## Mapa de documentacao
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- `README.md`: onboarding tecnico e visao geral
+- `DIAGRAMA_RAIZ_SISTEMA.md`: raiz logica e diagramas do sistema
+- `APP_LOGICA.md`: especificacao funcional de negocio
+- `SISTEMA_ESTRUTURA.md`: estrutura de evolucao do sistema sem perder relevancia
+- `SPRINT_1.md`: execucao e status da sprint atual
+
+## Objetivo do projeto
+
+Este sistema controla ciclo completo de itens unitarios:
+
+- entrada por compra ou producao
+- separacao, transferencia e recebimento
+- baixa diaria por consumo real
+- perdas e divergencias
+- auditoria de todas as acoes
+
+O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
+
+## Stack atual
+
+- Next.js (App Router) + React + TypeScript
+- Tailwind CSS
+- Supabase (Postgres + Realtime)
+- Scanner QR: `html5-qrcode`
+
+## Regras de negocio (resumo)
+
+Perfis:
+
+- `ADMIN_MASTER`
+- `MANAGER`
+- `OPERATOR_WAREHOUSE`
+- `OPERATOR_STORE`
+- `DRIVER`
+
+Estados do item:
+
+- `EM_ESTOQUE`
+- `EM_TRANSFERENCIA`
+- `BAIXADO`
+- `DESCARTADO`
+
+Regras principais:
+
+- cada item fisico possui QR unico
+- transferencia exige aceite antes do despacho
+- recebimento compara enviado x recebido e gera divergencias
+- baixa diaria so pode ocorrer no local do usuario
+- descarte exige motivo
+- auditoria registra usuario, local, acao, item e contexto
+
+Para a especificacao funcional completa, leia `APP_LOGICA.md`.
+
+## Fluxos implementados (telas)
+
+- Login por telefone
+- Entrada de compra
+- Producao
+- Separar por loja
+- Viagem / aceite
+- Receber entrega
+- Transferencia loja -> loja
+- Aceites pendentes
+- Baixa diaria
+- Perdas
+- Contagem
+- Estoque
+- Validades
+- Divergencias
+- Rastreio por QR
+- Dashboard admin
+- Relatorios
+- Cadastros de produtos, locais e usuarios
+
+## Estrutura principal
+
+- `src/app`: paginas e fluxos
+- `src/lib/services`: regras e operacoes de dominio
+- `src/hooks`: hooks de auth e realtime
+- `src/types/database.ts`: tipagem das tabelas do Supabase
+- `supabase/schema_public.sql`: schema principal em `public`
+
+## Ambiente local
+
+Crie/valide o arquivo `.env.local` com:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Como rodar
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+App local: [http://localhost:3000](http://localhost:3000)
 
-## Learn More
+## Observacoes importantes do estado atual
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- auth/OTP ainda esta simplificado para desenvolvimento
+- permissoes de rota estao no cliente
+- para ambiente de producao, reforcar politicas RLS por perfil/local
