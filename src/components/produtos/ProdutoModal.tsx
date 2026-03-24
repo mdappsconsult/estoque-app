@@ -183,6 +183,11 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
           ? 'AMBOS'
           : 'PRODUCAO';
 
+    const validadeFornecedor = tipoCadastro === 'FORNECEDOR';
+    const validadeDiasFinal = validadeFornecedor ? 0 : formData.validadeDias;
+    const validadeHorasFinal = validadeFornecedor ? 0 : formData.validadeHoras;
+    const validadeMinutosFinal = validadeFornecedor ? 0 : formData.validadeMinutos;
+
     const produtoData = {
       nome: formData.nome,
       medida: formData.medida,
@@ -197,13 +202,13 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       conservacoes: [{
         tipo: formData.conservacaoTipo,
         status: formData.conservacaoStatus,
-        dias: formData.validadeDias,
-        horas: formData.validadeHoras,
-        minutos: formData.validadeMinutos,
+        dias: validadeDiasFinal,
+        horas: validadeHorasFinal,
+        minutos: validadeMinutosFinal,
       }],
-      validadeDias: formData.validadeDias,
-      validadeHoras: formData.validadeHoras,
-      validadeMinutos: formData.validadeMinutos,
+      validadeDias: validadeDiasFinal,
+      validadeHoras: validadeHorasFinal,
+      validadeMinutos: validadeMinutosFinal,
       exibirHorarioEtiqueta: formData.exibirHorarioEtiqueta,
       contagemDoDia: formData.contagemDoDia,
     };
@@ -328,12 +333,17 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
               )}
             </div>
             {tipoCadastro === 'FORNECEDOR' ? (
-              <Input
-                label="Fornecedor preferencial"
-                placeholder="Nome usual na compra (opcional)"
-                value={formData.fornecedorPreferencial}
-                onChange={(e) => setFormData((prev) => ({ ...prev, fornecedorPreferencial: e.target.value }))}
-              />
+              <>
+                <Input
+                  label="Fornecedor preferencial"
+                  placeholder="Nome usual na compra (opcional)"
+                  value={formData.fornecedorPreferencial}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, fornecedorPreferencial: e.target.value }))}
+                />
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">
+                  A validade do produto de fornecedor é informada somente no momento de <strong>Registrar Compra</strong>, junto com quantidade e lote.
+                </div>
+              </>
             ) : (
               <label className="flex items-center gap-2 text-sm text-gray-600">
                 <input
@@ -350,161 +360,165 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
           </div>
 
           {/* Organização de grupos */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">
-              Organização de grupos
-            </h3>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Grupos <span className="text-red-500">*</span>
-              </label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {formData.grupoIds.map((grupoId) => (
-                  <Badge 
-                    key={grupoId} 
-                    variant="error" 
-                    removable 
-                    onRemove={() => handleRemoveGrupo(grupoId)}
-                  >
-                    {getGrupoNome(grupoId)}
-                  </Badge>
-                ))}
+          {tipoCadastro === 'INDUSTRIA' && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                Organização de grupos
+              </h3>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Grupos <span className="text-red-500">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {formData.grupoIds.map((grupoId) => (
+                    <Badge 
+                      key={grupoId} 
+                      variant="error" 
+                      removable 
+                      onRemove={() => handleRemoveGrupo(grupoId)}
+                    >
+                      {getGrupoNome(grupoId)}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Select
+                    options={[
+                      { value: '', label: 'Selecione um grupo' },
+                      ...grupos
+                        .filter(g => !formData.grupoIds.includes(g.id))
+                        .map(g => ({ value: g.id, label: g.nome }))
+                    ]}
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleAddGrupo(e.target.value);
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Select
-                  options={[
-                    { value: '', label: 'Selecione um grupo' },
-                    ...grupos
-                      .filter(g => !formData.grupoIds.includes(g.id))
-                      .map(g => ({ value: g.id, label: g.nome }))
-                  ]}
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      handleAddGrupo(e.target.value);
-                    }
-                  }}
-                  className="flex-1"
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Marca"
+                  placeholder="Marca do produto"
+                  value={formData.marca}
+                  onChange={(e) => setFormData(prev => ({ ...prev, marca: e.target.value }))}
+                />
+                <Input
+                  label="SIF"
+                  placeholder="Número do SIF"
+                  value={formData.sif}
+                  onChange={(e) => setFormData(prev => ({ ...prev, sif: e.target.value }))}
                 />
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Marca"
-                placeholder="Marca do produto"
-                value={formData.marca}
-                onChange={(e) => setFormData(prev => ({ ...prev, marca: e.target.value }))}
-              />
-              <Input
-                label="SIF"
-                placeholder="Número do SIF"
-                value={formData.sif}
-                onChange={(e) => setFormData(prev => ({ ...prev, sif: e.target.value }))}
-              />
-            </div>
-          </div>
+          )}
 
           {/* Conservação e validade */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">
-              Conservação e validade do produto
-            </h3>
-            
-            <div className="mb-4">
-              <label className="flex items-center gap-2 text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={formData.contagemDoDia}
-                  onChange={(e) => setFormData(prev => ({ ...prev, contagemDoDia: e.target.checked }))}
-                  className="rounded border-gray-300"
-                />
-                Contagem do dia
-              </label>
-              <p className="text-xs text-gray-500 mt-1 ml-6">
-                Apenas para validades em dias, considerar o dia até <strong>23h59</strong>.
-              </p>
-            </div>
+          {tipoCadastro === 'INDUSTRIA' && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                Conservação e validade do produto
+              </h3>
+              
+              <div className="mb-4">
+                <label className="flex items-center gap-2 text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={formData.contagemDoDia}
+                    onChange={(e) => setFormData(prev => ({ ...prev, contagemDoDia: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  Contagem do dia
+                </label>
+                <p className="text-xs text-gray-500 mt-1 ml-6">
+                  Apenas para validades em dias, considerar o dia até <strong>23h59</strong>.
+                </p>
+              </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {/* Ver etiqueta preview */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-red-500 font-medium">Ver etiqueta</span>
-                  <span className="text-gray-400">...</span>
-                </div>
-                <div className="flex items-center justify-center py-4">
-                  <Tag className="w-8 h-8 text-red-400" />
-                </div>
-                
-                <Select
-                  options={tiposConservacao}
-                  value={formData.conservacaoTipo}
-                  onChange={(e) => setFormData(prev => ({ ...prev, conservacaoTipo: e.target.value }))}
-                  className="mb-2"
-                />
-                <Select
-                  options={[
-                    { value: 'ativo', label: 'Ativo' },
-                    { value: 'inativo', label: 'Inativo' },
-                  ]}
-                  value={formData.conservacaoStatus}
-                  onChange={(e) => setFormData(prev => ({ ...prev, conservacaoStatus: e.target.value }))}
-                  className="mb-3"
-                />
-                
-                <div className="grid grid-cols-3 gap-2">
-                  <Input
-                    label="Dias"
-                    type="number"
-                    min={0}
-                    value={formData.validadeDias}
-                    onChange={(e) => setFormData(prev => ({ ...prev, validadeDias: parseInt(e.target.value) || 0 }))}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Ver etiqueta preview */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm text-red-500 font-medium">Ver etiqueta</span>
+                    <span className="text-gray-400">...</span>
+                  </div>
+                  <div className="flex items-center justify-center py-4">
+                    <Tag className="w-8 h-8 text-red-400" />
+                  </div>
+                  
+                  <Select
+                    options={tiposConservacao}
+                    value={formData.conservacaoTipo}
+                    onChange={(e) => setFormData(prev => ({ ...prev, conservacaoTipo: e.target.value }))}
+                    className="mb-2"
                   />
-                  <Input
-                    label="Horas"
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={formData.validadeHoras}
-                    onChange={(e) => setFormData(prev => ({ ...prev, validadeHoras: parseInt(e.target.value) || 0 }))}
+                  <Select
+                    options={[
+                      { value: 'ativo', label: 'Ativo' },
+                      { value: 'inativo', label: 'Inativo' },
+                    ]}
+                    value={formData.conservacaoStatus}
+                    onChange={(e) => setFormData(prev => ({ ...prev, conservacaoStatus: e.target.value }))}
+                    className="mb-3"
                   />
-                  <Input
-                    label="Minutos"
-                    type="number"
-                    min={0}
-                    max={59}
-                    value={formData.validadeMinutos}
-                    onChange={(e) => setFormData(prev => ({ ...prev, validadeMinutos: parseInt(e.target.value) || 0 }))}
-                  />
-                </div>
-                
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <a href="#" className="text-sm text-red-500 hover:underline">Detalhes</a>
-                  <label className="flex items-center gap-2 text-sm text-gray-600 mt-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.exibirHorarioEtiqueta}
-                      onChange={(e) => setFormData(prev => ({ ...prev, exibirHorarioEtiqueta: e.target.checked }))}
-                      className="rounded border-gray-300"
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      label="Dias"
+                      type="number"
+                      min={0}
+                      value={formData.validadeDias}
+                      onChange={(e) => setFormData(prev => ({ ...prev, validadeDias: parseInt(e.target.value) || 0 }))}
                     />
-                    Exibir horário na etiqueta
-                  </label>
+                    <Input
+                      label="Horas"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={formData.validadeHoras}
+                      onChange={(e) => setFormData(prev => ({ ...prev, validadeHoras: parseInt(e.target.value) || 0 }))}
+                    />
+                    <Input
+                      label="Minutos"
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={formData.validadeMinutos}
+                      onChange={(e) => setFormData(prev => ({ ...prev, validadeMinutos: parseInt(e.target.value) || 0 }))}
+                    />
+                  </div>
+                  
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <a href="#" className="text-sm text-red-500 hover:underline">Detalhes</a>
+                    <label className="flex items-center gap-2 text-sm text-gray-600 mt-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.exibirHorarioEtiqueta}
+                        onChange={(e) => setFormData(prev => ({ ...prev, exibirHorarioEtiqueta: e.target.checked }))}
+                        className="rounded border-gray-300"
+                      />
+                      Exibir horário na etiqueta
+                    </label>
+                  </div>
+                </div>
+
+                {/* Adicionar método de conservação */}
+                <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 flex items-center justify-center">
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-gray-600 text-sm"
+                  >
+                    Adicionar método de conservação
+                  </button>
                 </div>
               </div>
-
-              {/* Adicionar método de conservação */}
-              <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 flex items-center justify-center">
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-gray-600 text-sm"
-                >
-                  Adicionar método de conservação
-                </button>
-              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Footer */}

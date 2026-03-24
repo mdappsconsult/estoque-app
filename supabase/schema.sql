@@ -164,9 +164,17 @@ CREATE TABLE IF NOT EXISTS acai_kim.lotes_compra (
   produto_id UUID NOT NULL REFERENCES acai_kim.produtos(id) ON DELETE CASCADE,
   quantidade INTEGER NOT NULL,
   custo_unitario NUMERIC(10,2) NOT NULL DEFAULT 0,
-  fornecedor TEXT,
-  lote_fornecedor TEXT,
+  fornecedor TEXT NOT NULL,
+  lote_fornecedor TEXT NOT NULL,
+  nota_fiscal TEXT,
+  sem_nota_fiscal BOOLEAN NOT NULL DEFAULT false,
+  motivo_sem_nota TEXT,
   local_id UUID NOT NULL REFERENCES acai_kim.locais(id),
+  CONSTRAINT lotes_compra_nota_fiscal_check CHECK (
+    (sem_nota_fiscal = false AND nota_fiscal IS NOT NULL AND btrim(nota_fiscal) <> '')
+    OR
+    (sem_nota_fiscal = true AND motivo_sem_nota IS NOT NULL AND btrim(motivo_sem_nota) <> '')
+  ),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -28,7 +28,7 @@ import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 const menuItems: { name: string; href: string; icon: any; badge?: string }[] = [
   { name: 'Início', href: '/', icon: Home },
   { name: 'Scanner', href: '/qrcode', icon: QrCode },
-  { name: 'Entrada de Compra', href: '/entrada-compra', icon: PackagePlus },
+  { name: 'Registrar Compra', href: '/entrada-compra', icon: PackagePlus },
   { name: 'Produção', href: '/producao', icon: ChefHat },
   { name: 'Separar por Loja', href: '/separar-por-loja', icon: Truck },
   { name: 'Viagem / Aceite', href: '/viagem-aceite', icon: Truck },

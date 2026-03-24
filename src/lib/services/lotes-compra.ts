@@ -23,6 +23,33 @@ export async function criarLoteCompra(
   dataValidade: string | null,
   usuarioId: string
 ): Promise<{ loteCompra: LoteCompra; itensGerados: number }> {
+  const gerarLoteInterno = (): string => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    const r = Math.random().toString(36).slice(2, 6).toUpperCase();
+    return `L${y}${m}${day}-${h}${min}${s}-${r}`;
+  };
+
+  const loteFornecedorFinal =
+    typeof lote.lote_fornecedor === 'string' && lote.lote_fornecedor.trim()
+      ? lote.lote_fornecedor.trim().toUpperCase()
+      : gerarLoteInterno();
+
+  if (!lote.fornecedor || !lote.fornecedor.trim()) {
+    throw new Error('Fornecedor é obrigatório');
+  }
+  if (lote.sem_nota_fiscal) {
+    if (!lote.motivo_sem_nota || !lote.motivo_sem_nota.trim()) {
+      throw new Error('Motivo sem nota fiscal é obrigatório');
+    }
+  } else if (!lote.nota_fiscal || !lote.nota_fiscal.trim()) {
+    throw new Error('Nota fiscal é obrigatória');
+  }
   if (lote.quantidade <= 0) {
     throw new Error('Quantidade de entrada deve ser maior que zero');
   }
@@ -36,7 +63,11 @@ export async function criarLoteCompra(
   // 1. Criar o lote de compra
   const { data: loteCompra, error } = await supabase
     .from('lotes_compra')
-    .insert(lote)
+    .insert({
+      ...lote,
+      fornecedor: lote.fornecedor.trim(),
+      lote_fornecedor: loteFornecedorFinal,
+    })
     .select()
     .single();
   if (error) throw error;

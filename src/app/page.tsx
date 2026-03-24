@@ -9,10 +9,25 @@ import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
+import { PerfilUsuario } from '@/types/database';
 
-const features = [
+type HomeFeature = {
+  title: string;
+  description: string;
+  icon: any;
+  iconBg: string;
+  iconColor: string;
+  href: string;
+};
+
+type HomeSection = {
+  title: string;
+  items: string[];
+};
+
+const features: HomeFeature[] = [
   { title: 'Escanear QR', description: 'Ações por item.', icon: QrCode, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/qrcode' },
-  { title: 'Entrada de Compra', description: 'Lote de compra + etiquetas.', icon: PackageCheck, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/entrada-compra' },
+  { title: 'Registrar Compra', description: 'Registrar compra do dia (lote + etiquetas).', icon: PackageCheck, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/entrada-compra' },
   { title: 'Produção', description: 'Lote de produção + etiquetas.', icon: ChefHat, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/producao' },
   { title: 'Etiquetas', description: 'Impressão de QR.', icon: QrCode, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/etiquetas' },
   { title: 'Separar por Loja', description: 'Warehouse → Store.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/separar-por-loja' },
@@ -36,9 +51,94 @@ const features = [
   { title: 'Permissões', description: 'Quem acessa cada tela (admin).', icon: Shield, iconBg: 'bg-red-50', iconColor: 'text-red-600', href: '/configuracoes/permissoes' },
 ];
 
+const featuresByHref = Object.fromEntries(
+  features.map((f) => [f.href, f])
+) as Record<string, HomeFeature>;
+
+const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
+  ADMIN_MASTER: [
+    {
+      title: 'Operação do Dia',
+      items: ['/qrcode', '/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/recebimento'],
+    },
+    {
+      title: 'Controle e Gestão',
+      items: ['/estoque', '/validades', '/divergencias', '/dashboard-admin', '/relatorios'],
+    },
+    {
+      title: 'Configuração',
+      items: ['/cadastros/produtos', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/permissoes'],
+    },
+  ],
+  MANAGER: [
+    {
+      title: 'Operação do Dia',
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/recebimento', '/qrcode'],
+    },
+    {
+      title: 'Acompanhamento',
+      items: ['/estoque', '/validades', '/perdas', '/relatorios'],
+    },
+    {
+      title: 'Cadastros',
+      items: ['/cadastros/produtos', '/cadastros/locais', '/configuracoes/perfil'],
+    },
+  ],
+  OPERATOR_WAREHOUSE: [
+    {
+      title: 'Operação',
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
+    },
+    {
+      title: 'Conferência',
+      items: ['/estoque', '/validades', '/perdas', '/baixa-diaria'],
+    },
+  ],
+  OPERATOR_WAREHOUSE_DRIVER: [
+    {
+      title: 'Operação',
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
+    },
+    {
+      title: 'Transporte',
+      items: ['/viagem-aceite', '/aceites-pendentes', '/recebimento'],
+    },
+  ],
+  OPERATOR_STORE: [
+    {
+      title: 'Operação da Loja',
+      items: ['/recebimento', '/transferencia-loja', '/aceites-pendentes', '/qrcode'],
+    },
+    {
+      title: 'Conferência',
+      items: ['/estoque', '/validades', '/baixa-diaria', '/perdas'],
+    },
+  ],
+  DRIVER: [
+    {
+      title: 'Transporte',
+      items: ['/viagem-aceite', '/aceites-pendentes'],
+    },
+    {
+      title: 'Conferência',
+      items: ['/qrcode', '/configuracoes/perfil'],
+    },
+  ],
+};
+
+const defaultSections: HomeSection[] = [
+  {
+    title: 'Acesso Rápido',
+    items: ['/qrcode', '/estoque', '/configuracoes/perfil'],
+  },
+];
+
 export default function Home() {
   const { usuario } = useAuth();
   const permissionsMap = useEffectivePermissionsMap();
+  const sections = usuario
+    ? homeSectionsByProfile[usuario.perfil] ?? defaultSections
+    : defaultSections;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -46,23 +146,41 @@ export default function Home() {
         <h1 className="text-2xl font-bold text-gray-900">
           {usuario ? `Olá, ${usuario.nome}` : 'Home'}
         </h1>
-        <p className="text-gray-500 mt-1">Acesso rápido às operações do dia</p>
+        <p className="text-gray-500 mt-1">Navegação organizada por prioridade de trabalho</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        {features.filter((f) => usuario ? hasAccessWithMap(usuario.perfil, f.href, permissionsMap) : true).map((f) => (
-          <Link key={f.href} href={f.href} className="block">
-            <Card className="flex flex-col h-full" hoverable>
-              <CardHeader
-                icon={<f.icon className={`w-7 h-7 ${f.iconColor}`} />}
-                iconBg={f.iconBg}
-              >
-                <CardTitle>{f.title}</CardTitle>
-                <CardDescription>{f.description}</CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ))}
+      <div className="space-y-8">
+        {sections.map((section) => {
+          const sectionFeatures = section.items
+            .map((href) => featuresByHref[href])
+            .filter(Boolean)
+            .filter((f) => (usuario ? hasAccessWithMap(usuario.perfil, f.href, permissionsMap) : true));
+
+          if (sectionFeatures.length === 0) return null;
+
+          return (
+            <section key={section.title}>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                {section.title}
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {sectionFeatures.map((f) => (
+                  <Link key={f.href} href={f.href} className="block">
+                    <Card className="flex flex-col h-full" hoverable>
+                      <CardHeader
+                        icon={<f.icon className={`w-7 h-7 ${f.iconColor}`} />}
+                        iconBg={f.iconBg}
+                      >
+                        <CardTitle>{f.title}</CardTitle>
+                        <CardDescription>{f.description}</CardDescription>
+                      </CardHeader>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );

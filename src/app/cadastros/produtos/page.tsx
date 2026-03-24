@@ -187,6 +187,9 @@ export default function ProdutosPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          Cadastro de produto define os padrões. Para lançar compras do dia a dia (com validade e lote reais), use a tela <strong>Registrar Compra</strong>.
+        </div>
         <div className="flex flex-wrap gap-4">
           <div className="w-64">
             <Select

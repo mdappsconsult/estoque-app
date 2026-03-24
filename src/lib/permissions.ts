@@ -53,7 +53,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/', label: 'Início', section: 'Geral' },
   { path: '/login', label: 'Login', section: 'Geral' },
   { path: '/qrcode', label: 'Scanner QR', section: 'Operações' },
-  { path: '/entrada-compra', label: 'Entrada de compra', section: 'Operações' },
+  { path: '/entrada-compra', label: 'Registrar compra', section: 'Operações' },
   { path: '/producao', label: 'Produção', section: 'Operações' },
   { path: '/etiquetas', label: 'Etiquetas', section: 'Operações' },
   { path: '/separar-por-loja', label: 'Separar por loja', section: 'Operações' },
