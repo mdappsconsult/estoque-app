@@ -6,11 +6,12 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import QRScanner from '@/components/QRScanner';
 import Badge from '@/components/ui/Badge';
-import { getItemByTokenQR, ItemCompleto } from '@/lib/services/itens';
+import { getItemPorCodigoEscaneado, ItemCompleto } from '@/lib/services/itens';
 import { getRastreioItem, AuditoriaCompleta } from '@/lib/services/auditoria';
 
 export default function RastreioQRPage() {
   const [token, setToken] = useState('');
+  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [item, setItem] = useState<ItemCompleto | null>(null);
   const [timeline, setTimeline] = useState<AuditoriaCompleta[]>([]);
@@ -25,12 +26,12 @@ export default function RastreioQRPage() {
     setTimeline([]);
     setErro('');
     try {
-      const result = await getItemByTokenQR(t);
-      if (!result) { setErro('Item não encontrado'); setBuscando(false); return; }
+      const result = await getItemPorCodigoEscaneado(t);
+      if (!result) { setErro('Item não encontrado. Confira o código e tente novamente.'); setBuscando(false); return; }
       setItem(result);
       const audit = await getRastreioItem(result.id);
       setTimeline(audit);
-    } catch { setErro('Erro ao buscar'); }
+    } catch { setErro('Não foi possível buscar o item. Tente novamente.'); }
     finally { setBuscando(false); }
   };
 
@@ -49,13 +50,35 @@ export default function RastreioQRPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
-        <QRScanner onScan={(code) => buscar(code)} label="Escanear com câmera" />
-        <div className="flex gap-2">
-          <Input placeholder="Ou digite o código QR" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && buscar()} />
-          <Button variant="primary" onClick={() => buscar()} disabled={buscando}>
-            {buscando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+        <QRScanner onScan={(code) => buscar(code)} label="Escanear com câmera" autoOpen />
+        {!mostrarEntradaManual ? (
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => setMostrarEntradaManual(true)}
+          >
+            Não conseguiu ler? Digitar código
           </Button>
-        </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input placeholder="Digite o código QR ou token curto" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && buscar()} />
+              <Button variant="primary" onClick={() => buscar()} disabled={buscando}>
+                {buscando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              </Button>
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setMostrarEntradaManual(false);
+                setToken('');
+              }}
+            >
+              Fechar digitação manual
+            </Button>
+          </div>
+        )}
         {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
       </div>
 

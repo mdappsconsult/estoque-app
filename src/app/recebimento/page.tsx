@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -9,8 +9,10 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import { getItemByTokenQR } from '@/lib/services/itens';
-import { receberTransferencia, TransferenciaCompleta } from '@/lib/services/transferencias';
+import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
+import { receberTransferencia } from '@/lib/services/transferencias';
+import { filtrarRecebimentoPorLoja } from '@/lib/operador-loja-scope';
+import { supabase } from '@/lib/supabase';
 
 interface TransRow {
   id: string;
@@ -21,49 +23,155 @@ interface TransRow {
   created_at: string;
   origem: { nome: string };
   destino: { nome: string };
+  transferencia_itens?: { id: string }[];
+}
+
+interface ItemEsperado {
+  id: string;
+  token_qr: string;
+  token_short: string | null;
+  nome: string;
 }
 
 export default function RecebimentoPage() {
   const { usuario } = useAuth();
   const { data: transferencias, loading } = useRealtimeQuery<TransRow>({
     table: 'transferencias',
-    select: '*, origem:locais!origem_id(nome), destino:locais!destino_id(nome)',
+    select: '*, origem:locais!origem_id(nome), destino:locais!destino_id(nome), transferencia_itens(id)',
     orderBy: { column: 'created_at', ascending: false },
   });
 
-  const pendentes = transferencias.filter(t => t.status === 'IN_TRANSIT');
+  const emTransito = transferencias.filter((t) => t.status === 'IN_TRANSIT');
+  const pendentes = filtrarRecebimentoPorLoja(emTransito, usuario);
   const [selecionada, setSelecionada] = useState<string>('');
   const [tokenInput, setTokenInput] = useState('');
+  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
   const [itensRecebidos, setItensRecebidos] = useState<{ id: string; token_qr: string; nome: string }[]>([]);
+  const [itensEsperados, setItensEsperados] = useState<ItemEsperado[]>([]);
+  const [loadingEsperados, setLoadingEsperados] = useState(false);
   const [erro, setErro] = useState('');
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ divergencias: number } | null>(null);
+  const scanEmAndamentoRef = useRef(false);
+
+  useEffect(() => {
+    const carregarItensEsperados = async () => {
+      if (!selecionada) {
+        setItensEsperados([]);
+        return;
+      }
+      setLoadingEsperados(true);
+      try {
+        const { data, error } = await supabase
+          .from('transferencia_itens')
+          .select('item_id, item:itens!item_id(id, token_qr, token_short, produto:produtos(nome))')
+          .eq('transferencia_id', selecionada);
+        if (error) throw error;
+        const itens = (data || [])
+          .map((row: any) => ({
+            id: row.item?.id || row.item_id,
+            token_qr: row.item?.token_qr || '',
+            token_short: row.item?.token_short || null,
+            nome: row.item?.produto?.nome || 'Produto',
+          }))
+          .filter((item: ItemEsperado) => Boolean(item.id));
+        setItensEsperados(itens);
+      } catch {
+        setItensEsperados([]);
+      } finally {
+        setLoadingEsperados(false);
+      }
+    };
+    void carregarItensEsperados();
+  }, [selecionada]);
+
+  const idsEscaneados = useMemo(
+    () => new Set(itensRecebidos.map((i) => i.id)),
+    [itensRecebidos]
+  );
 
   const escanear = async (codigo?: string) => {
     const tk = codigo || tokenInput.trim();
     if (!tk) return;
+    if (scanEmAndamentoRef.current) return;
+    scanEmAndamentoRef.current = true;
     setErro('');
     try {
-      const item = await getItemByTokenQR(tk);
-      if (!item) { setErro('Item não encontrado'); return; }
-      if (itensRecebidos.find(i => i.id === item.id)) { setErro('Já escaneado'); return; }
-      setItensRecebidos(prev => [...prev, { id: item.id, token_qr: item.token_qr, nome: item.produto?.nome || '' }]);
+      if (loadingEsperados) {
+        setErro('Aguarde carregar os itens esperados da transferência');
+        return;
+      }
+      const item = await getItemPorCodigoEscaneado(tk);
+      if (!item) { setErro('Item não encontrado. Confira o código e tente novamente.'); return; }
+      if (itensEsperados.length > 0 && !itensEsperados.some((e) => e.id === item.id)) {
+        setErro('Este item não pertence à transferência selecionada');
+        return;
+      }
+      let duplicado = false;
+      setItensRecebidos((prev) => {
+        if (prev.some((i) => i.id === item.id || i.token_qr === item.token_qr)) {
+          duplicado = true;
+          return prev;
+        }
+        return [...prev, { id: item.id, token_qr: item.token_qr, nome: item.produto?.nome || '' }];
+      });
+      if (duplicado) {
+        setErro('Já escaneado');
+        return;
+      }
       setTokenInput('');
-    } catch { setErro('Erro ao buscar'); }
+    } catch { setErro('Não foi possível buscar o item. Tente novamente.'); }
+    finally {
+      scanEmAndamentoRef.current = false;
+    }
   };
 
   const confirmarRecebimento = async () => {
-    if (!usuario) return;
-    const trans = pendentes.find(t => t.id === selecionada);
-    if (!trans) return;
+    if (!usuario) {
+      setErro('Faça login novamente para continuar');
+      return;
+    }
+    if (!selecionada) {
+      setErro('Selecione uma transferência em trânsito');
+      return;
+    }
+    if (itensRecebidos.length === 0) {
+      setErro('Escaneie pelo menos 1 item antes de confirmar');
+      return;
+    }
+
+    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    if (!transSelecionada) {
+      setErro('Transferência não encontrada. Atualize a página e tente novamente.');
+      return;
+    }
+    if (transSelecionada.status !== 'IN_TRANSIT') {
+      setErro('Esta transferência não está mais em trânsito.');
+      return;
+    }
+    if (!pendentes.some((t) => t.id === selecionada)) {
+      setErro('Esta transferência não está disponível para o seu usuário.');
+      return;
+    }
+    const confirmou = window.confirm(
+      `Confirmar recebimento de ${itensRecebidos.length} item(ns) desta transferência?`
+    );
+    if (!confirmou) return;
+
     setSaving(true);
+    setErro('');
     try {
-      const res = await receberTransferencia(selecionada, itensRecebidos.map(i => i.id), trans.destino_id, usuario.id);
+      const res = await receberTransferencia(
+        selecionada,
+        itensRecebidos.map((i) => i.id),
+        transSelecionada.destino_id,
+        usuario.id
+      );
       setResultado({ divergencias: res.divergencias.length });
       setItensRecebidos([]);
       setSelecionada('');
     } catch (err: any) {
-      alert(err?.message || 'Erro');
+      setErro(err?.message || 'Erro ao confirmar recebimento');
     } finally {
       setSaving(false);
     }
@@ -91,24 +199,121 @@ export default function RecebimentoPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-2">
+        {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
+          <p className="text-xs text-gray-600">
+            Lista só entregas <span className="font-medium">em trânsito para a sua loja</span> (origem pode ser a
+            indústria ou outra loja — o que importa é o destino ser a unidade vinculada ao seu usuário).
+          </p>
+        )}
         <Select
           label="Transferência em trânsito"
-          options={[{ value: '', label: 'Selecione...' }, ...pendentes.map(t => ({ value: t.id, label: `${t.origem?.nome} → ${t.destino?.nome} (${new Date(t.created_at).toLocaleDateString('pt-BR')})` }))]}
+          options={[
+            { value: '', label: 'Selecione...' },
+            ...pendentes.map((t) => {
+              const qtdItens = t.transferencia_itens?.length || 0;
+              const data = new Date(t.created_at).toLocaleString('pt-BR');
+              return {
+                value: t.id,
+                label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'} • ${qtdItens} item(ns) • ${data}`,
+              };
+            }),
+          ]}
           value={selecionada}
-          onChange={(e) => { setSelecionada(e.target.value); setItensRecebidos([]); }}
+          onChange={(e) => {
+            setSelecionada(e.target.value);
+            setItensRecebidos([]);
+            setErro('');
+            setMostrarEntradaManual(false);
+          }}
         />
       </div>
 
       {selecionada && (
         <>
+          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="font-semibold text-gray-900">Itens esperados desta entrega</p>
+              <div className="flex items-center gap-2">
+                <Badge variant="info" size="sm">Total: {itensEsperados.length}</Badge>
+                <Badge variant="success" size="sm">Escaneados: {itensRecebidos.length}</Badge>
+                <Badge variant="warning" size="sm">Faltando: {Math.max(itensEsperados.length - itensRecebidos.length, 0)}</Badge>
+              </div>
+            </div>
+            {loadingEsperados ? (
+              <div className="py-6 flex items-center justify-center text-gray-400">
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Carregando itens esperados...
+              </div>
+            ) : itensEsperados.length > 0 ? (
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {itensEsperados.map((item) => {
+                  const escaneado = idsEscaneados.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                        escaneado
+                          ? 'border-green-200 bg-green-50'
+                          : 'border-gray-200 bg-gray-50'
+                      }`}
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">{item.nome}</p>
+                        <p className="text-xs text-gray-400 font-mono">
+                          {item.token_short || item.token_qr}
+                        </p>
+                      </div>
+                      <Badge variant={escaneado ? 'success' : 'warning'} size="sm">
+                        {escaneado ? 'Escaneado' : 'Pendente'}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Não foi possível carregar os itens da transferência.
+              </p>
+            )}
+          </div>
+
           <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
             <label className="block text-sm font-medium text-gray-700">Escanear QR do item recebido</label>
-            <QRScanner onScan={(code) => escanear(code)} label="Abrir câmera" />
-            <div className="flex gap-2">
-              <Input placeholder="Ou digite o código QR" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && escanear()} />
-              <Button variant="primary" onClick={() => escanear()}><QrCode className="w-4 h-4" /></Button>
-            </div>
+            <QRScanner onScan={(code) => escanear(code)} label="Escanear com câmera" autoOpen={Boolean(selecionada)} />
+            {!mostrarEntradaManual ? (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setMostrarEntradaManual(true)}
+              >
+                Não conseguiu ler? Digitar código
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Digite o código QR ou token curto"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && escanear()}
+                  />
+                  <Button variant="primary" onClick={() => escanear()}>
+                    <QrCode className="w-4 h-4" />
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setMostrarEntradaManual(false);
+                    setTokenInput('');
+                  }}
+                >
+                  Fechar digitação manual
+                </Button>
+              </div>
+            )}
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>
 
@@ -140,6 +345,20 @@ export default function RecebimentoPage() {
         <div className="text-center py-12 text-gray-400">
           <Store className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>Nenhuma entrega em trânsito</p>
+          {usuario?.perfil === 'OPERATOR_STORE' &&
+            usuario.local_padrao_id &&
+            emTransito.length > 0 && (
+              <p className="text-xs text-gray-500 mt-2 max-w-xs mx-auto">
+                Há entregas em trânsito para outras lojas. Só aparecem aqui os pedidos com destino na{' '}
+                <span className="font-medium">sua loja</span> (local padrão do seu usuário).
+              </p>
+            )}
+          {usuario?.perfil === 'OPERATOR_STORE' && !usuario.local_padrao_id && (
+            <p className="text-xs text-amber-700 mt-2 max-w-xs mx-auto">
+              Seu usuário não tem loja padrão cadastrada. Peça ao administrador para vincular sua loja em
+              cadastro de usuários.
+            </p>
+          )}
         </div>
       )}
     </div>

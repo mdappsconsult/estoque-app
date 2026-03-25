@@ -14,6 +14,29 @@ type TransferenciaComItensMinimo = Pick<Transferencia, 'id' | 'origem_id' | 'des
   transferencia_itens: { item_id: string }[];
 };
 
+async function sincronizarEstoquePorProdutos(produtoIds: string[]): Promise<void> {
+  const idsUnicos = Array.from(new Set(produtoIds.filter(Boolean)));
+  if (idsUnicos.length === 0) return;
+
+  for (const produtoId of idsUnicos) {
+    const { count, error: countError } = await supabase
+      .from('itens')
+      .select('id', { count: 'exact', head: true })
+      .eq('produto_id', produtoId)
+      .eq('estado', 'EM_ESTOQUE');
+    if (countError) throw countError;
+
+    const { error: upsertError } = await supabase
+      .from('estoque')
+      .upsert({
+        produto_id: produtoId,
+        quantidade: count ?? 0,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'produto_id' });
+    if (upsertError) throw upsertError;
+  }
+}
+
 async function getTransferenciaComItensMinimo(id: string): Promise<TransferenciaComItensMinimo> {
   const { data, error } = await supabase
     .from('transferencias')
@@ -162,7 +185,7 @@ export async function despacharTransferencia(id: string, usuarioId: string): Pro
     // Garantir que os itens ainda estão no estado correto antes de despachar.
     const { data: itensAtuais, error: itensError } = await supabase
       .from('itens')
-      .select('id, estado, local_atual_id')
+      .select('id, produto_id, estado, local_atual_id')
       .in('id', itemIds);
     if (itensError) throw itensError;
 
@@ -177,6 +200,8 @@ export async function despacharTransferencia(id: string, usuarioId: string): Pro
       .from('itens')
       .update({ estado: 'EM_TRANSFERENCIA' })
       .in('id', itemIds);
+
+    await sincronizarEstoquePorProdutos((itensAtuais || []).map((item) => item.produto_id));
   }
 
   await supabase
@@ -207,6 +232,14 @@ export async function receberTransferencia(
   }
 
   const transItens = transferencia.transferencia_itens || [];
+  const itemIdsEsperados = transItens.map((ti) => ti.item_id);
+
+  const { data: itensEsperadosData, error: itensEsperadosError } = await supabase
+    .from('itens')
+    .select('id, produto_id')
+    .in('id', itemIdsEsperados);
+  if (itensEsperadosError) throw itensEsperadosError;
+  const produtosEsperados = (itensEsperadosData || []).map((item) => item.produto_id);
 
   const esperados = new Set((transItens || []).map(ti => ti.item_id));
   const recebidos = new Set(itensRecebidosIds);
@@ -257,6 +290,8 @@ export async function receberTransferencia(
   } else {
     await supabase.from('transferencias').update({ status: 'DELIVERED' }).eq('id', transferenciaId);
   }
+
+  await sincronizarEstoquePorProdutos(produtosEsperados);
 
   await registrarAuditoria({
     usuario_id: usuarioId,

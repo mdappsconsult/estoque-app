@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Truck, Loader2, QrCode, CheckCircle, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { getItemByTokenQR } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
 import { Local } from '@/types/database';
+import { idLocalLojaOperadora } from '@/lib/operador-loja-scope';
 
 export default function TransferenciaLojaPage() {
   const { usuario } = useAuth();
@@ -24,6 +25,14 @@ export default function TransferenciaLojaPage() {
   const [saving, setSaving] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
+
+  const lojaOperadoraId = idLocalLojaOperadora(usuario);
+
+  useEffect(() => {
+    if (lojaOperadoraId) {
+      setOrigemId(lojaOperadoraId);
+    }
+  }, [lojaOperadoraId]);
 
   const escanear = async () => {
     if (!tokenInput.trim()) return;
@@ -41,6 +50,10 @@ export default function TransferenciaLojaPage() {
 
   const criar = async () => {
     if (!usuario) return;
+    const confirmou = window.confirm(
+      `Confirmar transferência com ${itens.length} item(ns) para a loja selecionada?`
+    );
+    if (!confirmou) return;
     setSaving(true);
     try {
       await criarTransferencia(
@@ -77,8 +90,31 @@ export default function TransferenciaLojaPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mb-6">
-        <Select label="Loja Origem" required options={[{ value: '', label: 'Selecione...' }, ...lojas.map(l => ({ value: l.id, label: l.nome }))]} value={origemId} onChange={(e) => setOrigemId(e.target.value)} />
-        <Select label="Loja Destino" required options={[{ value: '', label: 'Selecione...' }, ...lojas.filter(l => l.id !== origemId).map(l => ({ value: l.id, label: l.nome }))]} value={destinoId} onChange={(e) => setDestinoId(e.target.value)} />
+        {lojaOperadoraId ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+            <span className="font-medium text-gray-900">Loja origem:</span>{' '}
+            {lojas.find((l) => l.id === lojaOperadoraId)?.nome || 'Sua loja'}
+            <p className="text-xs text-gray-500 mt-1">Operador de loja só envia a partir da própria unidade.</p>
+          </div>
+        ) : (
+          <Select
+            label="Loja Origem"
+            required
+            options={[{ value: '', label: 'Selecione...' }, ...lojas.map((l) => ({ value: l.id, label: l.nome }))]}
+            value={origemId}
+            onChange={(e) => setOrigemId(e.target.value)}
+          />
+        )}
+        <Select
+          label="Loja Destino"
+          required
+          options={[
+            { value: '', label: 'Selecione...' },
+            ...lojas.filter((l) => l.id !== origemId).map((l) => ({ value: l.id, label: l.nome })),
+          ]}
+          value={destinoId}
+          onChange={(e) => setDestinoId(e.target.value)}
+        />
       </div>
 
       {origemId && destinoId && (

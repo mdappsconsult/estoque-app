@@ -1,0 +1,39 @@
+---
+description: Manter contexto operacional atualizado automaticamente
+alwaysApply: true
+---
+
+# Contexto Seguro e Contínuo
+
+Ao finalizar qualquer tarefa relevante neste projeto, atualize os dois arquivos:
+
+- `CONTEXTO_ATUAL.md` (estado vigente, curto e objetivo)
+- `LOG_SESSOES.md` (registro cronológico do que mudou)
+
+## Regra de atualização
+
+- Atualize os arquivos quando houver:
+  - mudança de fluxo de negócio;
+  - mudança de permissões/perfis;
+  - ajuste de status/transferência/recebimento;
+  - fix importante de bug operacional;
+  - alteração em banco via SQL/MCP.
+
+## Padrão de conteúdo
+
+- Em `CONTEXTO_ATUAL.md`, manter somente o que vale hoje:
+  - objetivo do sistema;
+  - perfis e escopo de cada perfil;
+  - fluxos oficiais e status esperados;
+  - decisões ativas e pendências.
+- Em `LOG_SESSOES.md`, adicionar no topo:
+  - data/hora;
+  - o que foi feito;
+  - impacto;
+  - validação executada.
+
+## Qualidade
+
+- Escrever em português claro.
+- Evitar texto longo; usar bullets curtos.
+- Não duplicar histórico no contexto atual.

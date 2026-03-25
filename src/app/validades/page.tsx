@@ -3,18 +3,23 @@
 import { Timer, Loader2, AlertTriangle } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
+import { useAuth } from '@/hooks/useAuth';
 import { useState } from 'react';
+import { filtrarItensPorLojaOperadora, idLocalLojaOperadora } from '@/lib/operador-loja-scope';
 
 interface ItemRow {
   id: string;
   token_qr: string;
   estado: string;
+  local_atual_id: string | null;
   data_validade: string | null;
   produto: { nome: string };
   local_atual: { nome: string } | null;
 }
 
 export default function ValidadesPage() {
+  const { usuario } = useAuth();
+  const lojaOperadoraId = idLocalLojaOperadora(usuario);
   const { data: itens, loading } = useRealtimeQuery<ItemRow>({
     table: 'itens',
     select: '*, produto:produtos(nome), local_atual:locais!local_atual_id(nome)',
@@ -27,17 +32,21 @@ export default function ValidadesPage() {
   const limite = new Date();
   limite.setDate(limite.getDate() + dias);
 
-  const proximos = itens.filter(i =>
-    i.estado === 'EM_ESTOQUE' &&
-    i.data_validade &&
-    new Date(i.data_validade) <= limite &&
-    new Date(i.data_validade) >= agora
+  const itensEscopo = filtrarItensPorLojaOperadora(itens, usuario);
+
+  const proximos = itensEscopo.filter(
+    (i) =>
+      i.estado === 'EM_ESTOQUE' &&
+      i.data_validade &&
+      new Date(i.data_validade) <= limite &&
+      new Date(i.data_validade) >= agora
   );
 
-  const vencidos = itens.filter(i =>
-    i.estado === 'EM_ESTOQUE' &&
-    i.data_validade &&
-    new Date(i.data_validade) < agora
+  const vencidos = itensEscopo.filter(
+    (i) =>
+      i.estado === 'EM_ESTOQUE' &&
+      i.data_validade &&
+      new Date(i.data_validade) < agora
   );
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
@@ -49,6 +58,16 @@ export default function ValidadesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Validades</h1>
           <p className="text-sm text-gray-500">Itens próximos do vencimento</p>
+          {lojaOperadoraId && (
+            <p className="text-xs text-gray-500 mt-1">
+              Somente itens em estoque na sua loja (não inclui unidades ainda na indústria ou em trânsito).
+            </p>
+          )}
+          {usuario?.perfil === 'OPERATOR_STORE' && !lojaOperadoraId && (
+            <p className="text-xs text-amber-700 mt-1">
+              Sem loja vinculada ao usuário, validades não são exibidas. Cadastre a loja em Usuários e entre de novo.
+            </p>
+          )}
         </div>
       </div>
 

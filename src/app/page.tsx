@@ -59,7 +59,16 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   ADMIN_MASTER: [
     {
       title: 'Operação do Dia',
-      items: ['/qrcode', '/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/recebimento'],
+      items: [
+        '/qrcode',
+        '/entrada-compra',
+        '/producao',
+        '/etiquetas',
+        '/separar-por-loja',
+        '/viagem-aceite',
+        '/aceites-pendentes',
+        '/recebimento',
+      ],
     },
     {
       title: 'Controle e Gestão',
@@ -73,7 +82,16 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   MANAGER: [
     {
       title: 'Operação do Dia',
-      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/recebimento', '/qrcode'],
+      items: [
+        '/entrada-compra',
+        '/producao',
+        '/etiquetas',
+        '/separar-por-loja',
+        '/viagem-aceite',
+        '/aceites-pendentes',
+        '/recebimento',
+        '/qrcode',
+      ],
     },
     {
       title: 'Acompanhamento',
@@ -88,6 +106,10 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     {
       title: 'Operação',
       items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
+    },
+    {
+      title: 'Transporte',
+      items: ['/viagem-aceite', '/aceites-pendentes'],
     },
     {
       title: 'Conferência',

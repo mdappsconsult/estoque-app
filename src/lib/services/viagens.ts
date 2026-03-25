@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { Viagem, ViagemInsert, ViagemUpdate } from '@/types/database';
+import { Viagem, ViagemInsert } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
 
 export interface ViagemCompleta extends Viagem {
@@ -59,6 +59,14 @@ export async function aceitarViagem(id: string, motoristaId: string): Promise<vo
     .update({ status: 'ACCEPTED', motorista_id: motoristaId })
     .eq('id', id);
 
+  // Mantém viagem e transferências coerentes: ao aceitar a viagem,
+  // transferências pendentes da viagem também viram ACCEPTED.
+  await supabase
+    .from('transferencias')
+    .update({ status: 'ACCEPTED', aceito_por: motoristaId })
+    .eq('viagem_id', id)
+    .eq('status', 'AWAITING_ACCEPT');
+
   await registrarAuditoria({
     usuario_id: motoristaId,
     acao: 'ACEITAR_VIAGEM',
@@ -81,14 +89,18 @@ export async function iniciarViagem(id: string, motoristaId: string): Promise<vo
     throw new Error('Somente o motorista que aceitou pode iniciar a viagem');
   }
 
-  await supabase.from('viagens').update({ status: 'IN_TRANSIT' }).eq('id', id);
-
-  // Despachar todas as transferências da viagem
+  // Despachar todas as transferências aceitas da viagem.
   const { data: transferencias } = await supabase
     .from('transferencias')
     .select('id')
     .eq('viagem_id', id)
     .eq('status', 'ACCEPTED');
+
+  if (!transferencias || transferencias.length === 0) {
+    throw new Error('Nenhuma transferência aceita para iniciar esta viagem');
+  }
+
+  await supabase.from('viagens').update({ status: 'IN_TRANSIT' }).eq('id', id);
 
   for (const t of transferencias || []) {
     const { data: transItens } = await supabase

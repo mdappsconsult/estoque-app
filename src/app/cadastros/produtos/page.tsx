@@ -181,9 +181,9 @@ export default function ProdutosPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Produtos</h1>
-        <Button variant="primary" onClick={handleCriarProduto}>Criar produto</Button>
+        <Button variant="primary" onClick={handleCriarProduto} className="w-full sm:w-auto">Criar produto</Button>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
@@ -191,7 +191,7 @@ export default function ProdutosPage() {
           Cadastro de produto define os padrões. Para lançar compras do dia a dia (com validade e lote reais), use a tela <strong>Registrar Compra</strong>.
         </div>
         <div className="flex flex-wrap gap-4">
-          <div className="w-64">
+          <div className="w-full sm:w-64">
             <Select
               options={[
                 { value: 'todos', label: 'Produtos da Unidade' },
@@ -202,7 +202,7 @@ export default function ProdutosPage() {
               onChange={(e) => setFiltroUnidade(e.target.value)}
             />
           </div>
-          <div className="w-56">
+          <div className="w-full sm:w-56">
             <Select
               label="Origem"
               options={[
@@ -215,15 +215,15 @@ export default function ProdutosPage() {
               onChange={(e) => setFiltroOrigem(e.target.value)}
             />
           </div>
-          <div className="flex-1 relative min-w-[200px]">
+          <div className="w-full sm:flex-1 relative min-w-0">
             <Input placeholder="Buscar produto pelo nome" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
             <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+        <table className="w-full min-w-[760px]">
           <thead>
             <tr className="border-b border-gray-200">
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Produto</th>

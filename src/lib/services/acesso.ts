@@ -7,6 +7,8 @@ type CredencialOperacional = {
   nome: string;
   telefone: string;
   perfil: Usuario['perfil'];
+  /** Para OPERATOR_STORE: nome do cadastro em `locais` (loja ativa). */
+  lojaPadraoNome?: string;
 };
 
 const CREDENCIAIS_OPERACIONAIS: CredencialOperacional[] = [
@@ -33,13 +35,78 @@ const CREDENCIAIS_OPERACIONAIS: CredencialOperacional[] = [
     telefone: '550000000003',
     perfil: 'MANAGER',
   },
+  {
+    login: 'joana',
+    senha: '123456',
+    nome: 'Joana',
+    telefone: '550000000004',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Paraiso',
+  },
 ];
 
 function normalizarLogin(login: string): string {
   return login.trim().toLowerCase();
 }
 
-async function buscarLocalPadraoParaPerfil(perfil: Usuario['perfil']): Promise<string | null> {
+function normalizarTexto(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+async function buscarLojaStorePorNome(nome: string): Promise<string | null> {
+  const t = nome.trim();
+  if (!t) return null;
+
+  const { data: exato } = await supabase
+    .from('locais')
+    .select('id')
+    .eq('tipo', 'STORE')
+    .eq('status', 'ativo')
+    .eq('nome', t)
+    .maybeSingle();
+  if (exato?.id) return exato.id;
+
+  const { data: aprox } = await supabase
+    .from('locais')
+    .select('id')
+    .eq('tipo', 'STORE')
+    .eq('status', 'ativo')
+    .ilike('nome', `%${t}%`)
+    .order('nome', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (aprox?.id) return aprox.id;
+
+  // Fallback robusto para variações de acento/espaço no nome da loja.
+  const { data: lojas } = await supabase
+    .from('locais')
+    .select('id, nome')
+    .eq('tipo', 'STORE')
+    .eq('status', 'ativo')
+    .order('nome', { ascending: true });
+
+  const alvo = normalizarTexto(t);
+  const exataNormalizada = (lojas || []).find(
+    (loja) => normalizarTexto(loja.nome) === alvo
+  );
+  if (exataNormalizada?.id) return exataNormalizada.id;
+
+  const aproximadaNormalizada = (lojas || []).find((loja) =>
+    normalizarTexto(loja.nome).includes(alvo)
+  );
+
+  return aproximadaNormalizada?.id || null;
+}
+
+async function buscarLocalPadraoOperacional(credencial: CredencialOperacional): Promise<string | null> {
+  const { perfil } = credencial;
+
   // Gerente operacional no estoque/indústria: mesmo local padrão que operador (baixa, perdas, etc.).
   if (
     perfil === 'OPERATOR_WAREHOUSE' ||
@@ -58,11 +125,31 @@ async function buscarLocalPadraoParaPerfil(perfil: Usuario['perfil']): Promise<s
     return data?.id || null;
   }
 
+  if (perfil === 'OPERATOR_STORE') {
+    if (credencial.lojaPadraoNome?.trim()) {
+      const porNome = await buscarLojaStorePorNome(credencial.lojaPadraoNome);
+      if (porNome) return porNome;
+      // Para conta com loja explícita (ex.: Joana), não cair em fallback de "primeira loja".
+      return null;
+    }
+
+    const { data } = await supabase
+      .from('locais')
+      .select('id')
+      .eq('tipo', 'STORE')
+      .eq('status', 'ativo')
+      .order('nome', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    return data?.id || null;
+  }
+
   return null;
 }
 
 async function upsertUsuarioOperacional(credencial: CredencialOperacional): Promise<Usuario> {
-  const localPadraoId = await buscarLocalPadraoParaPerfil(credencial.perfil);
+  const localPadraoId = await buscarLocalPadraoOperacional(credencial);
 
   const { data: existente, error: erroBusca } = await supabase
     .from('usuarios')
@@ -72,12 +159,19 @@ async function upsertUsuarioOperacional(credencial: CredencialOperacional): Prom
   if (erroBusca) throw erroBusca;
 
   if (existente) {
+    const localPadraoFinal = localPadraoId;
+    if (credencial.perfil === 'OPERATOR_STORE' && !localPadraoFinal) {
+      throw new Error(
+        `Nao foi possivel identificar a loja padrao de ${credencial.nome}.`
+      );
+    }
+
     const { data: atualizado, error: erroAtualizacao } = await supabase
       .from('usuarios')
       .update({
         nome: credencial.nome,
         perfil: credencial.perfil,
-        local_padrao_id: localPadraoId,
+        local_padrao_id: localPadraoFinal,
         status: 'ativo',
       })
       .eq('id', existente.id)

@@ -29,6 +29,7 @@ export default function SepararPorLojaPage() {
   const [origemId, setOrigemId] = useState('');
   const [destinoId, setDestinoId] = useState('');
   const [tokenInput, setTokenInput] = useState('');
+  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
   const [itensEscaneados, setItensEscaneados] = useState<ItemEscaneado[]>([]);
   const [saving, setSaving] = useState(false);
   const [sucesso, setSucesso] = useState(false);
@@ -45,7 +46,7 @@ export default function SepararPorLojaPage() {
     try {
       const item = await getItemPorCodigoEscaneado(raw);
       if (!item) {
-        setErro('Item não encontrado. Confira se o QR é o token completo ou o código curto da etiqueta.');
+        setErro('Item não encontrado. Confira o código e tente novamente.');
         return;
       }
       if (item.estado !== 'EM_ESTOQUE') {
@@ -75,7 +76,7 @@ export default function SepararPorLojaPage() {
       }
       setTokenInput('');
     } catch (err: unknown) {
-      setErro(err instanceof Error ? err.message : 'Erro ao buscar item');
+      setErro(err instanceof Error ? err.message : 'Não foi possível buscar o item. Tente novamente.');
     }
   };
 
@@ -85,6 +86,10 @@ export default function SepararPorLojaPage() {
 
   const criarSeparacao = async () => {
     if (!usuario) return alert('Faça login');
+    const confirmou = window.confirm(
+      `Confirmar criação da separação com ${itensEscaneados.length} item(ns)?`
+    );
+    if (!confirmou) return;
     setSaving(true);
     try {
       // Criar viagem
@@ -106,6 +111,7 @@ export default function SepararPorLojaPage() {
       setSucesso(true);
       setItensEscaneados([]);
       setDestinoId('');
+      setMostrarEntradaManual(false);
     } catch (err: any) {
       alert(err?.message || 'Erro');
     } finally {
@@ -145,18 +151,44 @@ export default function SepararPorLojaPage() {
         <>
           <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
             <label className="block text-sm font-medium text-gray-700">Escanear QR do item</label>
-            <QRScanner onScan={(code) => void processarEscaneamento(code)} label="Abrir câmera" />
-            <div className="flex gap-2">
-              <Input
-                placeholder="Ou digite o código / token curto"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
-              />
-              <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
-                <QrCode className="w-4 h-4" />
+            <QRScanner
+              onScan={(code) => void processarEscaneamento(code)}
+              label="Escanear com câmera"
+              autoOpen={Boolean(origemId && destinoId)}
+            />
+            {!mostrarEntradaManual ? (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setMostrarEntradaManual(true)}
+              >
+                Não conseguiu ler? Digitar código
               </Button>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Digite o código QR ou token curto"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
+                  />
+                  <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
+                    <QrCode className="w-4 h-4" />
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setMostrarEntradaManual(false);
+                    setTokenInput('');
+                  }}
+                >
+                  Fechar digitação manual
+                </Button>
+              </div>
+            )}
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>
 

@@ -99,6 +99,10 @@ export default function EntradaCompraPage() {
     } else if (!form.nota_fiscal.trim()) {
       return alert('Nota fiscal é obrigatória ou marque "Sem nota fiscal"');
     }
+    const confirmou = window.confirm(
+      `Confirmar registro da compra de ${form.quantidade} item(ns)?`
+    );
+    if (!confirmou) return;
     setSaving(true);
     setResultado(null);
     try {
@@ -254,7 +258,7 @@ export default function EntradaCompraPage() {
             </p>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label="Quantidade" type="number" min="1" value={form.quantidade} onChange={(e) => setForm({ ...form, quantidade: e.target.value })} required />
           <Input label="Custo Unitário (R$)" type="number" step="0.01" min="0" value={form.custo_unitario} onChange={(e) => setForm({ ...form, custo_unitario: e.target.value })} required />
         </div>
@@ -342,7 +346,7 @@ export default function EntradaCompraPage() {
             onChange={(e) => setNovoProduto((p) => ({ ...p, nome: e.target.value }))}
             required
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Unidade"
               options={[
@@ -364,7 +368,7 @@ export default function EntradaCompraPage() {
             value={novoProduto.fornecedor}
             onChange={(e) => setNovoProduto((p) => ({ ...p, fornecedor: e.target.value }))}
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Estoque mínimo"
               type="number"

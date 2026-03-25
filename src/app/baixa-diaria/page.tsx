@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Archive, Loader2, QrCode, CheckCircle, X, AlertCircle } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Badge from '@/components/ui/Badge';
 import QRScanner from '@/components/QRScanner';
 import { useAuth } from '@/hooks/useAuth';
-import { getItemByTokenQR, baixarItem } from '@/lib/services/itens';
+import { baixarItem, getItemPorCodigoEscaneado } from '@/lib/services/itens';
 
 interface BaixaResult {
   token_qr: string;
@@ -21,26 +21,51 @@ export default function BaixaDiariaPage() {
   const [tokenInput, setTokenInput] = useState('');
   const [processando, setProcessando] = useState(false);
   const [resultados, setResultados] = useState<BaixaResult[]>([]);
+  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
+  const processandoRef = useRef(false);
+  const ultimoScanRef = useRef<{ token: string; ts: number } | null>(null);
+  const itensBaixadosRef = useRef<Set<string>>(new Set());
 
   const localId = usuario?.local_padrao_id;
 
   const escanearBaixa = async (codigo?: string) => {
     const token = codigo || tokenInput.trim();
     if (!token || !usuario || !localId) return;
+
+    // Scanner de câmera pode disparar o mesmo QR várias vezes em milissegundos.
+    const agora = Date.now();
+    const ultimo = ultimoScanRef.current;
+    if (ultimo && ultimo.token === token && agora - ultimo.ts < 1200) {
+      return;
+    }
+    ultimoScanRef.current = { token, ts: agora };
+
+    if (processandoRef.current) return;
+    processandoRef.current = true;
+
     setProcessando(true);
     try {
-      const item = await getItemByTokenQR(token);
+      const item = await getItemPorCodigoEscaneado(token);
       if (!item) {
-        setResultados(prev => [{ token_qr: token, nome: '?', success: false, error: 'Não encontrado' }, ...prev]);
+        setResultados(prev => [{ token_qr: token, nome: token, success: false, error: 'Item não encontrado. Confira o código e tente novamente.' }, ...prev]);
       } else {
+        if (itensBaixadosRef.current.has(item.id)) {
+          setResultados(prev => [
+            { token_qr: item.token_qr, nome: item.produto?.nome || '?', success: false, error: 'Item já baixado nesta sessão' },
+            ...prev,
+          ]);
+          return;
+        }
         await baixarItem(item.id, localId, usuario.id);
+        itensBaixadosRef.current.add(item.id);
         setResultados(prev => [{ token_qr: item.token_qr, nome: item.produto?.nome || '', success: true }, ...prev]);
       }
     } catch (err: any) {
-      setResultados(prev => [{ token_qr: token, nome: '?', success: false, error: err?.message || 'Erro' }, ...prev]);
+      setResultados(prev => [{ token_qr: token, nome: token, success: false, error: err?.message || 'Não foi possível buscar o item. Tente novamente.' }, ...prev]);
     } finally {
       setTokenInput('');
       setProcessando(false);
+      processandoRef.current = false;
     }
   };
 
@@ -64,19 +89,48 @@ export default function BaixaDiariaPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
-        <QRScanner onScan={(code) => escanearBaixa(code)} label="Abrir câmera para escanear" />
-        <div className="flex gap-2">
-          <Input
-            placeholder="Ou digite o código QR"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && escanearBaixa()}
-            disabled={!localId}
-            autoFocus
-          />
-          <Button variant="primary" onClick={() => escanearBaixa()} disabled={processando || !localId || !tokenInput.trim()}>
-            {processando ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-          </Button>
+        <QRScanner
+          onScan={(code) => escanearBaixa(code)}
+          label="Escanear com câmera"
+          autoOpen={Boolean(localId)}
+        />
+        <div>
+          {!mostrarEntradaManual ? (
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => setMostrarEntradaManual(true)}
+              disabled={!localId}
+            >
+              Não conseguiu ler? Digitar código
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Digite o código QR ou token curto"
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && escanearBaixa()}
+                  disabled={!localId}
+                  autoFocus
+                />
+                <Button variant="primary" onClick={() => escanearBaixa()} disabled={processando || !localId || !tokenInput.trim()}>
+                  {processando ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setMostrarEntradaManual(false);
+                  setTokenInput('');
+                }}
+              >
+                Fechar digitação manual
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

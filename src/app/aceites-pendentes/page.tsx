@@ -7,6 +7,7 @@ import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { aceitarTransferencia, despacharTransferencia } from '@/lib/services/transferencias';
+import { filtrarAceitesPorOperadorLoja } from '@/lib/operador-loja-scope';
 
 interface TransRow {
   id: string;
@@ -31,10 +32,15 @@ export default function AceitesPendentesPage() {
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const pendentes = transferencias.filter(t => t.status === 'AWAITING_ACCEPT' || t.status === 'ACCEPTED');
+  const pendentesBrutos = transferencias.filter(
+    (t) => t.status === 'AWAITING_ACCEPT' || t.status === 'ACCEPTED'
+  );
+  const pendentes = filtrarAceitesPorOperadorLoja(pendentesBrutos, usuario);
 
   const handleAceitar = async (id: string) => {
     if (!usuario) return;
+    const confirmou = window.confirm('Confirmar aceite desta transferência?');
+    if (!confirmou) return;
     setActionLoading(id);
     try { await aceitarTransferencia(id, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
     setActionLoading(null);
@@ -42,6 +48,8 @@ export default function AceitesPendentesPage() {
 
   const handleDespachar = async (id: string) => {
     if (!usuario) return;
+    const confirmou = window.confirm('Confirmar despacho desta transferência?');
+    if (!confirmou) return;
     setActionLoading(id);
     try { await despacharTransferencia(id, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
     setActionLoading(null);

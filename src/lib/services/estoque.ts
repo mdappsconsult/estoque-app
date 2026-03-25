@@ -140,7 +140,7 @@ async function atualizarEstoque(produtoId: string, quantidade: number, tipo: 'en
       produto_id: produtoId,
       quantidade: novaQuantidade,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'produto_id' });
 
   if (error) throw error;
 }

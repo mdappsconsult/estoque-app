@@ -34,6 +34,19 @@ const perfilBadge = (perfil: string) => {
 
 const perfilLabel = (perfil: string) => PERFIS.find(p => p.value === perfil)?.label || perfil;
 
+function idsLocaisPermitidosParaPerfil(
+  perfil: Usuario['perfil'],
+  lista: Local[]
+): Set<string> {
+  if (perfil === 'OPERATOR_STORE') {
+    return new Set(lista.filter((l) => l.tipo === 'STORE').map((l) => l.id));
+  }
+  if (perfil === 'OPERATOR_WAREHOUSE' || perfil === 'OPERATOR_WAREHOUSE_DRIVER') {
+    return new Set(lista.filter((l) => l.tipo === 'WAREHOUSE').map((l) => l.id));
+  }
+  return new Set(lista.map((l) => l.id));
+}
+
 export default function UsuariosPage() {
   const { data: usuarios, loading } = useRealtimeQuery<Usuario & { local_padrao?: { id: string; nome: string } | null }>({
     table: 'usuarios',
@@ -65,6 +78,10 @@ export default function UsuariosPage() {
   };
 
   const handleSave = async () => {
+    if (form.perfil === 'OPERATOR_STORE' && !form.local_padrao_id.trim()) {
+      alert('Operador de loja precisa ter uma loja de atuação selecionada.');
+      return;
+    }
     try {
       const payload = {
         nome: form.nome,
@@ -91,6 +108,36 @@ export default function UsuariosPage() {
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
   }
+
+  const localLabel =
+    form.perfil === 'OPERATOR_STORE'
+      ? 'Loja de atuação'
+      : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
+        ? 'Indústria padrão'
+        : 'Local padrão';
+
+  const localOptions =
+    form.perfil === 'OPERATOR_STORE'
+      ? [
+          { value: '', label: 'Selecione a loja…' },
+          ...locais
+            .filter((l) => l.tipo === 'STORE')
+            .map((l) => ({ value: l.id, label: l.nome })),
+        ]
+      : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
+        ? [
+            { value: '', label: 'Nenhum' },
+            ...locais
+              .filter((l) => l.tipo === 'WAREHOUSE')
+              .map((l) => ({ value: l.id, label: l.nome })),
+          ]
+        : [
+            { value: '', label: 'Nenhum' },
+            ...locais.map((l) => ({
+              value: l.id,
+              label: `${l.nome} (${l.tipo === 'WAREHOUSE' ? 'Indústria' : 'Loja'})`,
+            })),
+          ];
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -128,14 +175,44 @@ export default function UsuariosPage() {
         <div className="p-6 space-y-4">
           <Input label="Nome" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} required />
           <Input label="Telefone" value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(99) 99999-9999" required />
-          <Select label="Perfil" options={PERFIS} value={form.perfil} onChange={(e) => setForm({ ...form, perfil: e.target.value as Usuario['perfil'] })} />
           <Select
-            label="Local Padrão"
-            options={[{ value: '', label: 'Nenhum' }, ...locais.map(l => ({ value: l.id, label: `${l.nome} (${l.tipo === 'WAREHOUSE' ? 'Indústria' : 'Loja'})` }))]}
+            label="Perfil"
+            options={PERFIS}
+            value={form.perfil}
+            onChange={(e) => {
+              const perfil = e.target.value as Usuario['perfil'];
+              const ids = idsLocaisPermitidosParaPerfil(perfil, locais);
+              setForm((prev) => ({
+                ...prev,
+                perfil,
+                local_padrao_id:
+                  prev.local_padrao_id && ids.has(prev.local_padrao_id) ? prev.local_padrao_id : '',
+              }));
+            }}
+          />
+          <Select
+            label={localLabel}
+            required={form.perfil === 'OPERATOR_STORE'}
+            options={localOptions}
             value={form.local_padrao_id}
             onChange={(e) => setForm({ ...form, local_padrao_id: e.target.value })}
           />
-          <Button variant="primary" className="w-full" onClick={handleSave} disabled={!form.nome || !form.telefone}>
+          {form.perfil === 'OPERATOR_STORE' && (
+            <p className="text-xs text-gray-500 -mt-2">
+              Obrigatório: recebimentos e aceites pendentes consideram só pedidos destinados a esta loja.
+            </p>
+          )}
+          {(form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER') && (
+            <p className="text-xs text-gray-500 -mt-2">
+              Recomendado para baixa, perdas e operações na indústria correta.
+            </p>
+          )}
+          <Button
+            variant="primary"
+            className="w-full"
+            onClick={handleSave}
+            disabled={!form.nome || !form.telefone || (form.perfil === 'OPERATOR_STORE' && !form.local_padrao_id)}
+          >
             {editando ? 'Salvar' : 'Criar'}
           </Button>
         </div>

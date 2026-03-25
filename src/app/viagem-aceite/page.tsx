@@ -53,6 +53,8 @@ export default function ViagemAceitePage() {
 
   const handleAceitar = async (viagemId: string) => {
     if (!usuario) return;
+    const confirmou = window.confirm('Confirmar aceite desta viagem?');
+    if (!confirmou) return;
     setLoadingAction(viagemId);
     try { await aceitarViagem(viagemId, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
     setLoadingAction(null);
@@ -60,6 +62,8 @@ export default function ViagemAceitePage() {
 
   const handleIniciar = async (viagemId: string) => {
     if (!usuario) return;
+    const confirmou = window.confirm('Confirmar início desta viagem?');
+    if (!confirmou) return;
     setLoadingAction(viagemId);
     try { await iniciarViagem(viagemId, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
     setLoadingAction(null);
@@ -72,6 +76,18 @@ export default function ViagemAceitePage() {
   const statusLabel = (s: string) => {
     const m: Record<string, string> = { PENDING: 'Pendente', ACCEPTED: 'Aceita', IN_TRANSIT: 'Em Trânsito', COMPLETED: 'Completa' };
     return m[s] || s;
+  };
+
+  const resumoDestinos = (trans: TransRow[]): string => {
+    const nomes = Array.from(
+      new Set(
+        trans
+          .map((t) => t.destino?.nome)
+          .filter((nome): nome is string => Boolean(nome))
+      )
+    );
+    if (nomes.length === 0) return 'Destino não informado';
+    return nomes.join(' • ');
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
@@ -136,15 +152,22 @@ export default function ViagemAceitePage() {
         <>
           <h2 className="text-lg font-semibold text-gray-700 mt-8 mb-4">Histórico</h2>
           <div className="space-y-2">
-            {viagensHist.slice(0, 10).map(v => (
-              <div key={v.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Viagem #{v.id.slice(0, 8)}</p>
-                  <p className="text-xs text-gray-400">{new Date(v.created_at).toLocaleDateString('pt-BR')}</p>
+            {viagensHist.slice(0, 10).map(v => {
+              const trans = transMap[v.id] || [];
+              const totalItens = trans.reduce((acc, t) => acc + (t.transferencia_itens?.length || 0), 0);
+              return (
+                <div key={v.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Viagem #{v.id.slice(0, 8)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Lojas: {resumoDestinos(trans)}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {trans.length} destino(s) • {totalItens} itens • {new Date(v.created_at).toLocaleString('pt-BR')}
+                    </p>
+                  </div>
+                  <Badge variant={statusBadge(v.status)} size="sm">{statusLabel(v.status)}</Badge>
                 </div>
-                <Badge variant={statusBadge(v.status)} size="sm">{statusLabel(v.status)}</Badge>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

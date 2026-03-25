@@ -69,7 +69,7 @@ export async function createContagem(
         produto_id: item.produto_id,
         quantidade: item.quantidade_contada,
         updated_at: new Date().toISOString(),
-      });
+      }, { onConflict: 'produto_id' });
   }
 
   return contagem;

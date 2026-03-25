@@ -7,16 +7,29 @@ import Button from '@/components/ui/Button';
 interface QRScannerProps {
   onScan: (code: string) => void;
   label?: string;
+  autoOpen?: boolean;
 }
 
-export default function QRScanner({ onScan, label = 'Escanear QR Code' }: QRScannerProps) {
+export default function QRScanner({
+  onScan,
+  label = 'Escanear QR Code',
+  autoOpen = false,
+}: QRScannerProps) {
   const [aberto, setAberto] = useState(false);
   const [erro, setErro] = useState('');
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const autoOpenAplicadoRef = useRef(false);
 
   const reactId = useId();
   const readerId = `qr-scanner-${reactId.replace(/:/g, '')}`;
+
+  useEffect(() => {
+    if (autoOpen && !autoOpenAplicadoRef.current) {
+      setAberto(true);
+      autoOpenAplicadoRef.current = true;
+    }
+  }, [autoOpen]);
 
   useEffect(() => {
     if (!aberto) return;
