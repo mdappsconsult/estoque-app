@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PackageCheck, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -11,6 +11,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { criarLoteCompra } from '@/lib/services/lotes-compra';
 import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
+
+type UnidadeCompra = 'UN' | 'CAIXA' | 'FARDO';
 
 export default function EntradaCompraPage() {
   const { usuario } = useAuth();
@@ -39,6 +41,8 @@ export default function EntradaCompraPage() {
     motivo_sem_nota: '',
     local_id: '',
     data_validade: '',
+    unidade_compra: 'UN' as UnidadeCompra,
+    itens_por_embalagem: '1',
   });
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ itens: number } | null>(null);
@@ -48,6 +52,7 @@ export default function EntradaCompraPage() {
   } | null>(null);
   const [modalProdutoAberto, setModalProdutoAberto] = useState(false);
   const [savingProduto, setSavingProduto] = useState(false);
+  const [produtoRapidoEditandoId, setProdutoRapidoEditandoId] = useState<string | null>(null);
   const [novoProduto, setNovoProduto] = useState({
     nome: '',
     unidade_medida: 'un',
@@ -55,6 +60,22 @@ export default function EntradaCompraPage() {
     estoque_minimo: '0',
     custo_referencia: '',
   });
+
+  const quantidadeCompra = useMemo(
+    () => Number.parseInt(form.quantidade, 10) || 0,
+    [form.quantidade]
+  );
+  const fatorUnidades = useMemo(() => {
+    if (form.unidade_compra === 'UN') return 1;
+    const fator = Number.parseInt(form.itens_por_embalagem, 10) || 0;
+    return fator;
+  }, [form.itens_por_embalagem, form.unidade_compra]);
+  const custoEmbalagem = useMemo(
+    () => Number.parseFloat((form.custo_unitario || '0').replace(',', '.')) || 0,
+    [form.custo_unitario]
+  );
+  const quantidadeUnitaria = quantidadeCompra * fatorUnidades;
+  const custoUnitarioCalculado = fatorUnidades > 0 ? custoEmbalagem / fatorUnidades : 0;
 
   const handleProdutoChange = async (produtoId: string) => {
     if (!produtoId) {
@@ -92,6 +113,14 @@ export default function EntradaCompraPage() {
   const handleSubmit = async () => {
     if (!usuario) return alert('Faça login primeiro');
     if (!form.fornecedor.trim()) return alert('Fornecedor é obrigatório');
+    if (quantidadeCompra <= 0) return alert('Quantidade comprada deve ser maior que zero');
+    if (custoEmbalagem < 0) return alert('Custo não pode ser negativo');
+    if (form.unidade_compra !== 'UN' && fatorUnidades <= 1) {
+      return alert('Para caixa/fardo, informe quantas unidades existem em cada embalagem');
+    }
+    if (quantidadeUnitaria <= 0) {
+      return alert('Quantidade unitária calculada inválida. Revise os campos de embalagem.');
+    }
     if (form.sem_nota_fiscal) {
       if (!form.motivo_sem_nota.trim()) {
         return alert('Informe o motivo de estar sem nota fiscal');
@@ -99,8 +128,16 @@ export default function EntradaCompraPage() {
     } else if (!form.nota_fiscal.trim()) {
       return alert('Nota fiscal é obrigatória ou marque "Sem nota fiscal"');
     }
+    const labelUnidadeCompra =
+      form.unidade_compra === 'UN'
+        ? 'unidade(s)'
+        : form.unidade_compra === 'CAIXA'
+          ? 'caixa(s)'
+          : 'fardo(s)';
     const confirmou = window.confirm(
-      `Confirmar registro da compra de ${form.quantidade} item(ns)?`
+      `Confirmar compra de ${quantidadeCompra} ${labelUnidadeCompra}?\n` +
+      `Conversão: ${quantidadeUnitaria} item(ns) unitários com QR.\n` +
+      `Custo unitário calculado: R$ ${custoUnitarioCalculado.toFixed(2)}`
     );
     if (!confirmou) return;
     setSaving(true);
@@ -109,8 +146,8 @@ export default function EntradaCompraPage() {
       const res = await criarLoteCompra(
         {
           produto_id: form.produto_id,
-          quantidade: Number(form.quantidade),
-          custo_unitario: Number(form.custo_unitario),
+          quantidade: quantidadeUnitaria,
+          custo_unitario: custoUnitarioCalculado,
           fornecedor: form.fornecedor.trim(),
           lote_fornecedor: '',
           nota_fiscal: form.sem_nota_fiscal ? null : form.nota_fiscal.trim().toUpperCase(),
@@ -132,6 +169,8 @@ export default function EntradaCompraPage() {
         motivo_sem_nota: '',
         local_id: '',
         data_validade: '',
+        unidade_compra: 'UN',
+        itens_por_embalagem: '1',
       });
       setHintCompra(null);
     } catch (err: any) {
@@ -153,37 +192,67 @@ export default function EntradaCompraPage() {
         ? Number.parseFloat(novoProduto.custo_referencia.replace(',', '.'))
         : null;
 
-      const { data: criado, error } = await supabase
-        .from('produtos')
-        .insert({
-          nome,
-          unidade_medida: novoProduto.unidade_medida,
-          fornecedor: novoProduto.fornecedor.trim() || null,
-          origem: 'COMPRA',
-          estoque_minimo: Math.max(0, Number.parseInt(novoProduto.estoque_minimo, 10) || 0),
-          custo_referencia: Number.isFinite(custoParsed as number) ? custoParsed : null,
-          validade_dias: 0,
-          validade_horas: 0,
-          validade_minutos: 0,
-          contagem_do_dia: false,
-          exibir_horario_etiqueta: false,
-        })
-        .select()
-        .single();
-      if (error) throw error;
+      if (produtoRapidoEditandoId) {
+        const { data: atualizado, error: erroAtualizacao } = await supabase
+          .from('produtos')
+          .update({
+            nome,
+            unidade_medida: novoProduto.unidade_medida,
+            fornecedor: novoProduto.fornecedor.trim() || null,
+            estoque_minimo: Math.max(0, Number.parseInt(novoProduto.estoque_minimo, 10) || 0),
+            custo_referencia: Number.isFinite(custoParsed as number) ? custoParsed : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', produtoRapidoEditandoId)
+          .select()
+          .single();
+        if (erroAtualizacao) throw erroAtualizacao;
 
-      await supabase.from('estoque').insert({ produto_id: criado.id, quantidade: 0 });
+        await refetch();
+        setModalProdutoAberto(false);
+        setProdutoRapidoEditandoId(null);
+        setNovoProduto({
+          nome: '',
+          unidade_medida: 'un',
+          fornecedor: '',
+          estoque_minimo: '0',
+          custo_referencia: '',
+        });
+        await handleProdutoChange(atualizado.id);
+      } else {
+        const { data: criado, error } = await supabase
+          .from('produtos')
+          .insert({
+            nome,
+            unidade_medida: novoProduto.unidade_medida,
+            fornecedor: novoProduto.fornecedor.trim() || null,
+            origem: 'COMPRA',
+            estoque_minimo: Math.max(0, Number.parseInt(novoProduto.estoque_minimo, 10) || 0),
+            custo_referencia: Number.isFinite(custoParsed as number) ? custoParsed : null,
+            validade_dias: 0,
+            validade_horas: 0,
+            validade_minutos: 0,
+            contagem_do_dia: false,
+            exibir_horario_etiqueta: false,
+          })
+          .select()
+          .single();
+        if (error) throw error;
 
-      await refetch();
-      setModalProdutoAberto(false);
-      setNovoProduto({
-        nome: '',
-        unidade_medida: 'un',
-        fornecedor: '',
-        estoque_minimo: '0',
-        custo_referencia: '',
-      });
-      await handleProdutoChange(criado.id);
+        await supabase.from('estoque').insert({ produto_id: criado.id, quantidade: 0 });
+
+        await refetch();
+        setModalProdutoAberto(false);
+        setProdutoRapidoEditandoId(null);
+        setNovoProduto({
+          nome: '',
+          unidade_medida: 'un',
+          fornecedor: '',
+          estoque_minimo: '0',
+          custo_referencia: '',
+        });
+        await handleProdutoChange(criado.id);
+      }
     } catch (err: any) {
       alert(err?.message || 'Erro ao criar produto');
     } finally {
@@ -226,8 +295,47 @@ export default function EntradaCompraPage() {
           value={form.produto_id}
           onChange={(e) => void handleProdutoChange(e.target.value)}
         />
-        <div className="flex justify-end">
-          <Button variant="outline" onClick={() => setModalProdutoAberto(true)}>
+        <div className="flex justify-end gap-2 flex-wrap">
+          {form.produto_id && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                const produtoSelecionado = produtos.find((p) => p.id === form.produto_id);
+                if (!produtoSelecionado) {
+                  alert('Selecione um produto válido para editar');
+                  return;
+                }
+                setProdutoRapidoEditandoId(produtoSelecionado.id);
+                setNovoProduto({
+                  nome: produtoSelecionado.nome,
+                  unidade_medida: produtoSelecionado.unidade_medida || 'un',
+                  fornecedor: produtoSelecionado.fornecedor || '',
+                  estoque_minimo: String(produtoSelecionado.estoque_minimo ?? 0),
+                  custo_referencia:
+                    produtoSelecionado.custo_referencia != null
+                      ? String(produtoSelecionado.custo_referencia)
+                      : '',
+                });
+                setModalProdutoAberto(true);
+              }}
+            >
+              Editar produto selecionado
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setProdutoRapidoEditandoId(null);
+              setNovoProduto({
+                nome: '',
+                unidade_medida: 'un',
+                fornecedor: '',
+                estoque_minimo: '0',
+                custo_referencia: '',
+              });
+              setModalProdutoAberto(true);
+            }}
+          >
             + Novo produto de fornecedor
           </Button>
         </div>
@@ -259,8 +367,72 @@ export default function EntradaCompraPage() {
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="Quantidade" type="number" min="1" value={form.quantidade} onChange={(e) => setForm({ ...form, quantidade: e.target.value })} required />
-          <Input label="Custo Unitário (R$)" type="number" step="0.01" min="0" value={form.custo_unitario} onChange={(e) => setForm({ ...form, custo_unitario: e.target.value })} required />
+          <Select
+            label="Unidade de compra"
+            options={[
+              { value: 'UN', label: 'Unidade' },
+              { value: 'CAIXA', label: 'Caixa' },
+              { value: 'FARDO', label: 'Fardo' },
+            ]}
+            value={form.unidade_compra}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...prev,
+                unidade_compra: e.target.value as UnidadeCompra,
+                itens_por_embalagem: e.target.value === 'UN' ? '1' : prev.itens_por_embalagem,
+              }))
+            }
+          />
+          {form.unidade_compra === 'UN' ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 flex items-center">
+              Compra unitária: cada item comprado gera 1 QR.
+            </div>
+          ) : (
+            <Input
+              label="Unidades por embalagem"
+              type="number"
+              min="2"
+              value={form.itens_por_embalagem}
+              onChange={(e) => setForm({ ...form, itens_por_embalagem: e.target.value })}
+              required
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label={
+              form.unidade_compra === 'UN'
+                ? 'Quantidade (unidades)'
+                : form.unidade_compra === 'CAIXA'
+                  ? 'Quantidade (caixas)'
+                  : 'Quantidade (fardos)'
+            }
+            type="number"
+            min="1"
+            value={form.quantidade}
+            onChange={(e) => setForm({ ...form, quantidade: e.target.value })}
+            required
+          />
+          <Input
+            label={
+              form.unidade_compra === 'UN'
+                ? 'Custo Unitário (R$)'
+                : form.unidade_compra === 'CAIXA'
+                  ? 'Custo por Caixa (R$)'
+                  : 'Custo por Fardo (R$)'
+            }
+            type="number"
+            step="0.01"
+            min="0"
+            value={form.custo_unitario}
+            onChange={(e) => setForm({ ...form, custo_unitario: e.target.value })}
+            required
+          />
+        </div>
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          Conversão da compra: <span className="font-semibold tabular-nums">{quantidadeUnitaria}</span> item(ns) unitários com QR
+          {' '}• Custo unitário estimado:{' '}
+          <span className="font-semibold tabular-nums">R$ {custoUnitarioCalculado.toFixed(2)}</span>
         </div>
         <Input
           label="Fornecedor"
@@ -323,6 +495,8 @@ export default function EntradaCompraPage() {
             !form.local_id ||
             !form.data_validade ||
             !form.fornecedor.trim() ||
+            (form.unidade_compra !== 'UN' && fatorUnidades <= 1) ||
+            quantidadeUnitaria <= 0 ||
             (!form.sem_nota_fiscal && !form.nota_fiscal.trim()) ||
             (form.sem_nota_fiscal && !form.motivo_sem_nota.trim())
           }
@@ -334,9 +508,12 @@ export default function EntradaCompraPage() {
 
       <Modal
         isOpen={modalProdutoAberto}
-        onClose={() => setModalProdutoAberto(false)}
-        title="Novo produto de fornecedor"
-        subtitle="Cadastro rápido sem sair da compra"
+        onClose={() => {
+          setModalProdutoAberto(false);
+          setProdutoRapidoEditandoId(null);
+        }}
+        title={produtoRapidoEditandoId ? 'Editar produto selecionado' : 'Novo produto de fornecedor'}
+        subtitle={produtoRapidoEditandoId ? 'Ajuste rápido sem sair da compra' : 'Cadastro rápido sem sair da compra'}
         size="md"
       >
         <div className="p-6 space-y-4">
@@ -395,7 +572,7 @@ export default function EntradaCompraPage() {
             disabled={savingProduto || !novoProduto.nome.trim()}
           >
             {savingProduto ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Criar e continuar compra
+            {produtoRapidoEditandoId ? 'Salvar e continuar compra' : 'Criar e continuar compra'}
           </Button>
         </div>
       </Modal>

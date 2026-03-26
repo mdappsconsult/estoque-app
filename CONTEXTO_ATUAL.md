@@ -31,6 +31,8 @@
 - Padrão de UX de QR replicado: câmera autoaberta + digitação manual sob demanda (botão) em recebimento, separar por loja, scanner QR e rastreio por QR.
 - Textos de UX/erro de QR padronizados nas telas operacionais (mensagens de não encontrado, falha de busca e placeholders de digitação manual).
 - Ajustes mobile-first aplicados em telas administrativas com formulários/tabelas (quebra responsiva de grids, cabeçalhos e scroll horizontal controlado em tabelas largas).
+- Registrar Compra suporta lançamento por `Unidade`, `Caixa` e `Fardo`, com conversão automática para itens unitários (QR) e custo unitário.
+- Registrar Compra permite edição rápida do produto selecionado sem sair da tela (nome, unidade, fornecedor, estoque mínimo e custo de referência).
 - Em recebimento:
   - lista de itens esperados;
   - marcação pendente/escaneado;

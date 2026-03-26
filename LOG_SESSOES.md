@@ -1,5 +1,30 @@
 # Log de Sessões
 
+## 2026-03-26
+
+### Sessão - 2026-03-26 11:38:42 -0300 - Edição rápida de produto no Registrar Compra
+- Adicionado botão "Editar produto selecionado" na tela `Registrar Compra`.
+- Modal de produto passou a operar em dois modos no fluxo de compra:
+  - criação rápida de novo produto de fornecedor;
+  - edição rápida do produto já selecionado.
+- Edição permite ajustar nome, unidade, fornecedor preferencial, estoque mínimo e custo de referência sem sair da compra.
+- Após salvar edição, produto segue selecionado e campos da compra são recalculados automaticamente.
+
+### Validação feita
+- Linter sem erros em `src/app/entrada-compra/page.tsx`.
+
+### Sessão - 2026-03-26 11:36:26 -0300 - Compra por unidade/caixa/fardo
+- Atualizado `Registrar Compra` para permitir tipo de compra: `Unidade`, `Caixa` e `Fardo`.
+- Adicionado campo de conversão (`unidades por embalagem`) para caixa/fardo.
+- Fluxo agora calcula automaticamente:
+  - quantidade unitária (itens com QR gerados);
+  - custo unitário final usado no lote e no custo de referência.
+- Confirmação da compra passou a mostrar resumo da conversão e custo unitário calculado.
+- Impacto: operador pode lançar compra por embalagem sem perder rastreabilidade unitária no estoque.
+
+### Validação feita
+- Linter sem erros em `src/app/entrada-compra/page.tsx`.
+
 ## 2026-03-25
 
 ### Sessão - 2026-03-25 12:36:46 -0300 - Revisão mobile-first (passo 1)
