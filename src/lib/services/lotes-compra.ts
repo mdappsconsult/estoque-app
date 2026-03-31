@@ -23,6 +23,7 @@ export async function criarLoteCompra(
   dataValidade: string | null,
   usuarioId: string
 ): Promise<{ loteCompra: LoteCompra; itensGerados: number }> {
+  const DATA_SENTINELA_SEM_VALIDADE = '2999-12-31';
   const gerarLoteInterno = (): string => {
     const d = new Date();
     const y = d.getFullYear();
@@ -56,8 +57,23 @@ export async function criarLoteCompra(
   if (lote.custo_unitario < 0) {
     throw new Error('Custo unitário não pode ser negativo');
   }
-  if (!dataValidade) {
-    throw new Error('Data de validade é obrigatória para gerar etiquetas');
+
+  const { data: produto, error: produtoError } = await supabase
+    .from('produtos')
+    .select('id, validade_dias, validade_horas, validade_minutos')
+    .eq('id', lote.produto_id)
+    .single();
+  if (produtoError) throw produtoError;
+  if (!produto) {
+    throw new Error('Produto não encontrado');
+  }
+
+  const produtoExigeValidade =
+    (produto.validade_dias || 0) > 0 ||
+    (produto.validade_horas || 0) > 0 ||
+    (produto.validade_minutos || 0) > 0;
+  if (produtoExigeValidade && !dataValidade) {
+    throw new Error('Data de validade é obrigatória para este produto');
   }
 
   // 1. Criar o lote de compra
@@ -82,7 +98,7 @@ export async function criarLoteCompra(
       lote_compra_id: loteCompra.id,
       local_atual_id: lote.local_id,
       estado: 'EM_ESTOQUE',
-      data_validade: dataValidade || undefined,
+      data_validade: dataValidade || null,
       data_producao: new Date().toISOString(),
     });
   }
@@ -95,7 +111,9 @@ export async function criarLoteCompra(
     id: item.id,
     produto_id: item.produto_id,
     data_producao: item.data_producao || new Date().toISOString(),
-    data_validade: item.data_validade || dataValidade,
+    data_validade: produtoExigeValidade
+      ? (item.data_validade || dataValidade || new Date().toISOString().slice(0, 10))
+      : DATA_SENTINELA_SEM_VALIDADE,
     lote: lote.lote_fornecedor || null,
     impressa: false,
     excluida: false,
@@ -116,6 +134,8 @@ export async function criarLoteCompra(
       produto_id: lote.produto_id,
       quantidade: lote.quantidade,
       custo_unitario: lote.custo_unitario,
+      exige_validade: produtoExigeValidade,
+      data_validade: dataValidade,
     },
   });
 

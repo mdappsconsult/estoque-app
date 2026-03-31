@@ -1,5 +1,16 @@
 # Log de Sessões
 
+## 2026-03-31
+
+### Sessão - 2026-03-31 14:51:34 -0300 - Validade opcional para produto sem vencimento
+- `Registrar Compra` passou a exigir data de validade somente quando o produto possui regra de vencimento no cadastro (`validade_dias/horas/minutos > 0`).
+- Para produto sem vencimento, o campo de validade fica opcional e os itens são criados com `data_validade = null`.
+- Service de lote (`criarLoteCompra`) foi blindado com a mesma regra para evitar inconsistência entre front e backend.
+- Tela de etiquetas foi ajustada para exibir "Sem validade" em produtos não perecíveis.
+
+### Validação feita
+- Linter sem erros em `src/app/entrada-compra/page.tsx`, `src/lib/services/lotes-compra.ts` e `src/app/etiquetas/page.tsx`.
+
 ## 2026-03-26
 
 ### Sessão - 2026-03-26 11:38:42 -0300 - Edição rápida de produto no Registrar Compra

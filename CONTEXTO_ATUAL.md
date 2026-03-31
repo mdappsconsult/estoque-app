@@ -33,6 +33,7 @@
 - Ajustes mobile-first aplicados em telas administrativas com formulários/tabelas (quebra responsiva de grids, cabeçalhos e scroll horizontal controlado em tabelas largas).
 - Registrar Compra suporta lançamento por `Unidade`, `Caixa` e `Fardo`, com conversão automática para itens unitários (QR) e custo unitário.
 - Registrar Compra permite edição rápida do produto selecionado sem sair da tela (nome, unidade, fornecedor, estoque mínimo e custo de referência).
+- Validade em compra é opcional para produto sem regra de vencimento no cadastro (validade zerada), e obrigatória apenas para produto perecível.
 - Em recebimento:
   - lista de itens esperados;
   - marcação pendente/escaneado;

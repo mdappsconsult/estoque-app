@@ -61,6 +61,19 @@ export default function EntradaCompraPage() {
     custo_referencia: '',
   });
 
+  const produtoSelecionado = useMemo(
+    () => produtos.find((p) => p.id === form.produto_id) || null,
+    [form.produto_id, produtos]
+  );
+  const produtoExigeValidade = useMemo(() => {
+    if (!produtoSelecionado) return true;
+    return (
+      (produtoSelecionado.validade_dias || 0) > 0 ||
+      (produtoSelecionado.validade_horas || 0) > 0 ||
+      (produtoSelecionado.validade_minutos || 0) > 0
+    );
+  }, [produtoSelecionado]);
+
   const quantidadeCompra = useMemo(
     () => Number.parseInt(form.quantidade, 10) || 0,
     [form.quantidade]
@@ -86,13 +99,21 @@ export default function EntradaCompraPage() {
     const p = produtos.find((pr) => pr.id === produtoId);
     if (!p) return;
 
-    const now = new Date();
-    now.setDate(now.getDate() + p.validade_dias);
+    const exigeValidade =
+      (p.validade_dias || 0) > 0 ||
+      (p.validade_horas || 0) > 0 ||
+      (p.validade_minutos || 0) > 0;
+    let dataValidadeSugerida = '';
+    if (exigeValidade) {
+      const now = new Date();
+      now.setDate(now.getDate() + (p.validade_dias || 0));
+      dataValidadeSugerida = now.toISOString().slice(0, 10);
+    }
 
     setForm((f) => ({
       ...f,
       produto_id: produtoId,
-      data_validade: now.toISOString().slice(0, 10),
+      data_validade: dataValidadeSugerida,
       fornecedor: p.fornecedor || f.fornecedor,
       custo_unitario:
         p.custo_referencia != null ? String(p.custo_referencia) : f.custo_unitario,
@@ -120,6 +141,9 @@ export default function EntradaCompraPage() {
     }
     if (quantidadeUnitaria <= 0) {
       return alert('Quantidade unitária calculada inválida. Revise os campos de embalagem.');
+    }
+    if (produtoExigeValidade && !form.data_validade) {
+      return alert('Data de validade é obrigatória para este produto');
     }
     if (form.sem_nota_fiscal) {
       if (!form.motivo_sem_nota.trim()) {
@@ -168,7 +192,7 @@ export default function EntradaCompraPage() {
         sem_nota_fiscal: false,
         motivo_sem_nota: '',
         local_id: '',
-        data_validade: '',
+          data_validade: '',
         unidade_compra: 'UN',
         itens_por_embalagem: '1',
       });
@@ -481,7 +505,18 @@ export default function EntradaCompraPage() {
           value={form.local_id}
           onChange={(e) => setForm({ ...form, local_id: e.target.value })}
         />
-        <Input label="Data de Validade" type="date" value={form.data_validade} onChange={(e) => setForm({ ...form, data_validade: e.target.value })} required />
+        <Input
+          label={produtoExigeValidade ? 'Data de Validade' : 'Data de Validade (opcional)'}
+          type="date"
+          value={form.data_validade}
+          onChange={(e) => setForm({ ...form, data_validade: e.target.value })}
+          required={produtoExigeValidade}
+        />
+        {!produtoExigeValidade && (
+          <p className="text-xs text-gray-500 -mt-2">
+            Este produto está sem regra de validade no cadastro; o campo pode ficar em branco.
+          </p>
+        )}
 
         <Button
           variant="primary"
@@ -493,7 +528,7 @@ export default function EntradaCompraPage() {
             !form.quantidade ||
             !form.custo_unitario ||
             !form.local_id ||
-            !form.data_validade ||
+            (produtoExigeValidade && !form.data_validade) ||
             !form.fornecedor.trim() ||
             (form.unidade_compra !== 'UN' && fatorUnidades <= 1) ||
             quantidadeUnitaria <= 0 ||

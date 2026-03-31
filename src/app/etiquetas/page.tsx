@@ -24,7 +24,7 @@ interface EtiquetaRow {
   impressa: boolean;
   excluida: boolean;
   created_at: string;
-  produto: { nome: string };
+  produto: { nome: string; validade_dias?: number; validade_horas?: number; validade_minutos?: number };
   item?: { id: string; token_qr: string; token_short: string | null } | null;
 }
 
@@ -39,10 +39,17 @@ interface GrupoEtiquetas {
 }
 
 export default function EtiquetasPage() {
+  const produtoTemValidade = (produto: EtiquetaRow['produto'] | undefined) =>
+    Boolean(
+      ((produto?.validade_dias || 0) > 0) ||
+      ((produto?.validade_horas || 0) > 0) ||
+      ((produto?.validade_minutos || 0) > 0)
+    );
+
   const { usuario } = useAuth();
   const { data: etiquetas, loading } = useRealtimeQuery<EtiquetaRow>({
     table: 'etiquetas',
-    select: '*, produto:produtos(nome)',
+    select: '*, produto:produtos(nome, validade_dias, validade_horas, validade_minutos)',
     orderBy: { column: 'created_at', ascending: false },
     transform: async (rows) => {
       const ids = rows.map((row) => row.id);
@@ -136,7 +143,7 @@ export default function EtiquetasPage() {
           id: e.id,
           produtoNome: e.produto?.nome || 'Produto',
           dataManipulacao: e.data_producao,
-          dataValidade: e.data_validade,
+          dataValidade: produtoTemValidade(e.produto) ? e.data_validade : '',
           lote: e.lote || '-',
           tokenQr: e.item?.token_qr || e.id,
           tokenShort: e.item?.token_short || e.id.slice(0, 8).toUpperCase(),
@@ -244,7 +251,12 @@ export default function EtiquetasPage() {
               {grupo.etiquetas.map((e) => (
                 <div key={e.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-gray-400">Val: {new Date(e.data_validade).toLocaleDateString('pt-BR')}</span>
+                    <span className="text-xs text-gray-400">
+                      Val:{' '}
+                      {produtoTemValidade(e.produto)
+                        ? new Date(e.data_validade).toLocaleDateString('pt-BR')
+                        : 'Sem validade'}
+                    </span>
                     <span className="text-xs text-gray-400 font-mono">Token: {e.item?.token_short || e.id.slice(0, 8).toUpperCase()}</span>
                     <Badge variant={e.impressa ? 'success' : 'warning'} size="sm">{e.impressa ? 'Impressa' : 'Pendente'}</Badge>
                   </div>
