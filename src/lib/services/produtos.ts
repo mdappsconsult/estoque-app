@@ -1,9 +1,23 @@
 import { supabase } from '@/lib/supabase';
-import { Produto, ProdutoInsert, ProdutoUpdate, Grupo, Conservacao } from '@/types/database';
+import {
+  Produto,
+  ProdutoInsert,
+  ProdutoUpdate,
+  Grupo,
+  Familia,
+  Conservacao,
+} from '@/types/database';
+
+function normalizarUm<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : v;
+}
 
 // Interface para produto com relacionamentos
 export interface ProdutoCompleto extends Produto {
+  /** Tipos de embalagem (`grupos`) via `produto_grupos` */
   grupos: Grupo[];
+  familia: Familia | null;
   conservacoes: Conservacao[];
 }
 
@@ -11,14 +25,14 @@ export interface ProdutoCompleto extends Produto {
 export async function getProdutos(): Promise<ProdutoCompleto[]> {
   const { data: produtos, error } = await supabase
     .from('produtos')
-    .select('*')
+    .select('*, familias(*)')
     .order('nome');
 
   if (error) throw error;
 
-  // Buscar grupos e conservações para cada produto
   const produtosCompletos = await Promise.all(
-    (produtos || []).map(async (produto) => {
+    (produtos || []).map(async (row: any) => {
+      const { familias: famRaw, ...produto } = row;
       const [gruposResult, conservacoesResult] = await Promise.all([
         supabase
           .from('produto_grupos')
@@ -32,6 +46,7 @@ export async function getProdutos(): Promise<ProdutoCompleto[]> {
 
       return {
         ...produto,
+        familia: normalizarUm<Familia>(famRaw),
         grupos: (gruposResult.data || []).map((pg: any) => pg.grupos),
         conservacoes: conservacoesResult.data || [],
       };
@@ -43,14 +58,16 @@ export async function getProdutos(): Promise<ProdutoCompleto[]> {
 
 // Buscar produto por ID
 export async function getProdutoById(id: string): Promise<ProdutoCompleto | null> {
-  const { data: produto, error } = await supabase
+  const { data: row, error } = await supabase
     .from('produtos')
-    .select('*')
+    .select('*, familias(*)')
     .eq('id', id)
     .single();
 
   if (error) throw error;
-  if (!produto) return null;
+  if (!row) return null;
+
+  const { familias: famRaw, ...produto } = row as any;
 
   const [gruposResult, conservacoesResult] = await Promise.all([
     supabase
@@ -65,6 +82,7 @@ export async function getProdutoById(id: string): Promise<ProdutoCompleto | null
 
   return {
     ...produto,
+    familia: normalizarUm<Familia>(famRaw),
     grupos: (gruposResult.data || []).map((pg: any) => pg.grupos),
     conservacoes: conservacoesResult.data || [],
   };

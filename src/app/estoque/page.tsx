@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Boxes, Loader2, Search, MapPin, Building2, Factory } from 'lucide-react';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -8,38 +8,33 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 import { Local } from '@/types/database';
-import { filtrarItensPorLojaOperadora, idLocalLojaOperadora } from '@/lib/operador-loja-scope';
-
-interface ItemRow {
-  id: string;
-  token_qr: string;
-  estado: string;
-  local_atual_id: string | null;
-  data_validade: string | null;
-  created_at: string;
-  produto: { id: string; nome: string };
-  local_atual: { id: string; nome: string; tipo: string } | null;
-}
+import { idLocalLojaOperadora } from '@/lib/operador-loja-scope';
+import {
+  getResumoEstoqueAgrupado,
+  getResumoEstoqueMinimo,
+  ResumoEstoqueMinimoRow,
+  ResumoEstoqueRow,
+} from '@/lib/services/estoque-resumo';
 
 export default function EstoquePage() {
   const { usuario } = useAuth();
   const visaoDonoDisponivel =
     usuario?.perfil === 'ADMIN_MASTER' || usuario?.perfil === 'MANAGER';
   const lojaOperadoraId = idLocalLojaOperadora(usuario);
-  const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
-  const { data: itens, loading } = useRealtimeQuery<ItemRow>({
-    table: 'itens',
-    select: '*, produto:produtos(id, nome), local_atual:locais!local_atual_id(id, nome, tipo)',
-    orderBy: { column: 'created_at', ascending: false },
-  });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchDebounced, setSearchDebounced] = useState('');
   const [filtroLocal, setFiltroLocal] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('EM_ESTOQUE');
-  const [modoVisualizacao, setModoVisualizacao] = useState<'operacional' | 'dono'>('operacional');
+  const [modoVisualizacao, setModoVisualizacao] = useState<'operacional' | 'dono' | 'minimo'>('operacional');
+  const [loading, setLoading] = useState(true);
+  const [resumoLinhas, setResumoLinhas] = useState<ResumoEstoqueRow[]>([]);
+  const [resumoMinimoLinhas, setResumoMinimoLinhas] = useState<ResumoEstoqueMinimoRow[]>([]);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const itensEscopo = filtrarItensPorLojaOperadora(itens, usuario);
+  const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
 
   useEffect(() => {
     if (!visaoDonoDisponivel && modoVisualizacao === 'dono') {
@@ -47,45 +42,100 @@ export default function EstoquePage() {
     }
   }, [visaoDonoDisponivel, modoVisualizacao]);
 
-  const filtrados = itensEscopo.filter((i) => {
-    if (filtroEstado && i.estado !== filtroEstado) return false;
-    if (!lojaOperadoraId && filtroLocal && i.local_atual_id !== filtroLocal) return false;
-    if (
-      searchTerm &&
-      !i.produto?.nome?.toLowerCase().includes(searchTerm.toLowerCase()) &&
-      !i.token_qr.toLowerCase().includes(searchTerm.toLowerCase())
-    ) {
-      return false;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebounced(searchTerm);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const localIdEfetivo = lojaOperadoraId || filtroLocal || null;
+
+  const carregarResumoEstoque = useCallback(async () => {
+    setLoading(true);
+    try {
+      const linhas = await getResumoEstoqueAgrupado({
+        estado: filtroEstado || null,
+        localId: localIdEfetivo,
+        busca: searchDebounced || null,
+      });
+      setResumoLinhas(linhas);
+    } catch (err) {
+      console.error('Erro ao carregar resumo de estoque:', err);
+      setResumoLinhas([]);
+    } finally {
+      setLoading(false);
     }
-    return true;
-  });
+  }, [filtroEstado, localIdEfetivo, searchDebounced]);
+
+  const carregarResumoMinimo = useCallback(async () => {
+    setLoading(true);
+    try {
+      const linhas = await getResumoEstoqueMinimo({
+        localId: localIdEfetivo,
+        busca: searchDebounced || null,
+        apenasAbaixo: true,
+      });
+      setResumoMinimoLinhas(linhas);
+    } catch (err) {
+      console.error('Erro ao carregar resumo de estoque mínimo:', err);
+      setResumoMinimoLinhas([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [localIdEfetivo, searchDebounced]);
+
+  useEffect(() => {
+    if (modoVisualizacao === 'minimo') {
+      void carregarResumoMinimo();
+      return;
+    }
+    void carregarResumoEstoque();
+  }, [carregarResumoEstoque, carregarResumoMinimo, modoVisualizacao]);
+
+  useEffect(() => {
+    const agendarAtualizacao = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        if (modoVisualizacao === 'minimo') {
+          void carregarResumoMinimo();
+          return;
+        }
+        void carregarResumoEstoque();
+      }, 300);
+    };
+
+    const channel = supabase
+      .channel(`estoque-resumo-realtime-${lojaOperadoraId || 'all'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'itens' }, agendarAtualizacao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, agendarAtualizacao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'locais' }, agendarAtualizacao)
+      .subscribe();
+
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [carregarResumoEstoque, carregarResumoMinimo, lojaOperadoraId, modoVisualizacao]);
 
   const agrupado = useMemo(() => {
     const porProdutoLocal: Record<
       string,
       { nome: string; local: string; count: number; proximaValidade: string | null }
     > = {};
-    filtrados.forEach((i) => {
-      const key = `${i.produto?.id}-${i.local_atual_id}`;
+    resumoLinhas.forEach((i) => {
+      const key = `${i.produto_id}-${i.local_id || 'SEM_LOCAL'}`;
       if (!porProdutoLocal[key]) {
         porProdutoLocal[key] = {
-          nome: i.produto?.nome || '?',
-          local: i.local_atual?.nome || 'Sem local',
-          count: 0,
-          proximaValidade: null,
+          nome: i.produto_nome || '?',
+          local: i.local_nome || 'Sem local',
+          count: Number(i.quantidade || 0),
+          proximaValidade: i.proxima_validade || null,
         };
-      }
-      porProdutoLocal[key].count++;
-      if (
-        i.data_validade &&
-        (!porProdutoLocal[key].proximaValidade ||
-          i.data_validade < porProdutoLocal[key].proximaValidade)
-      ) {
-        porProdutoLocal[key].proximaValidade = i.data_validade;
       }
     });
     return porProdutoLocal;
-  }, [filtrados]);
+  }, [resumoLinhas]);
 
   const resumoPorLocal = useMemo(() => {
     const porLocal = new Map<
@@ -100,37 +150,38 @@ export default function EstoquePage() {
       }
     >();
 
-    filtrados.forEach((item) => {
-      const localKey = item.local_atual_id || 'SEM_LOCAL';
+    resumoLinhas.forEach((item) => {
+      const localKey = item.local_id || 'SEM_LOCAL';
+      const quantidade = Number(item.quantidade || 0);
       const existente = porLocal.get(localKey) || {
-        localId: item.local_atual_id,
-        localNome: item.local_atual?.nome || 'Sem local',
-        localTipo: item.local_atual?.tipo || 'N/A',
+        localId: item.local_id,
+        localNome: item.local_nome || 'Sem local',
+        localTipo: item.local_tipo || 'N/A',
         totalItens: 0,
         proximaValidade: null,
         produtos: new Map<string, { produtoNome: string; count: number; proximaValidade: string | null }>(),
       };
 
-      existente.totalItens++;
+      existente.totalItens += quantidade;
       if (
-        item.data_validade &&
-        (!existente.proximaValidade || item.data_validade < existente.proximaValidade)
+        item.proxima_validade &&
+        (!existente.proximaValidade || item.proxima_validade < existente.proximaValidade)
       ) {
-        existente.proximaValidade = item.data_validade;
+        existente.proximaValidade = item.proxima_validade;
       }
 
-      const produtoKey = item.produto?.id || 'SEM_PRODUTO';
+      const produtoKey = item.produto_id || 'SEM_PRODUTO';
       const produtoExistente = existente.produtos.get(produtoKey) || {
-        produtoNome: item.produto?.nome || 'Produto não identificado',
+        produtoNome: item.produto_nome || 'Produto não identificado',
         count: 0,
         proximaValidade: null,
       };
-      produtoExistente.count++;
+      produtoExistente.count += quantidade;
       if (
-        item.data_validade &&
-        (!produtoExistente.proximaValidade || item.data_validade < produtoExistente.proximaValidade)
+        item.proxima_validade &&
+        (!produtoExistente.proximaValidade || item.proxima_validade < produtoExistente.proximaValidade)
       ) {
-        produtoExistente.proximaValidade = item.data_validade;
+        produtoExistente.proximaValidade = item.proxima_validade;
       }
       existente.produtos.set(produtoKey, produtoExistente);
       porLocal.set(localKey, existente);
@@ -145,7 +196,13 @@ export default function EstoquePage() {
         if (b.totalItens !== a.totalItens) return b.totalItens - a.totalItens;
         return a.localNome.localeCompare(b.localNome, 'pt-BR');
       });
-  }, [filtrados]);
+  }, [resumoLinhas]);
+
+  const totalItens = useMemo(
+    () => resumoLinhas.reduce((acc, item) => acc + Number(item.quantidade || 0), 0),
+    [resumoLinhas]
+  );
+  const totalAlertasMinimos = resumoMinimoLinhas.length;
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
 
@@ -153,7 +210,9 @@ export default function EstoquePage() {
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Estoque</h1>
-        <Badge variant="info">{filtrados.length} itens</Badge>
+        <Badge variant={modoVisualizacao === 'minimo' ? 'warning' : 'info'}>
+          {modoVisualizacao === 'minimo' ? `${totalAlertasMinimos} alertas` : `${totalItens} itens`}
+        </Badge>
       </div>
 
       {visaoDonoDisponivel && (
@@ -171,6 +230,13 @@ export default function EstoquePage() {
             onClick={() => setModoVisualizacao('dono')}
           >
             Visão do dono
+          </Button>
+          <Button
+            size="sm"
+            variant={modoVisualizacao === 'minimo' ? 'primary' : 'outline'}
+            onClick={() => setModoVisualizacao('minimo')}
+          >
+            Estoque mínimo
           </Button>
         </div>
       )}
@@ -197,6 +263,11 @@ export default function EstoquePage() {
             Consolidado por unidade (lojas + indústria), com total de itens e distribuição por produto em cada local.
           </p>
         )}
+        {modoVisualizacao === 'minimo' && (
+          <p className="text-xs text-amber-700 mb-3">
+            Lista de reposição: produtos com quantidade abaixo do estoque mínimo cadastrado.
+          </p>
+        )}
         <div className="flex gap-3 flex-wrap">
           <div className="w-full sm:flex-1 min-w-0 relative">
             <Input placeholder="Buscar produto ou QR" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
@@ -209,21 +280,71 @@ export default function EstoquePage() {
               onChange={(e) => setFiltroLocal(e.target.value)}
             />
           )}
-          <Select
-            options={[
-              { value: '', label: 'Todos os estados' },
-              { value: 'EM_ESTOQUE', label: 'Em Estoque' },
-              { value: 'EM_TRANSFERENCIA', label: 'Em Transferência' },
-              { value: 'BAIXADO', label: 'Baixado' },
-              { value: 'DESCARTADO', label: 'Descartado' },
-            ]}
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value)}
-          />
+          {modoVisualizacao !== 'minimo' && (
+            <Select
+              options={[
+                { value: '', label: 'Todos os estados' },
+                { value: 'EM_ESTOQUE', label: 'Em Estoque' },
+                { value: 'EM_TRANSFERENCIA', label: 'Em Transferência' },
+                { value: 'BAIXADO', label: 'Baixado' },
+                { value: 'DESCARTADO', label: 'Descartado' },
+              ]}
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+            />
+          )}
         </div>
       </div>
 
-      {modoVisualizacao === 'dono' && !lojaOperadoraId ? (
+      {modoVisualizacao === 'minimo' ? (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          <table className="w-full min-w-[780px]">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Produto</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Local</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Atual</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Mínimo</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Faltante</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumoMinimoLinhas.map((item) => (
+                <tr key={`${item.produto_id}-${item.local_id}`} className="border-b border-gray-100">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-900">{item.produto_nome}</p>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {item.local_nome || 'Sem local'}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-700">{item.quantidade_atual}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{item.estoque_minimo}</td>
+                  <td className="px-4 py-3 text-right font-bold text-amber-700">{item.faltante}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${
+                        item.faltante >= Math.max(3, item.estoque_minimo)
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}
+                    >
+                      {item.faltante >= Math.max(3, item.estoque_minimo) ? 'Crítico' : 'Atenção'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {resumoMinimoLinhas.length === 0 && (
+            <div className="text-center py-12 text-gray-400">
+              <Boxes className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Nenhum produto abaixo do estoque mínimo</p>
+            </div>
+          )}
+        </div>
+      ) : modoVisualizacao === 'dono' && !lojaOperadoraId ? (
         <div className="space-y-3">
           {resumoPorLocal.map((local) => (
             <div key={local.localId || local.localNome} className="bg-white rounded-xl border border-gray-200 p-4">

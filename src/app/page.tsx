@@ -36,6 +36,7 @@ const features: HomeFeature[] = [
   { title: 'Transf. Loja → Loja', description: 'Emergencial com aceite.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/transferencia-loja' },
   { title: 'Aceites Pendentes', description: 'Aceitar/recusar.', icon: ClipboardCheck, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/aceites-pendentes' },
   { title: 'Baixa Diária', description: 'Baixa por QR.', icon: Archive, iconBg: 'bg-orange-100', iconColor: 'text-orange-600', href: '/baixa-diaria' },
+  { title: 'Contagem da Loja', description: 'Contagem para reposição.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem-loja' },
   { title: 'Perdas / Descarte', description: 'Descarte com motivo.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/perdas' },
   { title: 'Contagem', description: 'Inventário por produto.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem' },
   { title: 'Estoque', description: 'Leitura atual.', icon: Boxes, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/estoque' },
@@ -45,6 +46,8 @@ const features: HomeFeature[] = [
   { title: 'Dashboard Admin', description: 'Visão gerencial.', icon: BarChart3, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/dashboard-admin' },
   { title: 'Relatórios', description: 'Exportar dados.', icon: FileText, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/relatorios' },
   { title: 'Produtos', description: 'Cadastro.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/produtos' },
+  { title: 'Tipos de Embalagem', description: 'Caixa, balde, pote etc.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/embalagens' },
+  { title: 'Reposição de estoque por loja', description: 'Mínimos por loja (só produtos de escopo loja).', icon: Store, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/cadastros/reposicao-loja' },
   { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
   { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
@@ -76,7 +79,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/permissoes'],
     },
   ],
   MANAGER: [
@@ -99,7 +102,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Cadastros',
-      items: ['/cadastros/produtos', '/cadastros/locais', '/configuracoes/perfil'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/configuracoes/perfil'],
     },
   ],
   OPERATOR_WAREHOUSE: [
@@ -129,7 +132,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_STORE: [
     {
       title: 'Operação da Loja',
-      items: ['/recebimento', '/transferencia-loja', '/aceites-pendentes', '/qrcode'],
+      items: ['/recebimento', '/transferencia-loja', '/aceites-pendentes', '/contagem-loja', '/qrcode'],
     },
     {
       title: 'Conferência',

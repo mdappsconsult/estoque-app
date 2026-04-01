@@ -13,6 +13,14 @@ import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
 
 type UnidadeCompra = 'UN' | 'CAIXA' | 'FARDO';
+interface FamiliaOpt {
+  id: string;
+  nome: string;
+}
+interface GrupoEmbalagem {
+  id: string;
+  nome: string;
+}
 
 export default function EntradaCompraPage() {
   const { usuario } = useAuth();
@@ -26,6 +34,16 @@ export default function EntradaCompraPage() {
   );
   const { data: locais } = useRealtimeQuery<Local>({
     table: 'locais',
+    orderBy: { column: 'nome', ascending: true },
+  });
+  const { data: familiasLista } = useRealtimeQuery<FamiliaOpt>({
+    table: 'familias',
+    select: 'id, nome',
+    orderBy: { column: 'nome', ascending: true },
+  });
+  const { data: gruposEmbalagem } = useRealtimeQuery<GrupoEmbalagem>({
+    table: 'grupos',
+    select: 'id, nome',
     orderBy: { column: 'nome', ascending: true },
   });
 
@@ -52,6 +70,14 @@ export default function EntradaCompraPage() {
   } | null>(null);
   const [modalProdutoAberto, setModalProdutoAberto] = useState(false);
   const [savingProduto, setSavingProduto] = useState(false);
+  const [modalCategoriaAberto, setModalCategoriaAberto] = useState(false);
+  const [categoriaEditandoId, setCategoriaEditandoId] = useState<string | null>(null);
+  const [categoriaNome, setCategoriaNome] = useState('');
+  const [savingCategoria, setSavingCategoria] = useState(false);
+  const [modalEmbalagemAberto, setModalEmbalagemAberto] = useState(false);
+  const [embalagemEditandoId, setEmbalagemEditandoId] = useState<string | null>(null);
+  const [embalagemNome, setEmbalagemNome] = useState('');
+  const [savingEmbalagem, setSavingEmbalagem] = useState(false);
   const [produtoRapidoEditandoId, setProdutoRapidoEditandoId] = useState<string | null>(null);
   const [novoProduto, setNovoProduto] = useState({
     nome: '',
@@ -59,6 +85,8 @@ export default function EntradaCompraPage() {
     fornecedor: '',
     estoque_minimo: '0',
     custo_referencia: '',
+    familia_id: '',
+    embalagem_grupo_id: '',
   });
 
   const produtoSelecionado = useMemo(
@@ -89,6 +117,159 @@ export default function EntradaCompraPage() {
   );
   const quantidadeUnitaria = quantidadeCompra * fatorUnidades;
   const custoUnitarioCalculado = fatorUnidades > 0 ? custoEmbalagem / fatorUnidades : 0;
+
+  const abrirNovaCategoria = () => {
+    setCategoriaEditandoId(null);
+    setCategoriaNome('');
+    setModalCategoriaAberto(true);
+  };
+
+  const abrirEdicaoCategoriaSelecionada = () => {
+    if (!novoProduto.familia_id) {
+      alert('Selecione uma família para editar');
+      return;
+    }
+    const fam = familiasLista.find((g) => g.id === novoProduto.familia_id);
+    if (!fam) {
+      alert('Família selecionada não encontrada');
+      return;
+    }
+    setCategoriaEditandoId(fam.id);
+    setCategoriaNome(fam.nome);
+    setModalCategoriaAberto(true);
+  };
+
+  const salvarCategoria = async () => {
+    const nomeFinal = categoriaNome.trim();
+    if (!nomeFinal) {
+      alert('Informe o nome da família');
+      return;
+    }
+
+    const duplicada = familiasLista.find(
+      (g) =>
+        g.nome.trim().toLowerCase() === nomeFinal.toLowerCase() &&
+        g.id !== categoriaEditandoId
+    );
+    if (duplicada) {
+      alert('Já existe uma família com esse nome');
+      return;
+    }
+
+    setSavingCategoria(true);
+    try {
+      if (categoriaEditandoId) {
+        const { error } = await supabase
+          .from('familias')
+          .update({ nome: nomeFinal })
+          .eq('id', categoriaEditandoId);
+        if (error) throw error;
+      } else {
+        const { data: criado, error } = await supabase
+          .from('familias')
+          .insert({ nome: nomeFinal, cor: '#6B7280' })
+          .select('id')
+          .single();
+        if (error) throw error;
+        setNovoProduto((p) => ({ ...p, familia_id: criado.id }));
+      }
+
+      setModalCategoriaAberto(false);
+      setCategoriaEditandoId(null);
+      setCategoriaNome('');
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao salvar família');
+    } finally {
+      setSavingCategoria(false);
+    }
+  };
+
+  const abrirNovaEmbalagem = () => {
+    setEmbalagemEditandoId(null);
+    setEmbalagemNome('');
+    setModalEmbalagemAberto(true);
+  };
+
+  const abrirEdicaoEmbalagemSelecionada = () => {
+    if (!novoProduto.embalagem_grupo_id) {
+      alert('Selecione um tipo de embalagem para editar');
+      return;
+    }
+    const embalagem = gruposEmbalagem.find((item) => item.id === novoProduto.embalagem_grupo_id);
+    if (!embalagem) {
+      alert('Tipo de embalagem selecionado não encontrado');
+      return;
+    }
+    setEmbalagemEditandoId(embalagem.id);
+    setEmbalagemNome(embalagem.nome);
+    setModalEmbalagemAberto(true);
+  };
+
+  const salvarEmbalagem = async () => {
+    const nomeFinal = embalagemNome.trim();
+    if (!nomeFinal) {
+      alert('Informe o nome do tipo de embalagem');
+      return;
+    }
+    const duplicada = gruposEmbalagem.find(
+      (item) =>
+        item.nome.trim().toLowerCase() === nomeFinal.toLowerCase() &&
+        item.id !== embalagemEditandoId
+    );
+    if (duplicada) {
+      alert('Já existe um tipo de embalagem com esse nome');
+      return;
+    }
+
+    setSavingEmbalagem(true);
+    try {
+      if (embalagemEditandoId) {
+        const { error } = await supabase
+          .from('grupos')
+          .update({ nome: nomeFinal })
+          .eq('id', embalagemEditandoId);
+        if (error) throw error;
+      } else {
+        const { data: criado, error } = await supabase
+          .from('grupos')
+          .insert({ nome: nomeFinal, cor: '#64748b' })
+          .select('id')
+          .single();
+        if (error) throw error;
+        setNovoProduto((p) => ({ ...p, embalagem_grupo_id: criado.id }));
+      }
+
+      setModalEmbalagemAberto(false);
+      setEmbalagemEditandoId(null);
+      setEmbalagemNome('');
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao salvar tipo de embalagem');
+    } finally {
+      setSavingEmbalagem(false);
+    }
+  };
+
+  const carregarFamiliaEGrupoEmbalagem = async (
+    produtoId: string
+  ): Promise<{ familia_id: string; embalagem_grupo_id: string }> => {
+    const { data: prodRow, error: pe } = await supabase
+      .from('produtos')
+      .select('familia_id')
+      .eq('id', produtoId)
+      .maybeSingle();
+    if (pe) return { familia_id: '', embalagem_grupo_id: '' };
+    const { data: pgRow, error: ge } = await supabase
+      .from('produto_grupos')
+      .select('grupo_id')
+      .eq('produto_id', produtoId)
+      .limit(1)
+      .maybeSingle();
+    if (ge) return { familia_id: prodRow?.familia_id || '', embalagem_grupo_id: '' };
+    return {
+      familia_id: prodRow?.familia_id || '',
+      embalagem_grupo_id: pgRow?.grupo_id || '',
+    };
+  };
 
   const handleProdutoChange = async (produtoId: string) => {
     if (!produtoId) {
@@ -223,6 +404,7 @@ export default function EntradaCompraPage() {
             nome,
             unidade_medida: novoProduto.unidade_medida,
             fornecedor: novoProduto.fornecedor.trim() || null,
+            familia_id: novoProduto.familia_id || null,
             estoque_minimo: Math.max(0, Number.parseInt(novoProduto.estoque_minimo, 10) || 0),
             custo_referencia: Number.isFinite(custoParsed as number) ? custoParsed : null,
             updated_at: new Date().toISOString(),
@@ -231,6 +413,14 @@ export default function EntradaCompraPage() {
           .select()
           .single();
         if (erroAtualizacao) throw erroAtualizacao;
+
+        await supabase.from('produto_grupos').delete().eq('produto_id', produtoRapidoEditandoId);
+        if (novoProduto.embalagem_grupo_id) {
+          await supabase.from('produto_grupos').insert({
+            produto_id: produtoRapidoEditandoId,
+            grupo_id: novoProduto.embalagem_grupo_id,
+          });
+        }
 
         await refetch();
         setModalProdutoAberto(false);
@@ -241,6 +431,8 @@ export default function EntradaCompraPage() {
           fornecedor: '',
           estoque_minimo: '0',
           custo_referencia: '',
+          familia_id: '',
+          embalagem_grupo_id: '',
         });
         await handleProdutoChange(atualizado.id);
       } else {
@@ -251,6 +443,7 @@ export default function EntradaCompraPage() {
             unidade_medida: novoProduto.unidade_medida,
             fornecedor: novoProduto.fornecedor.trim() || null,
             origem: 'COMPRA',
+            familia_id: novoProduto.familia_id || null,
             estoque_minimo: Math.max(0, Number.parseInt(novoProduto.estoque_minimo, 10) || 0),
             custo_referencia: Number.isFinite(custoParsed as number) ? custoParsed : null,
             validade_dias: 0,
@@ -265,6 +458,13 @@ export default function EntradaCompraPage() {
 
         await supabase.from('estoque').insert({ produto_id: criado.id, quantidade: 0 });
 
+        if (novoProduto.embalagem_grupo_id) {
+          await supabase.from('produto_grupos').insert({
+            produto_id: criado.id,
+            grupo_id: novoProduto.embalagem_grupo_id,
+          });
+        }
+
         await refetch();
         setModalProdutoAberto(false);
         setProdutoRapidoEditandoId(null);
@@ -274,6 +474,8 @@ export default function EntradaCompraPage() {
           fornecedor: '',
           estoque_minimo: '0',
           custo_referencia: '',
+          familia_id: '',
+          embalagem_grupo_id: '',
         });
         await handleProdutoChange(criado.id);
       }
@@ -324,23 +526,29 @@ export default function EntradaCompraPage() {
             <Button
               variant="outline"
               onClick={() => {
-                const produtoSelecionado = produtos.find((p) => p.id === form.produto_id);
-                if (!produtoSelecionado) {
-                  alert('Selecione um produto válido para editar');
-                  return;
-                }
-                setProdutoRapidoEditandoId(produtoSelecionado.id);
-                setNovoProduto({
-                  nome: produtoSelecionado.nome,
-                  unidade_medida: produtoSelecionado.unidade_medida || 'un',
-                  fornecedor: produtoSelecionado.fornecedor || '',
-                  estoque_minimo: String(produtoSelecionado.estoque_minimo ?? 0),
-                  custo_referencia:
-                    produtoSelecionado.custo_referencia != null
-                      ? String(produtoSelecionado.custo_referencia)
-                      : '',
-                });
-                setModalProdutoAberto(true);
+                void (async () => {
+                  const produtoSelecionado = produtos.find((p) => p.id === form.produto_id);
+                  if (!produtoSelecionado) {
+                    alert('Selecione um produto válido para editar');
+                    return;
+                  }
+                  const { familia_id: fid, embalagem_grupo_id: egid } =
+                    await carregarFamiliaEGrupoEmbalagem(produtoSelecionado.id);
+                  setProdutoRapidoEditandoId(produtoSelecionado.id);
+                  setNovoProduto({
+                    nome: produtoSelecionado.nome,
+                    unidade_medida: produtoSelecionado.unidade_medida || 'un',
+                    fornecedor: produtoSelecionado.fornecedor || '',
+                    estoque_minimo: String(produtoSelecionado.estoque_minimo ?? 0),
+                    custo_referencia:
+                      produtoSelecionado.custo_referencia != null
+                        ? String(produtoSelecionado.custo_referencia)
+                        : '',
+                    familia_id: fid,
+                    embalagem_grupo_id: egid,
+                  });
+                  setModalProdutoAberto(true);
+                })();
               }}
             >
               Editar produto selecionado
@@ -356,6 +564,8 @@ export default function EntradaCompraPage() {
                 fornecedor: '',
                 estoque_minimo: '0',
                 custo_referencia: '',
+                familia_id: '',
+                embalagem_grupo_id: '',
               });
               setModalProdutoAberto(true);
             }}
@@ -580,6 +790,53 @@ export default function EntradaCompraPage() {
             value={novoProduto.fornecedor}
             onChange={(e) => setNovoProduto((p) => ({ ...p, fornecedor: e.target.value }))}
           />
+          <Select
+            label="Família do produto (categoria)"
+            options={[
+              { value: '', label: 'Selecione...' },
+              ...familiasLista.map((g) => ({ value: g.id, label: g.nome })),
+            ]}
+            value={novoProduto.familia_id}
+            onChange={(e) => setNovoProduto((p) => ({ ...p, familia_id: e.target.value }))}
+          />
+          <div className="flex flex-wrap gap-2 -mt-2">
+            <Button variant="outline" size="sm" onClick={abrirNovaCategoria}>
+              + Nova família
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={abrirEdicaoCategoriaSelecionada}
+              disabled={!novoProduto.familia_id}
+            >
+              Editar família selecionada
+            </Button>
+          </div>
+          <Select
+            label="Tipo de embalagem"
+            options={[
+              { value: '', label: 'Selecione (opcional)...' },
+              ...gruposEmbalagem.map((item) => ({ value: item.id, label: item.nome })),
+            ]}
+            value={novoProduto.embalagem_grupo_id}
+            onChange={(e) => setNovoProduto((p) => ({ ...p, embalagem_grupo_id: e.target.value }))}
+          />
+          <div className="flex flex-wrap gap-2 -mt-2">
+            <Button variant="outline" size="sm" onClick={abrirNovaEmbalagem}>
+              + Novo tipo de embalagem
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={abrirEdicaoEmbalagemSelecionada}
+              disabled={!novoProduto.embalagem_grupo_id}
+            >
+              Editar tipo selecionado
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 -mt-2">
+            Família em <strong>Cadastros → Categorias</strong>. Caixa, balde, pote em <strong>Cadastros → Tipos de embalagem</strong>.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Estoque mínimo"
@@ -608,6 +865,56 @@ export default function EntradaCompraPage() {
           >
             {savingProduto ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
             {produtoRapidoEditandoId ? 'Salvar e continuar compra' : 'Criar e continuar compra'}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={modalCategoriaAberto}
+        onClose={() => setModalCategoriaAberto(false)}
+        title={categoriaEditandoId ? 'Editar família' : 'Nova família'}
+        size="sm"
+      >
+        <div className="p-6 space-y-4">
+          <Input
+            label="Nome da família"
+            value={categoriaNome}
+            onChange={(e) => setCategoriaNome(e.target.value)}
+            required
+          />
+          <Button
+            variant="primary"
+            className="w-full"
+            onClick={() => void salvarCategoria()}
+            disabled={savingCategoria || !categoriaNome.trim()}
+          >
+            {savingCategoria ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            {categoriaEditandoId ? 'Salvar família' : 'Criar família'}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={modalEmbalagemAberto}
+        onClose={() => setModalEmbalagemAberto(false)}
+        title={embalagemEditandoId ? 'Editar tipo de embalagem' : 'Novo tipo de embalagem'}
+        size="sm"
+      >
+        <div className="p-6 space-y-4">
+          <Input
+            label="Nome do tipo de embalagem"
+            value={embalagemNome}
+            onChange={(e) => setEmbalagemNome(e.target.value)}
+            required
+          />
+          <Button
+            variant="primary"
+            className="w-full"
+            onClick={() => void salvarEmbalagem()}
+            disabled={savingEmbalagem || !embalagemNome.trim()}
+          >
+            {savingEmbalagem ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            {embalagemEditandoId ? 'Salvar tipo de embalagem' : 'Criar tipo de embalagem'}
           </Button>
         </div>
       </Modal>

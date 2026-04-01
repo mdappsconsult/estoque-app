@@ -3,6 +3,7 @@ import { registrarAuditoria } from './auditoria';
 import { gerarTokenQR, gerarTokenShort } from './itens';
 import { gerarLote } from './etiquetas';
 import { EtiquetaInsert, Item } from '@/types/database';
+import { recalcularEstoqueProduto } from './estoque-sync';
 
 interface RegistrarProducaoInput {
   produtoId: string;
@@ -80,6 +81,9 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     const { error: etiquetasError } = await supabase.from('etiquetas').insert(etiquetas);
     if (etiquetasError) throw etiquetasError;
   }
+
+  // 2.1) Mantém o agregado de estoque alinhado com os itens unitários gerados.
+  await recalcularEstoqueProduto(input.produtoId);
 
   // 3) Registrar evento de produção.
   const { error: producaoError } = await supabase.from('producoes').insert({

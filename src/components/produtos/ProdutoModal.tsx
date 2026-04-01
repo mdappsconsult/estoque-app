@@ -5,11 +5,16 @@ import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
-import Badge from '@/components/ui/Badge';
 import { Tag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface Grupo {
+  id: string;
+  nome: string;
+  cor: string;
+}
+
+interface FamiliaRow {
   id: string;
   nome: string;
   cor: string;
@@ -31,6 +36,10 @@ interface ProdutoEditando {
   validade_minutos: number;
   exibir_horario_etiqueta: boolean;
   contagem_do_dia: boolean;
+  /** `industria`: não entra em reposição/contagem de loja. */
+  escopo_reposicao?: 'loja' | 'industria';
+  familia_id: string | null;
+  /** Tipos de embalagem (`grupos`) */
   grupos: { id: string; nome: string; cor: string }[];
   conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
 }
@@ -60,13 +69,15 @@ const tiposConservacao = [
 type TipoCadastro = 'INDUSTRIA' | 'FORNECEDOR';
 
 export default function ProdutoModal({ isOpen, onClose, produto, onSave }: ProdutoModalProps) {
-  const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [familias, setFamilias] = useState<FamiliaRow[]>([]);
+  const [gruposEmbalagem, setGruposEmbalagem] = useState<Grupo[]>([]);
   const [tipoCadastro, setTipoCadastro] = useState<TipoCadastro>('FORNECEDOR');
   const [formData, setFormData] = useState({
     nome: '',
     medida: '',
     unidadeMedida: 'l',
-    grupoIds: [] as string[],
+    familiaId: '',
+    embalagemGrupoId: '',
     marca: '',
     fornecedorPreferencial: '',
     sif: '',
@@ -82,32 +93,37 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
     contagemDoDia: false,
   });
 
-  // Carregar grupos do Supabase
   useEffect(() => {
-    const carregarGrupos = async () => {
-      const { data, error } = await supabase
-        .from('grupos')
-        .select('*')
-        .order('nome');
-      
-      if (!error && data) {
-        setGrupos(data);
-      }
+    const carregar = async () => {
+      const [{ data: fData, error: fErr }, { data: gData, error: gErr }] = await Promise.all([
+        supabase.from('familias').select('id, nome, cor').order('nome'),
+        supabase.from('grupos').select('*').order('nome'),
+      ]);
+      if (!fErr && fData) setFamilias(fData);
+      if (!gErr && gData) setGruposEmbalagem(gData);
     };
-    
-    if (isOpen) {
-      carregarGrupos();
-    }
+    if (isOpen) void carregar();
   }, [isOpen]);
 
   useEffect(() => {
     if (produto) {
-      setTipoCadastro(produto.origem === 'COMPRA' ? 'FORNECEDOR' : 'INDUSTRIA');
+      const escopo = produto.escopo_reposicao;
+      // Sem escopo no banco: COMPRA/AMBOS = fluxo fornecedor (entra em reposição de loja); só PRODUCAO = indústria.
+      setTipoCadastro(
+        escopo === 'industria'
+          ? 'INDUSTRIA'
+          : escopo === 'loja'
+            ? 'FORNECEDOR'
+            : produto.origem === 'PRODUCAO'
+              ? 'INDUSTRIA'
+              : 'FORNECEDOR'
+      );
       setFormData({
         nome: produto.nome,
         medida: produto.medida || '',
         unidadeMedida: produto.unidade_medida,
-        grupoIds: produto.grupos.map(g => g.id),
+        familiaId: produto.familia_id || '',
+        embalagemGrupoId: produto.grupos[0]?.id || '',
         marca: produto.marca || '',
         fornecedorPreferencial: produto.fornecedor || '',
         sif: produto.sif || '',
@@ -128,7 +144,8 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         nome: '',
         medida: '',
         unidadeMedida: 'l',
-        grupoIds: [],
+        familiaId: '',
+        embalagemGrupoId: '',
         marca: '',
         fornecedorPreferencial: '',
         sif: '',
@@ -146,29 +163,14 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
     }
   }, [produto, isOpen]);
 
-  const handleAddGrupo = (grupoId: string) => {
-    if (grupoId && !formData.grupoIds.includes(grupoId)) {
-      setFormData(prev => ({
-        ...prev,
-        grupoIds: [...prev.grupoIds, grupoId]
-      }));
-    }
-  };
-
-  const handleRemoveGrupo = (grupoId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      grupoIds: prev.grupoIds.filter(id => id !== grupoId)
-    }));
-  };
-
-  const getGrupoNome = (grupoId: string) => {
-    return grupos.find(g => g.id === grupoId)?.nome || '';
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (tipoCadastro === 'INDUSTRIA' && !formData.familiaId.trim()) {
+      alert('Selecione a família do produto (categoria).');
+      return;
+    }
+
     const custoRefParsed = formData.custoReferencia.trim();
     const custoParsed = Number.parseFloat(custoRefParsed.replace(',', '.'));
     const custoReferenciaNum =
@@ -192,7 +194,8 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       nome: formData.nome,
       medida: formData.medida,
       unidadeMedida: formData.unidadeMedida,
-      grupoIds: formData.grupoIds,
+      familiaId: formData.familiaId.trim() || null,
+      embalagemGrupoIds: formData.embalagemGrupoId ? [formData.embalagemGrupoId] : [],
       marca: formData.marca,
       fornecedor: formData.fornecedorPreferencial.trim() || null,
       sif: formData.sif,
@@ -211,6 +214,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       validadeMinutos: validadeMinutosFinal,
       exibirHorarioEtiqueta: formData.exibirHorarioEtiqueta,
       contagemDoDia: formData.contagemDoDia,
+      escopoReposicao: tipoCadastro === 'INDUSTRIA' ? 'industria' : 'loja',
     };
 
     onSave(produtoData);
@@ -295,6 +299,11 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
                 Produto de fornecedor
               </button>
             </div>
+            <p className="text-xs text-gray-500 mt-2">
+              <strong>Produto de fornecedor</strong> entra em <strong>reposição de estoque por loja</strong> e na{' '}
+              <strong>contagem da loja</strong>. <strong>Produto da indústria</strong> fica com a outra equipe e não
+              aparece nessas telas.
+            </p>
           </div>
 
           {/* Estoque / compra */}
@@ -332,6 +341,27 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
                 </div>
               )}
             </div>
+            <Select
+              label="Família do produto (categoria)"
+              options={[
+                { value: '', label: 'Selecione (opcional)...' },
+                ...familias.map((f) => ({ value: f.id, label: f.nome })),
+              ]}
+              value={formData.familiaId}
+              onChange={(e) => setFormData((prev) => ({ ...prev, familiaId: e.target.value }))}
+            />
+            <p className="text-xs text-gray-500 -mt-2">
+              Família em <strong>Cadastros → Categorias</strong>. Caixa, balde, pote etc. em <strong>Cadastros → Tipos de embalagem</strong>.
+            </p>
+            <Select
+              label="Tipo de embalagem"
+              options={[
+                { value: '', label: 'Selecione (opcional)...' },
+                ...gruposEmbalagem.map((g) => ({ value: g.id, label: g.nome })),
+              ]}
+              value={formData.embalagemGrupoId}
+              onChange={(e) => setFormData((prev) => ({ ...prev, embalagemGrupoId: e.target.value }))}
+            />
             {tipoCadastro === 'FORNECEDOR' ? (
               <>
                 <Input
@@ -359,47 +389,11 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
             )}
           </div>
 
-          {/* Organização de grupos */}
           {tipoCadastro === 'INDUSTRIA' && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-4">
-                Organização de grupos
+                Identificação (indústria)
               </h3>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Grupos <span className="text-red-500">*</span>
-                </label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {formData.grupoIds.map((grupoId) => (
-                    <Badge 
-                      key={grupoId} 
-                      variant="error" 
-                      removable 
-                      onRemove={() => handleRemoveGrupo(grupoId)}
-                    >
-                      {getGrupoNome(grupoId)}
-                    </Badge>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Select
-                    options={[
-                      { value: '', label: 'Selecione um grupo' },
-                      ...grupos
-                        .filter(g => !formData.grupoIds.includes(g.id))
-                        .map(g => ({ value: g.id, label: g.nome }))
-                    ]}
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        handleAddGrupo(e.target.value);
-                      }
-                    }}
-                    className="flex-1"
-                  />
-                </div>
-              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <Input

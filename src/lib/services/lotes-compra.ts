@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { LoteCompra, LoteCompraInsert, Item, ItemInsert, EtiquetaInsert } from '@/types/database';
 import { gerarTokenQR, gerarTokenShort } from './itens';
 import { registrarAuditoria } from './auditoria';
+import { recalcularEstoqueProduto } from './estoque-sync';
 
 export interface LoteCompraCompleto extends LoteCompra {
   produto?: { id: string; nome: string; validade_dias: number; validade_horas: number; validade_minutos: number };
@@ -123,6 +124,9 @@ export async function criarLoteCompra(
     const { error: etiquetasError } = await supabase.from('etiquetas').insert(etiquetas);
     if (etiquetasError) throw etiquetasError;
   }
+
+  // 3.1) Recalcular estoque agregado do produto para manter consistência da tela/relatórios.
+  await recalcularEstoqueProduto(lote.produto_id);
 
   // 4. Auditoria
   await registrarAuditoria({

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { Item, ItemInsert, ItemUpdate } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
+import { recalcularEstoqueProduto } from './estoque-sync';
 
 export interface ItemCompleto extends Item {
   produto?: { id: string; nome: string; medida: string | null; unidade_medida: string };
@@ -152,6 +153,8 @@ export async function baixarItem(itemId: string, localId: string, usuarioId: str
   // Atualizar estado
   await supabase.from('itens').update({ estado: 'BAIXADO' }).eq('id', itemId);
 
+  await recalcularEstoqueProduto(item.produto_id);
+
   // Registrar baixa
   await supabase.from('baixas').insert({ item_id: itemId, local_id: localId, usuario_id: usuarioId });
 
@@ -172,6 +175,7 @@ export async function descartarItem(itemId: string, motivo: string, localId: str
   if (item.local_atual_id !== localId) throw new Error('Item não está neste local');
 
   await supabase.from('itens').update({ estado: 'DESCARTADO' }).eq('id', itemId);
+  await recalcularEstoqueProduto(item.produto_id);
   await supabase.from('perdas').insert({ item_id: itemId, motivo, local_id: localId, usuario_id: usuarioId });
 
   await registrarAuditoria({

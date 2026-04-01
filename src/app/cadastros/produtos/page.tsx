@@ -10,7 +10,14 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
 import { Produto } from '@/types/database';
 
+interface FamiliaRow {
+  id: string;
+  nome: string;
+  cor: string;
+}
+
 interface ProdutoComGrupos extends Produto {
+  familia: FamiliaRow | null;
   grupos: { id: string; nome: string; cor: string }[];
   conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
 }
@@ -27,6 +34,12 @@ export default function ProdutosPage() {
     select: '*',
     orderBy: { column: 'nome', ascending: true },
     transform: async (prods) => {
+      const famIds = [...new Set(prods.map((p: any) => p.familia_id).filter(Boolean))] as string[];
+      let famMap = new Map<string, FamiliaRow>();
+      if (famIds.length > 0) {
+        const { data: fams } = await supabase.from('familias').select('id, nome, cor').in('id', famIds);
+        famMap = new Map((fams || []).map((f) => [f.id, f]));
+      }
       const result = await Promise.all(
         prods.map(async (produto: any) => {
           const { data: gruposData } = await supabase
@@ -42,6 +55,7 @@ export default function ProdutosPage() {
             origem: (produto.origem as Produto['origem']) ?? 'AMBOS',
             estoque_minimo: produto.estoque_minimo ?? 0,
             custo_referencia: produto.custo_referencia ?? null,
+            familia: produto.familia_id ? famMap.get(produto.familia_id) ?? null : null,
             grupos: (gruposData || []).map((pg: any) => pg.grupos),
             conservacoes: conservacoesData || [],
           } as ProdutoComGrupos;
@@ -102,20 +116,23 @@ export default function ProdutosPage() {
             origem: produtoData.origem,
             estoque_minimo: produtoData.estoqueMinimo,
             custo_referencia: produtoData.custoReferencia,
+            familia_id: produtoData.familiaId || null,
             validade_dias: produtoData.validadeDias,
             validade_horas: produtoData.validadeHoras,
             validade_minutos: produtoData.validadeMinutos,
             exibir_horario_etiqueta: produtoData.exibirHorarioEtiqueta,
             contagem_do_dia: produtoData.contagemDoDia,
+            escopo_reposicao: produtoData.escopoReposicao ?? 'loja',
             updated_at: new Date().toISOString(),
           })
           .eq('id', produtoEditando.id);
         if (updateError) throw updateError;
 
         await supabase.from('produto_grupos').delete().eq('produto_id', produtoEditando.id);
-        if (produtoData.grupoIds?.length > 0) {
+        const embIds: string[] = produtoData.embalagemGrupoIds || [];
+        if (embIds.length > 0) {
           await supabase.from('produto_grupos').insert(
-            produtoData.grupoIds.map((grupoId: string) => ({ produto_id: produtoEditando.id, grupo_id: grupoId }))
+            embIds.map((grupoId: string) => ({ produto_id: produtoEditando.id, grupo_id: grupoId }))
           );
         }
 
@@ -138,19 +155,22 @@ export default function ProdutosPage() {
             origem: produtoData.origem,
             estoque_minimo: produtoData.estoqueMinimo,
             custo_referencia: produtoData.custoReferencia,
+            familia_id: produtoData.familiaId || null,
             validade_dias: produtoData.validadeDias,
             validade_horas: produtoData.validadeHoras,
             validade_minutos: produtoData.validadeMinutos,
             exibir_horario_etiqueta: produtoData.exibirHorarioEtiqueta,
             contagem_do_dia: produtoData.contagemDoDia,
+            escopo_reposicao: produtoData.escopoReposicao ?? 'loja',
           })
           .select()
           .single();
         if (insertError) throw insertError;
 
-        if (produtoData.grupoIds?.length > 0) {
+        const embNovos: string[] = produtoData.embalagemGrupoIds || [];
+        if (embNovos.length > 0) {
           await supabase.from('produto_grupos').insert(
-            produtoData.grupoIds.map((grupoId: string) => ({ produto_id: novoProduto.id, grupo_id: grupoId }))
+            embNovos.map((grupoId: string) => ({ produto_id: novoProduto.id, grupo_id: grupoId }))
           );
         }
         if (produtoData.conservacoes?.length > 0) {
@@ -228,9 +248,10 @@ export default function ProdutosPage() {
             <tr className="border-b border-gray-200">
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Produto</th>
               <th className="text-left px-4 py-4 text-sm font-medium text-gray-500">Origem</th>
+              <th className="text-left px-4 py-4 text-sm font-medium text-gray-500">Embalagem</th>
               <th className="text-right px-4 py-4 text-sm font-medium text-gray-500">Mín.</th>
               <th className="text-right px-4 py-4 text-sm font-medium text-gray-500">Ref. R$</th>
-              <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Grupos</th>
+              <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Família</th>
               <th className="text-left px-6 py-4 text-sm font-medium text-gray-500">Validades</th>
               <th className="text-right px-6 py-4 text-sm font-medium text-gray-500">Ações</th>
             </tr>
@@ -245,6 +266,9 @@ export default function ProdutosPage() {
                 <td className="px-4 py-4 text-sm text-gray-700">
                   {LABEL_ORIGEM[produto.origem] || produto.origem}
                 </td>
+                <td className="px-4 py-4 text-sm text-gray-700">
+                  {produto.grupos.map((g) => g.nome).join(', ') || '-'}
+                </td>
                 <td className="px-4 py-4 text-right text-sm tabular-nums text-gray-800">
                   {produto.estoque_minimo ?? 0}
                 </td>
@@ -257,8 +281,8 @@ export default function ProdutosPage() {
                     : '—'}
                 </td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-500">Grupos</span>
-                  <p className="font-semibold text-gray-900">{produto.grupos.map(g => g.nome).join(', ') || '-'}</p>
+                  <span className="text-sm text-gray-500">Família</span>
+                  <p className="font-semibold text-gray-900">{produto.familia?.nome || '-'}</p>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-500">Validades</span>

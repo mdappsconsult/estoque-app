@@ -21,6 +21,8 @@ export type Database = {
           validade_minutos: number;
           exibir_horario_etiqueta: boolean;
           contagem_do_dia: boolean;
+          escopo_reposicao: 'loja' | 'industria';
+          familia_id: string | null;
           status: 'ativo' | 'inativo';
           created_at: string;
           updated_at: string;
@@ -41,6 +43,8 @@ export type Database = {
           validade_minutos?: number;
           exibir_horario_etiqueta?: boolean;
           contagem_do_dia?: boolean;
+          escopo_reposicao?: 'loja' | 'industria';
+          familia_id?: string | null;
           status?: 'ativo' | 'inativo';
           created_at?: string;
           updated_at?: string;
@@ -61,8 +65,29 @@ export type Database = {
           validade_minutos?: number;
           exibir_horario_etiqueta?: boolean;
           contagem_do_dia?: boolean;
+          escopo_reposicao?: 'loja' | 'industria';
+          familia_id?: string | null;
           status?: 'ativo' | 'inativo';
           updated_at?: string;
+        };
+      };
+      familias: {
+        Row: {
+          id: string;
+          nome: string;
+          cor: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          cor?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          nome?: string;
+          cor?: string;
         };
       };
       grupos: {
@@ -342,6 +367,65 @@ export type Database = {
           tipo?: 'WAREHOUSE' | 'STORE';
           endereco?: string | null;
           status?: 'ativo' | 'inativo';
+        };
+      };
+      loja_produtos_config: {
+        Row: {
+          id: string;
+          loja_id: string;
+          produto_id: string;
+          ativo_na_loja: boolean;
+          estoque_minimo_loja: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          loja_id: string;
+          produto_id: string;
+          ativo_na_loja?: boolean;
+          estoque_minimo_loja?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          loja_id?: string;
+          produto_id?: string;
+          ativo_na_loja?: boolean;
+          estoque_minimo_loja?: number;
+          updated_at?: string;
+        };
+      };
+      loja_contagens: {
+        Row: {
+          id: string;
+          loja_id: string;
+          produto_id: string;
+          quantidade_contada: number;
+          contado_por: string | null;
+          contado_em: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          loja_id: string;
+          produto_id: string;
+          quantidade_contada?: number;
+          contado_por?: string | null;
+          contado_em?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          loja_id?: string;
+          produto_id?: string;
+          quantidade_contada?: number;
+          contado_por?: string | null;
+          contado_em?: string;
+          updated_at?: string;
         };
       };
       usuarios: {
@@ -660,6 +744,8 @@ export type Database = {
 export type Produto = Database['public']['Tables']['produtos']['Row'];
 export type ProdutoInsert = Database['public']['Tables']['produtos']['Insert'];
 export type ProdutoUpdate = Database['public']['Tables']['produtos']['Update'];
+export type Familia = Database['public']['Tables']['familias']['Row'];
+export type FamiliaInsert = Database['public']['Tables']['familias']['Insert'];
 
 export type Grupo = Database['public']['Tables']['grupos']['Row'];
 export type GrupoInsert = Database['public']['Tables']['grupos']['Insert'];
@@ -686,6 +772,14 @@ export type Movimentacao = Database['public']['Tables']['movimentacoes']['Row'];
 export type Local = Database['public']['Tables']['locais']['Row'];
 export type LocalInsert = Database['public']['Tables']['locais']['Insert'];
 export type LocalUpdate = Database['public']['Tables']['locais']['Update'];
+
+export type LojaProdutoConfig = Database['public']['Tables']['loja_produtos_config']['Row'];
+export type LojaProdutoConfigInsert = Database['public']['Tables']['loja_produtos_config']['Insert'];
+export type LojaProdutoConfigUpdate = Database['public']['Tables']['loja_produtos_config']['Update'];
+
+export type LojaContagem = Database['public']['Tables']['loja_contagens']['Row'];
+export type LojaContagemInsert = Database['public']['Tables']['loja_contagens']['Insert'];
+export type LojaContagemUpdate = Database['public']['Tables']['loja_contagens']['Update'];
 
 export type Usuario = Database['public']['Tables']['usuarios']['Row'];
 export type UsuarioInsert = Database['public']['Tables']['usuarios']['Insert'];

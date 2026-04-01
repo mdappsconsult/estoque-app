@@ -29,12 +29,29 @@ CREATE TABLE IF NOT EXISTS public.produtos (
   validade_minutos INTEGER NOT NULL DEFAULT 0,
   exibir_horario_etiqueta BOOLEAN NOT NULL DEFAULT false,
   contagem_do_dia BOOLEAN NOT NULL DEFAULT false,
+  escopo_reposicao TEXT NOT NULL DEFAULT 'loja' CHECK (escopo_reposicao IN ('loja', 'industria')),
+  familia_id UUID,
   status TEXT NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- GRUPOS
+-- FAMILIAS (família do produto — conceito novo; não confundir com grupos/embalagem)
+CREATE TABLE IF NOT EXISTS public.familias (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  nome TEXT NOT NULL,
+  cor TEXT NOT NULL DEFAULT '#3b82f6',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT familias_nome_unique UNIQUE (nome)
+);
+
+ALTER TABLE public.produtos
+  DROP CONSTRAINT IF EXISTS produtos_familia_id_fkey;
+ALTER TABLE public.produtos
+  ADD CONSTRAINT produtos_familia_id_fkey
+  FOREIGN KEY (familia_id) REFERENCES public.familias(id);
+
+-- GRUPOS (tipos de embalagem operacionais; vínculo em produto_grupos)
 CREATE TABLE IF NOT EXISTS public.grupos (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   nome TEXT NOT NULL,
@@ -266,6 +283,31 @@ CREATE TABLE IF NOT EXISTS public.auditoria (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- LOJA_PRODUTOS_CONFIG (catálogo operacional da loja + mínimo por loja)
+CREATE TABLE IF NOT EXISTS public.loja_produtos_config (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  loja_id UUID NOT NULL REFERENCES public.locais(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
+  ativo_na_loja BOOLEAN NOT NULL DEFAULT true,
+  estoque_minimo_loja INTEGER NOT NULL DEFAULT 0 CHECK (estoque_minimo_loja >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (loja_id, produto_id)
+);
+
+-- LOJA_CONTAGENS (última contagem enviada por loja/produto)
+CREATE TABLE IF NOT EXISTS public.loja_contagens (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  loja_id UUID NOT NULL REFERENCES public.locais(id) ON DELETE CASCADE,
+  produto_id UUID NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
+  quantidade_contada INTEGER NOT NULL DEFAULT 0 CHECK (quantidade_contada >= 0),
+  contado_por UUID REFERENCES public.usuarios(id),
+  contado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (loja_id, produto_id)
+);
+
 -- =====================================================
 -- ENABLE RLS em TODAS as tabelas
 -- =====================================================
@@ -291,6 +333,9 @@ ALTER TABLE public.divergencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.baixas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.perdas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.auditoria ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loja_produtos_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loja_contagens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.familias ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- RLS POLICIES (permitir tudo com service_role / anon por enquanto)
@@ -306,7 +351,8 @@ BEGIN
     'etiquetas','estoque','movimentacoes',
     'locais','usuarios','lotes_compra','itens',
     'viagens','transferencias','transferencia_itens',
-    'divergencias','baixas','perdas','auditoria'
+    'divergencias','baixas','perdas','auditoria',
+    'loja_produtos_config','loja_contagens','familias'
   ])
   LOOP
     EXECUTE format('
@@ -341,6 +387,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.divergencias;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.baixas;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.perdas;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.auditoria;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.loja_produtos_config;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.loja_contagens;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.familias;
 
 -- =====================================================
 -- INDEXES para performance
@@ -358,3 +407,6 @@ CREATE INDEX IF NOT EXISTS idx_lotes_compra_produto_id ON public.lotes_compra(pr
 CREATE INDEX IF NOT EXISTS idx_baixas_item_id ON public.baixas(item_id);
 CREATE INDEX IF NOT EXISTS idx_perdas_item_id ON public.perdas(item_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_telefone ON public.usuarios(telefone);
+CREATE INDEX IF NOT EXISTS idx_loja_produtos_config_loja_ativo ON public.loja_produtos_config(loja_id, ativo_na_loja);
+CREATE INDEX IF NOT EXISTS idx_loja_contagens_loja_produto ON public.loja_contagens(loja_id, produto_id);
+CREATE INDEX IF NOT EXISTS idx_produtos_familia_id ON public.produtos(familia_id);
