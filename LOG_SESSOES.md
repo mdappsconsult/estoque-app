@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-01 - Deploy (push main)
+- `npm run build` concluído com sucesso; commit `7c328b8` em `main` e **push** para `origin` (`github.com/mdappsconsult/estoque-app`). Deploy automático depende do Vercel/Railway (ou outro) ligado ao repositório.
+- **Pós-deploy:** aplicar no Supabase as migrations pendentes em `supabase/migrations/` que ainda não rodaram em produção (reposição loja, `escopo_reposicao`, famílias/grupos, etc.).
+
 ### Sessão - 2026-04-01 - Reposição: esconder itens de indústria (PRODUCAO / AMBOS)
 - `participaReposicaoLoja`: **PRODUCAO** não entra na reposição/contagem/resumo; **AMBOS** só com `escopo_reposicao = loja`; **COMPRA** segue sempre; `industria` exclui primeiro.
 - Migration `20260402181000_ambos_industria_validade.sql`: AMBOS com validade (d/h/min) &gt; 0 e escopo loja → `industria` (heurística para cadastro indústria que herdou default loja).
