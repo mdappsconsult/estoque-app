@@ -1,5 +1,8 @@
 # Log de Sessões
 
+### Sessão - 2026-04-01 - Deploy (push main)
+- Commit `e094ca2`: tratamento de erro em `cadastros/reposicao-loja` + log da sessão de correção Supabase. Push para `origin/main`; build `npm run build` OK antes do commit.
+
 ### Sessão - 2026-04-01 - Reposição por loja: falha ao carregar (localhost)
 - **Causa:** `getConfigProdutosLoja` faz embed `produtos(..., escopo_reposicao)`. Se a coluna **não existir** no Supabase do `.env.local`, o PostgREST retorna erro e o fluxo ao escolher a loja quebra.
 - **Correção no projeto Supabase (MCP):** aplicadas migrations `produtos_escopo_reposicao_loja`, `escopo_loja_origem_compra`, `ambos_industria_validade`. Conferido `escopo_reposicao` em `information_schema.columns`.
