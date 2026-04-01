@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-01 - Reposição por loja: falha ao carregar (localhost)
+- **Causa:** `getConfigProdutosLoja` faz embed `produtos(..., escopo_reposicao)`. Se a coluna **não existir** no Supabase do `.env.local`, o PostgREST retorna erro e o fluxo ao escolher a loja quebra.
+- **Correção no projeto Supabase (MCP):** aplicadas migrations `produtos_escopo_reposicao_loja`, `escopo_loja_origem_compra`, `ambos_industria_validade`. Conferido `escopo_reposicao` em `information_schema.columns`.
+- **App:** tela `cadastros/reposicao-loja` passa a exibir erro de `useRealtimeQuery` (locais/produtos) e texto orientando migration se citar `escopo_reposicao`.
+- Outro ambiente (URL diferente no `.env.local`): rodar as migrations nesse projeto também.
+
 ### Sessão - 2026-04-01 - Deploy (push main)
 - `npm run build` concluído com sucesso; commit `7c328b8` em `main` e **push** para `origin` (`github.com/mdappsconsult/estoque-app`). Deploy automático depende do Vercel/Railway (ou outro) ligado ao repositório.
 - **Pós-deploy:** aplicar no Supabase as migrations pendentes em `supabase/migrations/` que ainda não rodaram em produção (reposição loja, `escopo_reposicao`, famílias/grupos, etc.).

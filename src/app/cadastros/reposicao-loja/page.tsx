@@ -16,12 +16,12 @@ import {
 } from '@/lib/services/reposicao-loja';
 
 export default function CadastroReposicaoLojaPage() {
-  const { data: locais, loading: loadingLocais } = useRealtimeQuery<Local>({
+  const { data: locais, loading: loadingLocais, error: errorLocais } = useRealtimeQuery<Local>({
     table: 'locais',
     select: 'id, nome, tipo, status',
     orderBy: { column: 'nome', ascending: true },
   });
-  const { data: produtos, loading: loadingProdutos } = useRealtimeQuery<Produto>({
+  const { data: produtos, loading: loadingProdutos, error: errorProdutos } = useRealtimeQuery<Produto>({
     table: 'produtos',
     // `*` evita erro se a coluna escopo_reposicao ainda não existir no Supabase; traz origem para a regra de elegibilidade.
     select: '*',
@@ -155,10 +155,33 @@ export default function CadastroReposicaoLojaPage() {
   };
 
   const loading = loadingLocais || loadingProdutos;
+  const erroConsulta = errorLocais ?? errorProdutos;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (erroConsulta) {
+    return (
+      <div className="max-w-2xl mx-auto rounded-xl border border-red-200 bg-red-50 p-6 text-red-900">
+        <h1 className="text-lg font-semibold mb-2">Falha ao carregar reposição por loja</h1>
+        <p className="text-sm mb-3">
+          Não foi possível ler <code className="rounded bg-red-100 px-1">locais</code> ou{' '}
+          <code className="rounded bg-red-100 px-1">produtos</code> no Supabase. Detalhe:
+        </p>
+        <pre className="text-xs whitespace-pre-wrap break-words rounded-lg bg-white/80 border border-red-100 p-3 text-red-800">
+          {erroConsulta.message}
+        </pre>
+        <p className="text-xs text-red-800/90 mt-4">
+          Se a mensagem citar <strong>escopo_reposicao</strong>, aplique no projeto a migration{' '}
+          <code className="rounded bg-red-100 px-1">20260402150000_produtos_escopo_reposicao_loja.sql</code> (Dashboard
+          Supabase → SQL ou CLI). Sem essa coluna, a consulta em <code className="rounded bg-red-100 px-1">loja_produtos_config</code>{' '}
+          que faz join com <code className="rounded bg-red-100 px-1">produtos</code> falha ao escolher a loja.
+        </p>
       </div>
     );
   }
