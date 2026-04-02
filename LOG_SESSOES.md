@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-02 - Deploy (push main)
+- Commit `9b06390` em `origin/main` (`github.com/mdappsconsult/estoque-app`); **GitHub Actions** CI e deploy **Railway** conforme integração do projeto.
+- **Validação pré-push:** `npm run build` OK.
+
 ### Sessão - 2026-04-02 - Login: removida lista pública de credenciais
 - `/login`: sem bloco “Acessos configurados”; placeholder genérico. Credenciais seguem em `acesso.ts` + README (uso interno).
 - **Validação:** `npm run build`.
