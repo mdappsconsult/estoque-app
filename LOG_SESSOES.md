@@ -1,5 +1,111 @@
 # Log de Sessões
 
+### Sessão - 2026-04-02 - Login: removida lista pública de credenciais
+- `/login`: sem bloco “Acessos configurados”; placeholder genérico. Credenciais seguem em `acesso.ts` + README (uso interno).
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Credenciais operadoras de loja (senhas 6 dígitos distintas)
+- `acesso.ts` / README / CONTEXTO: Luciene `382941` / Loja JK; Francisca `574028` / Loja Delivery; Júlia `619357` / Loja Santa Cruz; Lara `805426` / Loja Imperador Lara; Silvania `973518` / Loja Jardim Paraíso (`OPERATOR_STORE`).
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Separar por Loja: reposição automática + scanner só no manual
+- **Modo reposição:** `useEffect` com debounce dispara carregar faltantes + aplicar sugestão ao mudar origem/destino; **Recarregar faltantes e sugestão**; epoch (`reposicaoSyncEpoch`) + invalidação ao ir para manual ou ao recarregar.
+- **Modo manual:** bloco escanear/digitar só aparece no manual; mensagens de erro comuns abaixo do bloco.
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Separar por Loja: aviso quando PDF/etiquetas desativados
+- Caixa âmbar explicando que **Guia PDF** e **etiquetas** exigem itens em **Itens separados** (sugestão automática ou scan); ver só faltantes não basta. `title` nos botões.
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Separar por Loja: guia PDF + impressão de etiquetas
+- Dependências: `jspdf`, `jspdf-autotable`.
+- `src/lib/printing/separacao-guia-pdf.ts`: PDF A4 com cabeçalho (origem, destino, responsável, modo), tabela resumo por produto e tabela detalhe por unidade (token curto, QR, validade).
+- `separar-por-loja`: botão **Guia PDF + imprimir etiquetas** (confirmação única); **Só imprimir etiquetas** preserva o fluxo antigo; `executarUpsertEAbrirJanelaEtiquetas` compartilhado.
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Login: credenciais unificadas em `acesso.ts` + README
+- `listarCredenciaisParaTelaLogin()` gera a caixa de “Acessos configurados” em `/login` a partir de `CREDENCIAIS_OPERACIONAIS` (ordem: Leonardo, Joana, Ludmilla, Marco, Simone).
+- `README.md`: seção **Acessos de desenvolvimento** com o mesmo resumo.
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-02 - Usuário operacional Simone (Loja Teste)
+- `acesso.ts`: credencial `simone` / `123456`, perfil `OPERATOR_STORE`, telefone `550000000005`, `lojaPadraoNome: Loja Teste` — primeiro login faz upsert em `usuarios` com `local_padrao_id` da loja.
+- **Validação:** `npm run build`.
+
+### Sessão - 2026-04-01 - Etiqueta 60×30: QR levemente menor (texto igual)
+- `label-print`: `qrSizeMm` **14,5** (antes 16); fontes e margens de texto inalteradas.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-01 - Etiqueta 60×30: QR maior até perto da data
+- `label-print`: `qrSizeMm` **16** (antes 10,4); margem superior do QR **0,5 mm**; **data** mantém `margin-top: auto` no stack flex.
+- **Impacto:** QR ocupa quase todo o espaço entre produto e data; validar corte na Zebra (se estourar, reduzir alguns décimos de mm).
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: mais margem interna + conteúdo menor (anti-corte)
+- Padding **2,35 / 0,85 / 0,65 mm**; `qrSizeMm` **10,4**; prod **4,15 mm**; fontes loja/prod/data levemente menores; doc `IMPRESSAO_TERMICA_ZEBRA` nota zona útil.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: desce bloco (padding-top), QR menor, cabe na etiqueta
+- `label-print`: `vertical-align: top`; padding **1,65 / 0,55 mm**; `qrSizeMm` **11,6**; prod **4,55 mm**; margens um pouco menores entre loja/prod/QR.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: stack flex, meio vertical, data no fundo
+- `label-print`: wrapper `.celula-60x30-stack` (flex col, `height: 100%`); célula `vertical-align: middle`; `.cel-data` `margin-top: auto` + `0,1 mm` do fundo; padding vertical reduzido; margem QR um pouco menor.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: slot fixo 2 linhas no produto + padding topo
+- `label-print`: `.cel-prod` altura fixa **4,85 mm** (`-webkit-box-pack: start`); padding topo célula **0,85 mm** — metades esq/dir alinhadas (açaí 2 linhas vs leite 1 linha).
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: alinhamento topo (loja fixa, produto 2 linhas para baixo)
+- `label-print`: `.celula-60x30` `vertical-align: top` (antes `middle`); metade vazia continua centralizada.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: loja maior (fonte)
+- `label-print`: `.cel-loja` **6,75 pt**.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: loja um pouco maior
+- `label-print`: `.cel-loja` **5,75 pt** (antes 5,25 pt).
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: espaço loja × produto
+- `label-print`: `.cel-loja` margin-bottom **1 mm**; `.cel-prod` margin-top **0,35 mm**.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: QR −20%, data maior
+- `label-print`: `qrSizeMm` **12,48**; data **6 pt**; `max-height` produto **4,5 mm**.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: data mais forte/menor, QR +20%, checklist “perfeita”
+- `label-print`: `qrSizeMm` **15,6**; margem superior do QR **2,2 mm**; produto `max-height` menor; data **4 pt**, **#000**, **900**; `print-color-adjust` na data.
+- `IMPRESSAO_TERMICA_ZEBRA.md`: listras verticais (hardware) + checklist impressão perfeita.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: QR maior e mais afastado do texto
+- `label-print`: `qrSizeMm` **13**; margens `.cel-loja` / `.cel-qr` / `.cel-prod` (bloco produto um pouco mais baixo); `margin=2` na API do QR.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: QR mais nítido para térmica
+- `label-print`: `pixelsQrParaImpressao` (mín. 220px, ~22×mm); URL QR com `ecc=M&margin=1`; formato **60×30** com `qrSizeMm` **11**; legado usa mesma lógica de bitmap.
+- `IMPRESSAO_TERMICA_ZEBRA.md`: escuridão/velocidade/dither e QR que não lê.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-02 - Doc: página de teste Zebra + alinhamento do retângulo
+- `IMPRESSAO_TERMICA_ZEBRA.md`: nota sobre **Página de teste** do driver (retângulo de posição) — se sair deslocado, ajustar mídia/offset no driver, não o HTML do app.
+
+### Sessão - 2026-04-02 - Doc: driver Zebra + impressão minúscula no canto
+- **`IMPRESSAO_TERMICA_ZEBRA.md`:** seção “Por que sai pequeno no canto” — pipeline GDI/raster, descompasso stock (Letter/A4) vs 60×30, passos ZDesigner (mm, Stocks, DPI, diálogo do sistema); links suporte Zebra.
+
+### Sessão - 2026-04-02 - Etiqueta 60×30: layout table para Zebra
+- **`label-print` (60×30):** `folha-60x30`/`celula-60x30` de **flex** para **`display: table` / `table-cell`**, metades com **largura em mm** (`widthMm/2`); QR `display:block` + `margin: auto`; evita conteúdo só no canto (driver térmico).
+- **`IMPRESSAO_TERMICA_ZEBRA.md`:** nota sobre table vs flex.
+
+### Sessão - 2026-04-02 - Impressão térmica Zebra (orientação + ajuste HTML)
+- **`docs/IMPRESSAO_TERMICA_ZEBRA.md`:** cabeçalhos/rodapés do navegador, margens, escala 100%, calibração ZD220, driver/tamanho 60×30.
+- **`label-print`:** `<title>` vazio (evita texto tipo “Impressão (2 etiquetas)” na faixa do Chrome); `@media print` reforça margin 0 no `body`.
+- Tela teste: aviso térmica + caminho do doc; `README` mapa atualizado.
+
+### Sessão - 2026-04-02 - Fluxo de entrega contínua (CI + doc)
+- **`docs/FLUXO_ENTREGA.md`:** fluxo canônico local → CI → Railway → migrations Supabase → CONTEXTO/LOG.
+- **`.github/workflows/ci.yml`:** `npm ci` + `npm run build` em push/PR para `main` (env pública Supabase fictícia no job).
+- **`.nvmrc`** (20), **`package.json`** `engines` + script `ci`.
+- **`README.md`:** seção resumo + mapa apontando `FLUXO_ENTREGA`; **`AGENTS.md`** leitura do fluxo e regra de build.
+- **`.github/PULL_REQUEST_TEMPLATE.md`** checklist.
+- **Validação:** `npm run build` local; build com env fictícia (simulação CI).
+
+### Sessão - 2026-04-02 - README: deploy explícito (Railway)
+- `README.md`: seção **Deploy (produção)** — Railway + Supabase; evita suposição de outro host (ex.: Vercel) sem doc.
+
 ### Sessão - 2026-04-01 - Teste de impressão de etiqueta (impressora física)
 - `label-print.ts`: `gerarEtiquetasDemonstracaoImpressao` (60×30 com 2 amostras; legado com 1).
 - Nova rota `/teste-impressao-etiqueta` + link em **Etiquetas**; `ROUTE_PERMISSIONS` / `ROUTE_UI_META`.

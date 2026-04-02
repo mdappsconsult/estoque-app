@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, Loader2, LogIn, User } from 'lucide-react';
+import { Loader2, LogIn, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { useAuth } from '@/hooks/useAuth';
@@ -51,7 +51,7 @@ export default function LoginPage() {
 
           <Input
             label="Usuário"
-            placeholder="Ex.: leonardo, joana, ludmilla ou marco"
+            placeholder="Usuário"
             value={usuarioLogin}
             onChange={(e) => setUsuarioLogin(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && entrar()}
@@ -76,14 +76,6 @@ export default function LoginPage() {
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <LogIn className="w-4 h-4 mr-2" />}
             Entrar
           </Button>
-
-          <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 space-y-1">
-            <p className="font-medium text-gray-700">Acessos configurados:</p>
-            <p><span className="font-semibold">Leonardo</span> / 123456 (indústria)</p>
-            <p><span className="font-semibold">Joana</span> / 123456 (loja)</p>
-            <p><span className="font-semibold">Ludmilla</span> / 123456 (gerente)</p>
-            <p><span className="font-semibold">Marco</span> / 654321 (administrador)</p>
-          </div>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">

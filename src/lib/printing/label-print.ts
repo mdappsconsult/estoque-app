@@ -19,7 +19,8 @@ export const FORMATO_CONFIG: Record<
     widthMm: 60,
     heightMm: 30,
     paddingMm: 0.5,
-    qrSizeMm: 10,
+    /** QR grande; vão até a data via flex (margin-top auto na .cel-data) */
+    qrSizeMm: 14.5,
     dualPorFolha: true,
   },
   '60x60': {
@@ -90,20 +91,30 @@ function extrairVolumeProduto(nome: string): string {
   return match ? match[1].replace(/\s+/g, '').toUpperCase() : '';
 }
 
+/**
+ * Pixels da imagem do QR (fonte) maiores que o mínimo teórico em 203 dpi.
+ * O CSS limita o tamanho físico em mm; bitmap pequeno (~80px) vira “borrão” na térmica após raster do SO/driver.
+ */
+function pixelsQrParaImpressao(qrSizeMm: number): number {
+  return Math.max(220, Math.round(qrSizeMm * 22));
+}
+
 /** Uma metade da folha 60×30: loja, produto, QR, data de geração. */
 function gerarCelula60x30(item: EtiquetaParaImpressao, qrSizeMm: number, classeExtra = ''): string {
   const loja = escaparHtml((item.nomeLoja || '—').trim() || '—');
   const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 36));
   const dataGer = escaparHtml(formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao));
-  const qrPx = Math.max(80, Math.round(qrSizeMm * 8));
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&data=${encodeURIComponent(item.tokenQr)}`;
+  const qrPx = pixelsQrParaImpressao(qrSizeMm);
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&ecc=M&margin=2&data=${encodeURIComponent(item.tokenQr)}`;
 
   return `
     <div class="celula-60x30${classeExtra}">
-      <div class="cel-loja">${loja}</div>
-      <div class="cel-prod">${produto}</div>
-      <img class="cel-qr" src="${qrUrl}" alt="" width="${qrPx}" height="${qrPx}" />
-      <div class="cel-data">${dataGer}</div>
+      <div class="celula-60x30-stack">
+        <div class="cel-loja">${loja}</div>
+        <div class="cel-prod">${produto}</div>
+        <img class="cel-qr" src="${qrUrl}" alt="" width="${qrPx}" height="${qrPx}" />
+        <div class="cel-data">${dataGer}</div>
+      </div>
     </div>
   `;
 }
@@ -130,8 +141,8 @@ function gerarHtmlEtiquetaLegado(item: EtiquetaParaImpressao, formato: Exclude<F
   const tokenQr = escaparHtml(item.tokenQr);
   const manipulacao = escaparHtml(formatarDataPtBr(item.dataManipulacao));
   const validade = escaparHtml(formatarDataPtBr(item.dataValidade));
-  const qrPx = Math.max(120, Math.round(cfg.qrSizeMm * 7));
-  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&data=${encodeURIComponent(item.tokenQr)}`;
+  const qrPx = Math.max(pixelsQrParaImpressao(cfg.qrSizeMm), 180);
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&ecc=M&margin=1&data=${encodeURIComponent(item.tokenQr)}`;
 
   return `
     <div class="etiqueta">
@@ -214,42 +225,52 @@ export function confirmarImpressao(totalEtiquetas: number, formato?: FormatoEtiq
 
 function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
   const qr = cfg.qrSizeMm;
+  const meiaLargura = cfg.widthMm / 2;
   return `
     @page { size: ${cfg.widthMm}mm ${cfg.heightMm}mm; margin: 0; }
+    /* table + table-cell: drivers térmicos (Zebra via spooler) costumam errar flex/% — conteúdo ia parar num canto */
     .folha-60x30 {
       box-sizing: border-box;
+      display: table;
       width: ${cfg.widthMm}mm;
       height: ${cfg.heightMm}mm;
-      display: flex;
-      flex-direction: row;
-      align-items: stretch;
+      table-layout: fixed;
+      border-collapse: collapse;
       overflow: hidden;
     }
+    /* stack flex: topo da célula + padding-top grande desce loja+prod+QR+juntos; data com auto no espaço restante; conteúdo um pouco menor para não estourar */
     .celula-60x30 {
       box-sizing: border-box;
-      flex: 1 1 50%;
-      width: 50%;
-      min-width: 0;
+      display: table-cell;
+      width: ${meiaLargura}mm;
+      height: ${cfg.heightMm}mm;
+      vertical-align: top;
+      text-align: center;
+      padding: 2.35mm 0.65mm 0.85mm 0.65mm;
+    }
+    .celula-60x30.celula-vazia {
+      vertical-align: middle;
+    }
+    .celula-60x30-stack {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: ${cfg.paddingMm}mm 0.8mm;
-      gap: 0.25mm;
-    }
-    .celula-vazia {
-      justify-content: center;
+      justify-content: flex-start;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      min-height: 0;
     }
     .celula-direita-pontilhada {
       border-left: 0.4mm dashed #111;
-      padding-left: 0.9mm;
+      padding-left: 0.7mm;
     }
     .cel-vazia-txt {
       font-size: 8pt;
       color: #bbb;
     }
     .cel-loja {
-      font-size: 5.5pt;
+      font-size: 6.35pt;
       font-weight: 700;
       line-height: 1.05;
       text-align: center;
@@ -257,30 +278,47 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      margin: 0 0 0.5mm 0;
     }
     .cel-prod {
-      font-size: 6pt;
+      font-size: 5.25pt;
       font-weight: 800;
-      line-height: 1.05;
+      line-height: 1.08;
       text-align: center;
+      width: 100%;
       max-width: 100%;
-      max-height: 6mm;
+      box-sizing: border-box;
+      height: 4.15mm;
+      min-height: 4.15mm;
+      max-height: 4.15mm;
+      margin: 0.2mm auto 0;
       overflow: hidden;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
+      -webkit-box-pack: start;
     }
     .cel-qr {
+      display: block;
       width: ${qr}mm;
       height: ${qr}mm;
+      max-width: ${qr}mm;
       object-fit: contain;
+      margin: 0.5mm auto 0;
       flex-shrink: 0;
     }
     .cel-data {
       font-size: 5.5pt;
-      font-weight: 600;
-      color: #222;
-      margin-top: 0.2mm;
+      font-weight: 900;
+      color: #000;
+      letter-spacing: 0.02em;
+      margin: auto 0 0.15mm 0;
+      line-height: 1;
+      padding: 0;
+      text-align: center;
+      flex-shrink: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
   `;
 }
@@ -397,6 +435,9 @@ export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], 
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
+      @media print {
+        html, body { margin: 0 !important; padding: 0 !important; }
+      }
       ${estilosGlobais60x30(cfg)}
       .page-break { break-after: page; page-break-after: always; }
     `;
@@ -415,6 +456,9 @@ export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], 
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
+      @media print {
+        html, body { margin: 0 !important; padding: 0 !important; }
+      }
       ${estilosGlobaisLegado(formato)}
       .page-break { break-after: page; page-break-after: always; }
     `;
@@ -427,7 +471,7 @@ export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], 
   janela.document.write(`
     <html>
       <head>
-        <title>Impressão (${itens.length} etiqueta${itens.length > 1 ? 's' : ''})</title>
+        <title>&#8203;</title>
         <style>${estilos}</style>
       </head>
       <body>

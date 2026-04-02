@@ -87,6 +87,11 @@ export default function TesteImpressaoEtiquetaPage() {
           60×30: uma folha com <strong>dois</strong> QRs (linha pontilhada no meio). Formatos legados: uma etiqueta por
           página.
         </p>
+        <p className="text-xs text-amber-900/90 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          <strong>Térmica (Zebra etc.):</strong> na impressão, desative <strong>cabeçalhos e rodapés</strong>, margens
+          mínimas e escala 100%. Calibre a mídia na impressora. Guia no projeto:{' '}
+          <code className="text-[11px]">docs/IMPRESSAO_TERMICA_ZEBRA.md</code>.
+        </p>
       </div>
     </div>
   );

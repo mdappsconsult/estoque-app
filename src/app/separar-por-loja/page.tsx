@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer } from 'lucide-react';
+import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -17,9 +17,12 @@ import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
 import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   confirmarImpressao,
+  FORMATO_CONFIG,
   imprimirEtiquetasEmJobUnico,
   obterFormatoImpressaoPadrao,
+  type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
+import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
 import { supabase } from '@/lib/supabase';
 import { Local } from '@/types/database';
 
@@ -39,6 +42,22 @@ interface ResumoReposicaoTela {
   quantidade_contada: number;
   faltante: number;
   disponivel_origem: number;
+}
+
+function mensagemConfirmarGuiaPdfEetiquetas(total: number, formato: FormatoEtiqueta): string {
+  const cfg = FORMATO_CONFIG[formato];
+  if (cfg.dualPorFolha) {
+    const folhas = Math.ceil(total / 2);
+    return (
+      `Será baixado o PDF da guia de separação e aberta a janela de impressão de ${total} etiqueta(s) ` +
+      `(${folhas} folha(s) física(s) 60×30 mm, 2 QR por folha). ` +
+      `O formato de etiqueta segue o selecionado na tela Etiquetas. Deseja continuar?`
+    );
+  }
+  return (
+    `Será baixado o PDF da guia e aberta a impressão de ${total} etiqueta(s) (${cfg.label}). ` +
+    `O formato segue o selecionado na tela Etiquetas. Deseja continuar?`
+  );
 }
 
 export default function SepararPorLojaPage() {
@@ -61,49 +80,154 @@ export default function SepararPorLojaPage() {
   const [saving, setSaving] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
+  const reposicaoSyncEpoch = useRef(0);
 
-  const faltantesPendentes = useMemo(
-    () => resumoReposicao.filter((item) => item.faltante > 0),
-    [resumoReposicao]
-  );
+  /** Busca faltantes da loja + disponível na origem (sem alterar estado de loading). */
+  const loadResumoReposicaoData = useCallback(async (): Promise<ResumoReposicaoTela[]> => {
+    if (!origemId || !destinoId) return [];
+    const resumo = await getResumoReposicaoLoja(destinoId);
+    const produtoIds = resumo.map((item) => item.produto_id);
+    let disponivelPorProduto = new Map<string, number>();
 
-  const carregarResumoReposicao = async () => {
-    if (!origemId || !destinoId) return;
-    setCarregandoReposicao(true);
-    setMensagemReposicao('');
-    try {
-      const resumo = await getResumoReposicaoLoja(destinoId);
-      const produtoIds = resumo.map((item) => item.produto_id);
-      let disponivelPorProduto = new Map<string, number>();
+    if (produtoIds.length > 0) {
+      const { data: itensOrigem, error: itensError } = await supabase
+        .from('itens')
+        .select('produto_id')
+        .eq('estado', 'EM_ESTOQUE')
+        .eq('local_atual_id', origemId)
+        .in('produto_id', produtoIds);
+      if (itensError) throw itensError;
 
-      if (produtoIds.length > 0) {
-        const { data: itensOrigem, error: itensError } = await supabase
-          .from('itens')
-          .select('produto_id')
-          .eq('estado', 'EM_ESTOQUE')
-          .eq('local_atual_id', origemId)
-          .in('produto_id', produtoIds);
-        if (itensError) throw itensError;
+      disponivelPorProduto = new Map<string, number>();
+      (itensOrigem || []).forEach((item) => {
+        disponivelPorProduto.set(item.produto_id, (disponivelPorProduto.get(item.produto_id) || 0) + 1);
+      });
+    }
 
-        disponivelPorProduto = new Map<string, number>();
-        (itensOrigem || []).forEach((item) => {
-          disponivelPorProduto.set(item.produto_id, (disponivelPorProduto.get(item.produto_id) || 0) + 1);
-        });
+    return resumo
+      .map((item) => ({
+        ...item,
+        disponivel_origem: disponivelPorProduto.get(item.produto_id) || 0,
+      }))
+      .filter((item) => item.faltante > 0);
+  }, [origemId, destinoId]);
+
+  const aplicarSugestaoAPartirDeResumo = useCallback(
+    async (faltantesComDisponibilidade: ResumoReposicaoTela[]) => {
+      if (!origemId || !destinoId) return;
+      const pendentes = faltantesComDisponibilidade.filter((item) => item.faltante > 0);
+      if (pendentes.length === 0) {
+        setItensEscaneados([]);
+        setMensagemReposicao('Nenhum faltante para esta loja no momento.');
+        return;
       }
 
-      const apenasFaltantes = resumo
-        .map((item) => ({
-          ...item,
-          disponivel_origem: disponivelPorProduto.get(item.produto_id) || 0,
-        }))
-        .filter((item) => item.faltante > 0);
-      setResumoReposicao(apenasFaltantes);
+      const produtosComFalta = pendentes.map((item) => item.produto_id);
+      const { data: itensOrigem, error: itensError } = await supabase
+        .from('itens')
+        .select('id, token_qr, token_short, produto_id, data_validade, produto:produtos(nome)')
+        .eq('estado', 'EM_ESTOQUE')
+        .eq('local_atual_id', origemId)
+        .in('produto_id', produtosComFalta)
+        .order('created_at', { ascending: true });
+      if (itensError) throw itensError;
+
+      const porProduto = new Map<string, any[]>();
+      (itensOrigem || []).forEach((item) => {
+        const atual = porProduto.get(item.produto_id) || [];
+        atual.push(item);
+        porProduto.set(item.produto_id, atual);
+      });
+
+      const selecionados: ItemEscaneado[] = [];
+      const pendencias: string[] = [];
+      pendentes.forEach((resumo) => {
+        const disponiveis = porProduto.get(resumo.produto_id) || [];
+        const qtdSelecionada = Math.min(disponiveis.length, resumo.faltante);
+        if (qtdSelecionada < resumo.faltante) {
+          pendencias.push(`${resumo.produto_nome} (faltam ${resumo.faltante - qtdSelecionada})`);
+        }
+        disponiveis.slice(0, qtdSelecionada).forEach((item) => {
+          const prod = item.produto as { nome?: string } | null;
+          selecionados.push({
+            id: item.id,
+            token_qr: item.token_qr,
+            token_short: item.token_short,
+            produto_id: item.produto_id,
+            produto_nome: prod?.nome || resumo.produto_nome,
+            data_validade: item.data_validade,
+          });
+        });
+      });
+
+      setItensEscaneados(selecionados);
+      if (pendencias.length > 0) {
+        setMensagemReposicao(`Sugestão aplicada com saldo insuficiente em: ${pendencias.join(', ')}.`);
+      } else {
+        setMensagemReposicao('Sugestão aplicada com sucesso.');
+      }
+    },
+    [origemId, destinoId]
+  );
+
+  const sincronizarReposicaoESugestao = useCallback(async () => {
+    if (!origemId || !destinoId) return;
+    reposicaoSyncEpoch.current += 1;
+    const epoch = reposicaoSyncEpoch.current;
+    setItensEscaneados([]);
+    setMensagemReposicao('');
+    setCarregandoReposicao(true);
+    setAplicandoSugestao(true);
+    setErro('');
+    try {
+      const data = await loadResumoReposicaoData();
+      if (epoch !== reposicaoSyncEpoch.current) return;
+      setResumoReposicao(data);
+      await aplicarSugestaoAPartirDeResumo(data);
     } catch (err: unknown) {
+      if (epoch !== reposicaoSyncEpoch.current) return;
       setErro(err instanceof Error ? err.message : 'Não foi possível carregar a reposição');
+      setResumoReposicao([]);
+      setItensEscaneados([]);
     } finally {
-      setCarregandoReposicao(false);
+      if (epoch === reposicaoSyncEpoch.current) {
+        setCarregandoReposicao(false);
+        setAplicandoSugestao(false);
+      }
     }
-  };
+  }, [origemId, destinoId, loadResumoReposicaoData, aplicarSugestaoAPartirDeResumo]);
+
+  useEffect(() => {
+    if (modoSeparacao !== 'reposicao' || !origemId || !destinoId) return;
+    reposicaoSyncEpoch.current += 1;
+    const epoch = reposicaoSyncEpoch.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setItensEscaneados([]);
+        setMensagemReposicao('');
+        setCarregandoReposicao(true);
+        setAplicandoSugestao(true);
+        setErro('');
+        try {
+          const data = await loadResumoReposicaoData();
+          if (epoch !== reposicaoSyncEpoch.current) return;
+          setResumoReposicao(data);
+          await aplicarSugestaoAPartirDeResumo(data);
+        } catch (err: unknown) {
+          if (epoch !== reposicaoSyncEpoch.current) return;
+          setErro(err instanceof Error ? err.message : 'Não foi possível carregar a reposição');
+          setResumoReposicao([]);
+          setItensEscaneados([]);
+        } finally {
+          if (epoch === reposicaoSyncEpoch.current) {
+            setCarregandoReposicao(false);
+            setAplicandoSugestao(false);
+          }
+        }
+      })();
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [modoSeparacao, origemId, destinoId, loadResumoReposicaoData, aplicarSugestaoAPartirDeResumo]);
 
   const processarEscaneamento = async (codigo?: string) => {
     const raw = (codigo ?? tokenInput).trim();
@@ -161,64 +285,36 @@ export default function SepararPorLojaPage() {
     setItensEscaneados(prev => prev.filter(i => i.id !== id));
   };
 
-  const aplicarSugestaoReposicao = async () => {
-    if (!origemId || !destinoId) return;
-    if (faltantesPendentes.length === 0) {
-      setMensagemReposicao('Nenhum faltante encontrado para esta loja.');
-      return;
-    }
-    setAplicandoSugestao(true);
-    setErro('');
-    try {
-      const produtosComFalta = faltantesPendentes
-        .filter((item) => item.faltante > 0)
-        .map((item) => item.produto_id);
-      const { data: itensOrigem, error: itensError } = await supabase
-        .from('itens')
-        .select('id, token_qr, token_short, produto_id, data_validade, produto:produtos(nome)')
-        .eq('estado', 'EM_ESTOQUE')
-        .eq('local_atual_id', origemId)
-        .in('produto_id', produtosComFalta)
-        .order('created_at', { ascending: true });
-      if (itensError) throw itensError;
+  const executarUpsertEAbrirJanelaEtiquetas = async () => {
+    await upsertEtiquetasSeparacaoLoja(
+      itensEscaneados.map((item) => ({
+        id: item.id,
+        produto_id: item.produto_id,
+        data_validade: item.data_validade,
+      })),
+      { lote: 'SEPARACAO-LOJA', mode: 'impresso_agora' }
+    );
 
-      const porProduto = new Map<string, any[]>();
-      (itensOrigem || []).forEach((item) => {
-        const atual = porProduto.get(item.produto_id) || [];
-        atual.push(item);
-        porProduto.set(item.produto_id, atual);
-      });
-
-      const selecionados: ItemEscaneado[] = [];
-      const pendencias: string[] = [];
-      faltantesPendentes.forEach((resumo) => {
-        const disponiveis = porProduto.get(resumo.produto_id) || [];
-        const qtdSelecionada = Math.min(disponiveis.length, resumo.faltante);
-        if (qtdSelecionada < resumo.faltante) {
-          pendencias.push(`${resumo.produto_nome} (faltam ${resumo.faltante - qtdSelecionada})`);
-        }
-        disponiveis.slice(0, qtdSelecionada).forEach((item) => {
-          selecionados.push({
-            id: item.id,
-            token_qr: item.token_qr,
-            token_short: item.token_short,
-            produto_id: item.produto_id,
-            produto_nome: item.produto?.nome || resumo.produto_nome,
-            data_validade: item.data_validade,
-          });
-        });
-      });
-
-      setItensEscaneados(selecionados);
-      if (pendencias.length > 0) {
-        setMensagemReposicao(`Sugestão aplicada com saldo insuficiente em: ${pendencias.join(', ')}.`);
-      } else {
-        setMensagemReposicao('Sugestão aplicada com sucesso.');
-      }
-    } catch (err: unknown) {
-      setErro(err instanceof Error ? err.message : 'Falha ao aplicar sugestão de reposição');
-    } finally {
-      setAplicandoSugestao(false);
+    const formato = obterFormatoImpressaoPadrao();
+    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+    const agora = new Date().toISOString();
+    const abriu = imprimirEtiquetasEmJobUnico(
+      itensEscaneados.map((item) => ({
+        id: item.id,
+        produtoNome: item.produto_nome,
+        dataManipulacao: agora,
+        dataValidade: item.data_validade || agora,
+        lote: 'SEPARACAO-LOJA',
+        tokenQr: item.token_qr,
+        tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
+        responsavel: usuario?.nome || 'OPERADOR',
+        nomeLoja: nomeLojaDestino,
+        dataGeracaoIso: agora,
+      })),
+      formato
+    );
+    if (!abriu) {
+      throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
     }
   };
 
@@ -229,37 +325,37 @@ export default function SepararPorLojaPage() {
 
     setImprimindoEtiquetas(true);
     try {
-      await upsertEtiquetasSeparacaoLoja(
-        itensEscaneados.map((item) => ({
-          id: item.id,
-          produto_id: item.produto_id,
-          data_validade: item.data_validade,
-        })),
-        { lote: 'SEPARACAO-LOJA', mode: 'impresso_agora' }
-      );
-
-      const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
-      const agora = new Date().toISOString();
-      const abriu = imprimirEtiquetasEmJobUnico(
-        itensEscaneados.map((item) => ({
-          id: item.id,
-          produtoNome: item.produto_nome,
-          dataManipulacao: agora,
-          dataValidade: item.data_validade || agora,
-          lote: 'SEPARACAO-LOJA',
-          tokenQr: item.token_qr,
-          tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
-          responsavel: usuario?.nome || 'OPERADOR',
-          nomeLoja: nomeLojaDestino,
-          dataGeracaoIso: agora,
-        })),
-        formato
-      );
-      if (!abriu) {
-        throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
-      }
+      await executarUpsertEAbrirJanelaEtiquetas();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
+    } finally {
+      setImprimindoEtiquetas(false);
+    }
+  };
+
+  const guiaPdfEImprimirEtiquetas = async () => {
+    if (itensEscaneados.length === 0) return;
+    const formato = obterFormatoImpressaoPadrao();
+    if (!window.confirm(mensagemConfirmarGuiaPdfEetiquetas(itensEscaneados.length, formato))) return;
+
+    setImprimindoEtiquetas(true);
+    try {
+      const emitidoEm = new Date().toISOString();
+      const nomeOrigem = warehouses.find((l) => l.id === origemId)?.nome || '—';
+      const nomeDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+      baixarGuiaSeparacaoPdf({
+        nomeOrigem,
+        nomeDestino,
+        responsavel: usuario?.nome || 'OPERADOR',
+        modoSeparacaoLabel:
+          modoSeparacao === 'reposicao' ? 'Reposição (mínimo × contagem na loja)' : 'Manual (scan / digitação)',
+        itens: itensEscaneados,
+        emitidoEmIso: emitidoEm,
+      });
+      await new Promise((r) => setTimeout(r, 400));
+      await executarUpsertEAbrirJanelaEtiquetas();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao gerar guia ou imprimir etiquetas');
     } finally {
       setImprimindoEtiquetas(false);
     }
@@ -335,7 +431,17 @@ export default function SepararPorLojaPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mb-6">
-        <Select label="Origem (Indústria)" required options={[{ value: '', label: 'Selecione...' }, ...warehouses.map(l => ({ value: l.id, label: l.nome }))]} value={origemId} onChange={(e) => setOrigemId(e.target.value)} />
+        <Select
+          label="Origem (Indústria)"
+          required
+          options={[{ value: '', label: 'Selecione...' }, ...warehouses.map(l => ({ value: l.id, label: l.nome }))]}
+          value={origemId}
+          onChange={(e) => {
+            setOrigemId(e.target.value);
+            setResumoReposicao([]);
+            setMensagemReposicao('');
+          }}
+        />
         <Select
           label="Destino (Loja)"
           required
@@ -361,7 +467,13 @@ export default function SepararPorLojaPage() {
               </Button>
               <Button
                 variant={modoSeparacao === 'manual' ? 'primary' : 'outline'}
-                onClick={() => setModoSeparacao('manual')}
+                onClick={() => {
+                  reposicaoSyncEpoch.current += 1;
+                  setModoSeparacao('manual');
+                  setResumoReposicao([]);
+                  setMensagemReposicao('');
+                  setErro('');
+                }}
               >
                 Modo manual
               </Button>
@@ -373,29 +485,35 @@ export default function SepararPorLojaPage() {
                   <Link href="/cadastros/reposicao-loja" className="text-blue-600 underline underline-offset-2">
                     Reposição de estoque por loja
                   </Link>
-                  . A <strong>quantidade contada</strong> vem do que o funcionário informa em{' '}
+                  . A <strong>quantidade contada</strong> vem de{' '}
                   <Link href="/contagem-loja" className="text-blue-600 underline underline-offset-2">
                     Declarar estoque na loja
                   </Link>
-                  . O <strong>faltante</strong> é mínimo menos o que tem na loja. Use &quot;Carregar faltantes&quot; e
-                  depois &quot;Aplicar sugestão automática&quot; para pré-selecionar itens na origem.
+                  . Ao escolher <strong>origem</strong> e <strong>destino</strong>, o sistema carrega os faltantes e
+                  pré-seleciona as unidades disponíveis na indústria (com pequeno atraso ao trocar a loja). Use o botão
+                  abaixo para forçar uma nova leitura.
                 </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => void carregarResumoReposicao()} disabled={carregandoReposicao}>
-                    {carregandoReposicao ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Wand2 className="w-4 h-4 mr-2" />}
-                    Carregar faltantes da loja
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => void aplicarSugestaoReposicao()}
-                    disabled={aplicandoSugestao || carregandoReposicao || resumoReposicao.length === 0}
-                  >
-                    {aplicandoSugestao ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Wand2 className="w-4 h-4 mr-2" />}
-                    Aplicar sugestão automática
-                  </Button>
-                </div>
+                {(carregandoReposicao || aplicandoSugestao) && (
+                  <p className="text-xs text-blue-700 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    Atualizando faltantes e sugestão…
+                  </p>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => void sincronizarReposicaoESugestao()}
+                  disabled={carregandoReposicao || aplicandoSugestao}
+                >
+                  {carregandoReposicao || aplicandoSugestao ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Wand2 className="w-4 h-4 mr-2" />
+                  )}
+                  Recarregar faltantes e sugestão
+                </Button>
                 {mensagemReposicao && <p className="text-xs text-gray-600">{mensagemReposicao}</p>}
-                {resumoReposicao.length === 0 && !carregandoReposicao && (
+                {resumoReposicao.length === 0 && !carregandoReposicao && !aplicandoSugestao && (
                   <p className="text-xs text-gray-500">
                     Nenhum faltante para esta loja no momento.
                   </p>
@@ -432,50 +550,53 @@ export default function SepararPorLojaPage() {
             )}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
-            <label className="block text-sm font-medium text-gray-700">Escanear QR do item</label>
-            <QRScanner
-              onScan={(code) => void processarEscaneamento(code)}
-              label="Escanear com câmera"
-              autoOpen={Boolean(origemId && destinoId)}
-            />
-            {!mostrarEntradaManual ? (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setMostrarEntradaManual(true)}
-              >
-                Não conseguiu ler? Digitar código
-              </Button>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Digite o código QR ou token curto"
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
-                  />
-                  <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
-                    <QrCode className="w-4 h-4" />
+          {modoSeparacao === 'manual' && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Escanear QR do item</label>
+              <QRScanner
+                onScan={(code) => void processarEscaneamento(code)}
+                label="Escanear com câmera"
+                autoOpen={Boolean(origemId && destinoId)}
+              />
+              {!mostrarEntradaManual ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setMostrarEntradaManual(true)}
+                >
+                  Não conseguiu ler? Digitar código
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Digite o código QR ou token curto"
+                      value={tokenInput}
+                      onChange={(e) => setTokenInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
+                    />
+                    <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
+                      <QrCode className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    className="w-full"
+                    onClick={() => {
+                      setMostrarEntradaManual(false);
+                      setTokenInput('');
+                    }}
+                  >
+                    Fechar digitação manual
                   </Button>
                 </div>
-                <Button
-                  variant="ghost"
-                  className="w-full"
-                  onClick={() => {
-                    setMostrarEntradaManual(false);
-                    setTokenInput('');
-                  }}
-                >
-                  Fechar digitação manual
-                </Button>
-              </div>
-            )}
-            {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
-          </div>
+              )}
+            </div>
+          )}
 
-          {itensEscaneados.length > 0 && (
+          {erro && <p className="text-sm text-red-500 mb-4">{erro}</p>}
+
+          {itensEscaneados.length > 0 ? (
             <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="font-semibold text-gray-900">Itens separados</p>
@@ -493,16 +614,52 @@ export default function SepararPorLojaPage() {
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm text-amber-950">
+              <p className="font-medium text-amber-900 mb-1">Guia PDF e etiquetas ainda desativados</p>
+              <p className="text-amber-900/90 leading-relaxed">
+                Eles só liberam quando existir pelo menos <strong>uma unidade</strong> na lista <strong>Itens separados</strong>{' '}
+                (cada uma com QR no estoque da origem). No <strong>modo reposição</strong>, a lista é preenchida
+                automaticamente ao escolher origem e destino (ou em <strong>Recarregar faltantes e sugestão</strong>). No{' '}
+                <strong>modo manual</strong>, escaneie ou digite o código de cada item. Se não houver saldo na origem para
+                um faltante, a lista pode vir vazia ou parcial — confira a mensagem acima da tabela.
+              </p>
+            </div>
           )}
+
+          <Button
+            variant="primary"
+            className="w-full mb-2"
+            onClick={() => void guiaPdfEImprimirEtiquetas()}
+            disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
+            title={
+              itensEscaneados.length === 0
+                ? 'Inclua itens em Itens separados (sugestão automática ou escaneamento)'
+                : undefined
+            }
+          >
+            {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <FileDown className="w-4 h-4 mr-2" />}
+            Guia PDF + imprimir etiquetas
+          </Button>
+          <p className="text-xs text-gray-600 mb-3">
+            Baixa o PDF da guia (resumo por produto + lista por unidade com tokens) e, em seguida, abre a janela de impressão
+            das etiquetas — mesmo fluxo de <Link href="/etiquetas" className="text-blue-600 underline underline-offset-2">Etiquetas</Link>
+            (formato padrão escolhido lá). Na térmica, use o diálogo do sistema; na guia, impressora A4 ou &quot;Salvar como PDF&quot;.
+          </p>
 
           <Button
             variant="outline"
             className="w-full mb-3"
             onClick={() => void imprimirEtiquetasSeparacao()}
             disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
+            title={
+              itensEscaneados.length === 0
+                ? 'Inclua itens em Itens separados (sugestão automática ou escaneamento)'
+                : undefined
+            }
           >
             {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
-            Imprimir etiquetas da separação
+            Só imprimir etiquetas
           </Button>
           <p className="text-xs text-gray-500 -mt-2 mb-3">
             Ao imprimir ou ao criar a separação, o sistema grava/atualiza a linha em <strong>etiquetas</strong> (mesmo id do

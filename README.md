@@ -5,6 +5,8 @@ PWA de controle de estoque por unidade, com rastreio por QR do inicio ao fim.
 ## Mapa de documentacao
 
 - `README.md`: onboarding tecnico e visao geral
+- `docs/FLUXO_ENTREGA.md`: **fluxo oficial** código → CI → Railway → Supabase → contexto (manter sempre)
+- `docs/IMPRESSAO_TERMICA_ZEBRA.md`: impressão **60×30** em impressora térmica (Zebra, margens, calibração)
 - `DIAGRAMA_RAIZ_SISTEMA.md`: raiz logica e diagramas do sistema
 - `APP_LOGICA.md`: especificacao funcional de negocio
 - `SISTEMA_ESTRUTURA.md`: estrutura de evolucao do sistema sem perder relevancia
@@ -28,6 +30,21 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 - Tailwind CSS
 - Supabase (Postgres + Realtime)
 - Scanner QR: `html5-qrcode`
+
+## Deploy (produção)
+
+- App Next.js: **Railway** (deploy via CLI `railway up` ou integração Git do projeto; detalhes em `LOG_SESSOES.md`, sessão *Deploy Railway*).
+- Dados: **Supabase** (aplicar migrations em `supabase/migrations/` no projeto de produção quando o schema mudar).
+
+## Fluxo contínuo (resumo)
+
+1. **`npm run build`** local antes de integrar em `main`.
+2. **GitHub Actions** (`CI`) em todo push/PR para `main` — precisa ficar **verde**.
+3. **Railway** faz o deploy a partir do Git (recomendado ligar o repo no dashboard) ou via `railway up`.
+4. **Migrations** no Supabase de produção quando o schema mudar.
+5. **`CONTEXTO_ATUAL.md` / `LOG_SESSOES.md`** em mudanças operacionais relevantes.
+
+Detalhes e checklist: **`docs/FLUXO_ENTREGA.md`**.
 
 ## Regras de negocio (resumo)
 
@@ -104,6 +121,28 @@ npm run dev
 ```
 
 App local: [http://localhost:3000](http://localhost:3000)
+
+## Acessos de desenvolvimento (login operacional)
+
+Lista operacional (a tela `/login` **não** exibe senhas; uso interno / treinamento). Fonte: `src/lib/services/acesso.ts`:
+
+- **Leonardo** / `123456` (indústria) — usuário `leonardo`
+- **Joana** / `123456` (loja) — `joana`
+- **Ludmilla** / `123456` (gerente) — `ludmilla`
+- **Marco** / `654321` (administrador) — `marco`
+- **Simone** / `123456` (loja, Loja Teste) — `simone`
+
+Operadoras de loja (senha 6 dígitos **por pessoa**; login = primeira coluna em minúsculas: `luciene`, `francisca`, `julia`, `lara`, `silvania`):
+
+| Nome      | Senha   | Loja (`locais.nome`)   |
+|-----------|---------|-------------------------|
+| Luciene   | `382941` | Loja JK                 |
+| Francisca | `574028` | Loja Delivery           |
+| Júlia     | `619357` | Loja Santa Cruz         |
+| Lara      | `805426` | Loja Imperador Lara     |
+| Silvania  | `973518` | Loja Jardim Paraíso     |
+
+Cada loja precisa existir em **Cadastros → Locais** com tipo **Loja** e nome **exatamente** como na tabela.
 
 ## Observacoes importantes do estado atual
 

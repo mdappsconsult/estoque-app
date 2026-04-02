@@ -11,9 +11,12 @@
 - `DRIVER` / `OPERATOR_WAREHOUSE_DRIVER`: transporte e viagem.
 
 ## Usuários operacionais
+- Tela `/login` **não** exibe lista de usuários/senhas (credenciais em `acesso.ts` + `README` para uso interno).
 - Leonardo: operador indústria.
 - Ludmilla: gerente.
 - Joana: operadora de loja (Loja Paraiso).
+- Simone: operadora de loja (Loja Teste); login `simone` / senha `123456` (credencial em `acesso.ts`).
+- Operadoras de loja (senhas numéricas 6 dígitos **distintas**, ver README): Luciene / `382941` / `Loja JK`; Francisca / `574028` / `Loja Delivery`; Júlia / `619357` / `Loja Santa Cruz`; Lara / `805426` / `Loja Imperador Lara`; Silvania / `973518` / `Loja Jardim Paraíso` (logins `luciene`, `francisca`, `julia`, `lara`, `silvania`). **Locais** com nome idêntico ao cadastro ou o login falha ao resolver loja.
 - Marco: administrador.
 
 ## Fluxo oficial de transferência
@@ -57,12 +60,15 @@
 - `ProdutoModal` e lista de produtos: família + embalagem separados conforme modelo acima (indústria exige família).
 - **Reposição de estoque por loja** (`Cadastros`): elegíveis = **COMPRA** (sempre); **AMBOS** só com `escopo_reposicao = loja` (cadastro fornecedor); **PRODUCAO** **nunca** entra (indústria). `escopo industria` exclui sempre. Lista usa `select *` em `produtos`. Migrações: `20260402150000` (coluna + backfill PRODUCAO); `20260402180000` (COMPRA com escopo errado → loja); `20260402181000` (AMBOS indústria com validade preenchida e escopo loja → industria). **Contagem da loja** e **Separar por Loja** (reposição) usam o mesmo critério em `participaReposicaoLoja`. `loja_produtos_config` **paginada**; **Salvar** com `confirm`.
 - **Declarar estoque na loja** (`/contagem-loja`, operador de loja): mesma lista elegível que **Reposição de estoque por loja**; `ensureTodosProdutosElegiveisNaLoja` ao carregar. **UI só para o funcionário:** produto + **quantidade que tem** (sem exibir mínimo nem faltante — isso fica com estoque/indústria em cadastro e em **Separar por Loja**). Grava `loja_contagens`.
-- `Separar por Loja` ganhou modo de reposição automática: cruza contagem da loja vs mínimo da loja, sugere faltantes e permite aplicar seleção automática de itens na origem.
+- `Separar por Loja` — **modo reposição:** ao definir origem e destino, carrega faltantes e **aplica sugestão** automaticamente (debounce ~450 ms; troca de loja/indústria refaz o fluxo). Botão **Recarregar faltantes e sugestão** força nova leitura. **Modo manual:** leitor QR / digitação só nesse modo (oculto na reposição). Controle de concorrência por epoch evita estado inconsistente ao trocar selects rápido.
 - No modo reposição de `Separar por Loja`, a lista exibe apenas produtos com faltante (`mínimo_loja > contagem`), reduzindo ruído operacional.
 - `Separar por Loja` passou a permitir impressão de etiquetas dos itens separados (token QR/short) antes de fechar a transferência; **gravação no banco:** `upsert` em `etiquetas` com **id = id do item** — ao **imprimir**, lote `SEPARACAO-LOJA` e `impressa=true`; ao **criar separação** (após criar viagem), lote `SEP-{id_da_viagem}` e **não zera** `impressa` se já estava true (ex.: imprimiu antes). Itens sem `data_validade` usam sentinela `2999-12-31` como na compra. Limpeza em massa de `etiquetas` no Supabase **não remove** `itens` nem quantidades agregadas.
+- **Guia PDF + etiquetas** em `Separar por Loja`: botão principal baixa PDF (resumo por produto + detalhe por unidade com tokens/validade) e em seguida abre a mesma janela de impressão de etiquetas; formato de etiqueta = padrão da tela **Etiquetas** (`localStorage`). Botão **Só imprimir etiquetas** mantém o fluxo anterior.
 - Tela **Etiquetas** (`/etiquetas`): carrega no máximo as **5000 etiquetas mais recentes**; `useRealtimeQuery` aceita `maxRows` e `refetchDebounceMs` para não travar com tabelas enormes nem loop de refetch (transform estável com `useCallback`); join com `itens` em lotes.
-- Impressão de etiquetas (`label-print`): formato padrão **60×30 mm** com **2 QR por folha** (metades com **borda esquerda pontilhada** na direita para recorte); campos por metade: **nome da loja/local**, **produto**, **QR**, **data de geração**. **Separar por Loja** envia nome da **loja destino**; **Produção** envia nome do **local (indústria)**. Formatos legados 60×60, 58×40, 50×30 mantidos no seletor.
+- Impressão de etiquetas (`label-print`): formato padrão **60×30 mm** com **2 QR por folha** (metades com **borda esquerda pontilhada** na direita para recorte); campos por metade: **nome da loja/local**, **produto**, **QR**, **data de geração**. **Zona segura** na térmica: padding célula **~2,35 mm** topo, **~0,85 mm** fundo, **~0,65 mm** lados; QR **~14,5 mm** (**data** com **`margin-top: auto`** no flex); slot produto **~4,15 mm**; fontes um pouco menores. Listras / QR ilegível: ver `docs/IMPRESSAO_TERMICA_ZEBRA.md`. Layout 60×30 em **table/table-cell** e metades em **mm**. **Separar por Loja** envia nome da **loja destino**; **Produção** envia nome do **local (indústria)**. Formatos legados 60×60, 58×40, 50×30 mantidos no seletor. **Térmica (Zebra):** ver `docs/IMPRESSAO_TERMICA_ZEBRA.md` — driver (escuridão/velocidade), cabeçalhos/rodapés, margens, escala, calibração; título vazio na janela de impressão.
 - Rota **`/teste-impressao-etiqueta`**: gera amostra fictícia (`gerarEtiquetasDemonstracaoImpressao`) e abre a mesma janela de impressão — calibragem física sem tocar no banco; link na tela **Etiquetas**; permissões iguais a **Etiquetas**.
+- **Hospedagem:** app Next.js em **Railway** (`README.md` + `LOG_SESSOES`); dados em **Supabase**.
+- **Fluxo de entrega:** ver `docs/FLUXO_ENTREGA.md`. **GitHub Actions** (`CI`) em push/PR para `main` executa `npm ci` + `npm run build` (env Supabase fictícia no runner). Node **20** (`.nvmrc`). Template de PR com checklist.
 
 ## Situação validada recente
 - Transferência para Loja Paraiso foi recebida e concluída com itens movidos para destino.

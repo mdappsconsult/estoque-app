@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Contexto Seguro e Contínuo
 
+Fluxo técnico de entrega (CI, deploy, migrations): ver **`docs/FLUXO_ENTREGA.md`**.
+
 Ao finalizar qualquer tarefa relevante neste projeto, atualize os dois arquivos:
 
 - `CONTEXTO_ATUAL.md` (estado vigente, curto e objetivo)

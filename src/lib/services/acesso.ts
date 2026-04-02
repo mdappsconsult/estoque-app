@@ -43,7 +43,95 @@ const CREDENCIAIS_OPERACIONAIS: CredencialOperacional[] = [
     perfil: 'OPERATOR_STORE',
     lojaPadraoNome: 'Loja Paraiso',
   },
+  {
+    login: 'simone',
+    senha: '123456',
+    nome: 'Simone',
+    telefone: '550000000005',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Teste',
+  },
+  {
+    login: 'luciene',
+    senha: '382941',
+    nome: 'Luciene',
+    telefone: '550000000011',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja JK',
+  },
+  {
+    login: 'francisca',
+    senha: '574028',
+    nome: 'Francisca',
+    telefone: '550000000012',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Delivery',
+  },
+  {
+    login: 'julia',
+    senha: '619357',
+    nome: 'Júlia',
+    telefone: '550000000013',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Santa Cruz',
+  },
+  {
+    login: 'lara',
+    senha: '805426',
+    nome: 'Lara',
+    telefone: '550000000014',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Imperador Lara',
+  },
+  {
+    login: 'silvania',
+    senha: '973518',
+    nome: 'Silvania',
+    telefone: '550000000015',
+    perfil: 'OPERATOR_STORE',
+    lojaPadraoNome: 'Loja Jardim Paraíso',
+  },
 ];
+
+/** Ordem na tela de login / documentação: principais contas de desenvolvimento. */
+const ORDEM_EXIBICAO_LOGIN = ['leonardo', 'joana', 'ludmilla', 'marco', 'simone'] as const;
+
+const PAPEL_EXIBICAO_LOGIN: Partial<Record<Usuario['perfil'], string>> = {
+  OPERATOR_WAREHOUSE: 'indústria',
+  OPERATOR_WAREHOUSE_DRIVER: 'indústria + motorista',
+  OPERATOR_STORE: 'loja',
+  MANAGER: 'gerente',
+  ADMIN_MASTER: 'administrador',
+  DRIVER: 'motorista',
+};
+
+export type LinhaCredencialLogin = {
+  nomeExibicao: string;
+  login: string;
+  senha: string;
+  papel: string;
+};
+
+/** Lista credenciais (ex.: documentação interna); a UI de `/login` não exibe mais esta lista. */
+export function listarCredenciaisParaTelaLogin(): LinhaCredencialLogin[] {
+  const byLogin = new Map(CREDENCIAIS_OPERACIONAIS.map((c) => [c.login, c]));
+  const prioritized: CredencialOperacional[] = [];
+  for (const l of ORDEM_EXIBICAO_LOGIN) {
+    const c = byLogin.get(l);
+    if (c) prioritized.push(c);
+  }
+  const emOrdem = new Set<string>([...ORDEM_EXIBICAO_LOGIN]);
+  const extras = CREDENCIAIS_OPERACIONAIS.filter((c) => !emOrdem.has(c.login)).sort((a, b) =>
+    a.nome.localeCompare(b.nome, 'pt-BR')
+  );
+  const all = [...prioritized, ...extras];
+  return all.map((c) => ({
+    nomeExibicao: c.nome,
+    login: c.login,
+    senha: c.senha,
+    papel: PAPEL_EXIBICAO_LOGIN[c.perfil] ?? c.perfil,
+  }));
+}
 
 function normalizarLogin(login: string): string {
   return login.trim().toLowerCase();
