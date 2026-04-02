@@ -30,6 +30,7 @@ Se o build falhar, **não** faça merge/push para `main`.
 
 ## 4. Banco Supabase (sempre que o schema mudar)
 
+- **Mesmo projeto em todo lugar:** um único Postgres por ambiente (`NEXT_PUBLIC_SUPABASE_URL`). Para o MCP do Cursor usar o mesmo ref que este repo: `npm run sync:mcp-supabase` e reiniciar o MCP; detalhes em `docs/SUPABASE_AMBIENTE_E_MCP.md`. Conferir ref: `npm run env:supabase-ref`.
 - Migrations versionadas em `supabase/migrations/`.
 - **Produção:** aplicar no projeto Supabase de produção **na ordem** (SQL Editor ou CLI Supabase), **antes** ou junto com o deploy que depende do novo schema.
 - Manter `supabase/schema_public.sql` alinhado quando fizer sentido para o time (espelho legível do estado alvo).

@@ -1,5 +1,29 @@
 # Log de Sessões
 
+### Sessão - 2026-04-02 - Estoque: primeira carga operadora sem vazar consolidado
+- **Problema:** na abertura de **Estoque** como `OPERATOR_STORE`, o primeiro fetch às vezes ia com `usuario === null` (antes do effect do `useAuth`), `p_local_id` nulo na RPC e lista “de todos os locais”; ao mudar o filtro de estado e voltar, uma nova busca com loja correta mostrava só o estoque real da loja.
+- **Correção:** `usuarioEscopo = usuario ?? getUsuarioLogado()` para derivar `localIdEfetivo` / perfil; contador de geração em `carregarResumoEstoque` e `carregarResumoMinimo` para não aplicar resposta antiga por cima da atual.
+- **Validação:** `npm run build` OK.
+
+### Sessão - 2026-04-02 - MCP Supabase alinhado ao .env (um banco)
+- **Esclarecimento:** o app sempre usou um Postgres; o MCP é cliente do mesmo projeto. Wrapper `~/.cursor/supabase-mcp-wrapper.sh` passou a ler `SUPABASE_MCP_PROJECT_REF` / `ESTOQUE_APP_ENV_PATH` de `~/.cursor/supabase-mcp.env`.
+- **Repo:** `npm run sync:mcp-supabase` (`scripts/sync-cursor-mcp-supabase.mjs`) atualiza esse `.env` a partir do `.env.local` do estoque-app. Doc `docs/SUPABASE_AMBIENTE_E_MCP.md` reescrita.
+- **Validação:** `npm run sync:mcp-supabase` OK; `npm run build` OK.
+
+### Sessão - 2026-04-02 - Supabase: doc MCP vs .env + script ref + SQL estoque loja
+- **Motivo:** cruzamento MCP × localhost falhou (projetos diferentes); operação precisa validar estoque no banco certo.
+- **Inclusões:** `docs/SUPABASE_AMBIENTE_E_MCP.md`; `docs/consultas-sql/estoque-por-loja.sql`; `scripts/show-supabase-project-ref.mjs`; script npm `env:supabase-ref`; trechos em `docs/FLUXO_ENTREGA.md` e `AGENTS.md`.
+- **Validação:** `npm run env:supabase-ref` (com `.env.local`); `npm run build` OK.
+
+### Sessão - 2026-04-02 - Estoque: funcionário de loja só vê a própria unidade
+- **Estoque** (`OPERATOR_STORE`): `localIdEfetivo` ignora `filtroLocal`; sem `local_padrao_id` não chama RPC (evita `p_local_id` nulo = todos os locais). Seletor “Todos os locais” oculto para operadora. Texto de ajuda e aviso sem loja cadastrada reforçados. Comentário em `idLocalLojaOperadora`.
+- **Validação:** `npm run build` OK.
+
+### Sessão - 2026-04-02 - Separar por Loja: impressão alinhada à transferência + aviso pré-separação
+- **Problema tratado:** QR válido no banco mas recusado no recebimento quando a etiqueta não correspondia aos `item_id` da transferência (impressão/lista divergindo da «Criar separação»).
+- **Mudanças:** após **Criar separação** (viagem + transferência), `confirm` de impressão e janela de etiquetas com **snapshot** dos itens e lote `SEP-{viagem}`; helper `montarEtiquetasSeparacaoParaImpressao`; **Guia PDF** e **Só imprimir** com `confirm` de risco antes; textos de ajuda e sucesso atualizados. **Recebimento:** mensagem de erro mais explícita quando o item não está na transferência.
+- **Validação:** `npm run build` OK.
+
 ### Sessão - 2026-04-02 - Deploy (push main) — etiquetas operacionais
 - Push após correção 60×30 fixo + QR `qrcode`; CI/GitHub Actions e Railway conforme projeto.
 - **Validação pré-push:** `npm run build` OK.

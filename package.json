@@ -6,6 +6,8 @@
     "node": ">=20 <23"
   },
   "scripts": {
+    "env:supabase-ref": "node scripts/show-supabase-project-ref.mjs",
+    "sync:mcp-supabase": "node scripts/sync-cursor-mcp-supabase.mjs",
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",

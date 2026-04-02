@@ -8,6 +8,7 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
+import { getUsuarioLogado } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Local } from '@/types/database';
 import { idLocalLojaOperadora } from '@/lib/operador-loja-scope';
@@ -20,9 +21,15 @@ import {
 
 export default function EstoquePage() {
   const { usuario } = useAuth();
+  /** Enquanto `usuario` do hook ainda é null (antes do effect / hidratação), usa sessão do localStorage para não chamar RPC com `p_local_id` nulo como se fosse gerente. */
+  const usuarioEscopo =
+    usuario ?? (typeof window !== 'undefined' ? getUsuarioLogado() : null);
   const visaoDonoDisponivel =
-    usuario?.perfil === 'ADMIN_MASTER' || usuario?.perfil === 'MANAGER';
-  const lojaOperadoraId = idLocalLojaOperadora(usuario);
+    usuarioEscopo?.perfil === 'ADMIN_MASTER' || usuarioEscopo?.perfil === 'MANAGER';
+  const lojaOperadoraId = idLocalLojaOperadora(usuarioEscopo);
+  /** Funcionário de loja: só pode ver o estoque da própria unidade — nunca indústria nem “todos os locais”. */
+  const isOperadoraLoja = usuarioEscopo?.perfil === 'OPERATOR_STORE';
+  const operadoraSemLojaCadastrada = isOperadoraLoja && !lojaOperadoraId;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -33,6 +40,7 @@ export default function EstoquePage() {
   const [resumoLinhas, setResumoLinhas] = useState<ResumoEstoqueRow[]>([]);
   const [resumoMinimoLinhas, setResumoMinimoLinhas] = useState<ResumoEstoqueMinimoRow[]>([]);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumoFetchGenRef = useRef(0);
 
   const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
 
@@ -49,9 +57,17 @@ export default function EstoquePage() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const localIdEfetivo = lojaOperadoraId || filtroLocal || null;
+  const localIdEfetivo = isOperadoraLoja
+    ? lojaOperadoraId
+    : lojaOperadoraId || filtroLocal || null;
 
   const carregarResumoEstoque = useCallback(async () => {
+    if (operadoraSemLojaCadastrada) {
+      setResumoLinhas([]);
+      setLoading(false);
+      return;
+    }
+    const gen = ++resumoFetchGenRef.current;
     setLoading(true);
     try {
       const linhas = await getResumoEstoqueAgrupado({
@@ -59,16 +75,26 @@ export default function EstoquePage() {
         localId: localIdEfetivo,
         busca: searchDebounced || null,
       });
+      if (gen !== resumoFetchGenRef.current) return;
       setResumoLinhas(linhas);
     } catch (err) {
       console.error('Erro ao carregar resumo de estoque:', err);
+      if (gen !== resumoFetchGenRef.current) return;
       setResumoLinhas([]);
     } finally {
-      setLoading(false);
+      if (gen === resumoFetchGenRef.current) {
+        setLoading(false);
+      }
     }
-  }, [filtroEstado, localIdEfetivo, searchDebounced]);
+  }, [filtroEstado, localIdEfetivo, operadoraSemLojaCadastrada, searchDebounced]);
 
   const carregarResumoMinimo = useCallback(async () => {
+    if (operadoraSemLojaCadastrada) {
+      setResumoMinimoLinhas([]);
+      setLoading(false);
+      return;
+    }
+    const gen = ++resumoFetchGenRef.current;
     setLoading(true);
     try {
       const linhas = await getResumoEstoqueMinimo({
@@ -76,14 +102,18 @@ export default function EstoquePage() {
         busca: searchDebounced || null,
         apenasAbaixo: true,
       });
+      if (gen !== resumoFetchGenRef.current) return;
       setResumoMinimoLinhas(linhas);
     } catch (err) {
       console.error('Erro ao carregar resumo de estoque mínimo:', err);
+      if (gen !== resumoFetchGenRef.current) return;
       setResumoMinimoLinhas([]);
     } finally {
-      setLoading(false);
+      if (gen === resumoFetchGenRef.current) {
+        setLoading(false);
+      }
     }
-  }, [localIdEfetivo, searchDebounced]);
+  }, [localIdEfetivo, operadoraSemLojaCadastrada, searchDebounced]);
 
   useEffect(() => {
     if (modoVisualizacao === 'minimo') {
@@ -241,17 +271,18 @@ export default function EstoquePage() {
         </div>
       )}
 
-      {usuario?.perfil === 'OPERATOR_STORE' && !usuario.local_padrao_id && (
+      {operadoraSemLojaCadastrada && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Defina a <strong>loja de atuação</strong> deste usuário em Cadastro → Usuários e faça login de novo. Sem isso,
-          o estoque não é exibido (evita misturar unidades de outras lojas).
+          Defina a <strong>loja de atuação</strong> deste funcionário em <strong>Cadastro → Usuários</strong> e peça um novo
+          login. Sem <code className="text-[11px] bg-amber-100 px-1 rounded">local_padrao_id</code>, o estoque da loja não
+          pode ser exibido — assim ninguém vê a indústria nem o consolidado de outras unidades por engano.
         </div>
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
         {lojaOperadoraId && (
           <p className="text-xs text-gray-600 mb-3">
-            Mostrando apenas itens na sua loja:{' '}
+            <strong>Só a sua loja</strong> — sem estoque da indústria nem de outras filiais:{' '}
             <span className="font-medium">
               {locais.find((l) => l.id === lojaOperadoraId)?.nome || 'Loja vinculada ao seu usuário'}
             </span>
@@ -273,7 +304,7 @@ export default function EstoquePage() {
             <Input placeholder="Buscar produto ou QR" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
-          {!lojaOperadoraId && (
+          {!lojaOperadoraId && !isOperadoraLoja && (
             <Select
               options={[{ value: '', label: 'Todos os locais' }, ...locais.map((l) => ({ value: l.id, label: l.nome }))]}
               value={filtroLocal}

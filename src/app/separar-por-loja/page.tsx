@@ -20,6 +20,7 @@ import {
   FORMATO_CONFIG,
   FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
   imprimirEtiquetasEmJobUnico,
+  type EtiquetaParaImpressao,
   type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
 import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
@@ -44,6 +45,30 @@ interface ResumoReposicaoTela {
   disponivel_origem: number;
 }
 
+/** Impressão / guia antes de «Criar separação» pode gerar QR que não bate com `transferencia_itens`. */
+const AVISO_IMPRESSAO_ANTES_DA_SEPARACAO =
+  'No recebimento da loja, o QR só é aceito se a unidade estiver na transferência. O fluxo recomendado é confirmar «Criar separação» e imprimir quando o sistema oferecer (mesma lista da remessa).\n\n' +
+  'Se você imprimir ou gerar a guia agora sem registrar a separação em seguida com exatamente estes itens — ou se a lista mudar depois — a leitura na loja pode falhar.\n\n' +
+  'Deseja continuar mesmo assim?';
+
+function montarEtiquetasSeparacaoParaImpressao(
+  itens: ItemEscaneado[],
+  ctx: { lote: string; nomeLoja: string; responsavel: string; agoraIso: string }
+): EtiquetaParaImpressao[] {
+  return itens.map((item) => ({
+    id: item.id,
+    produtoNome: item.produto_nome,
+    dataManipulacao: ctx.agoraIso,
+    dataValidade: item.data_validade || ctx.agoraIso,
+    lote: ctx.lote,
+    tokenQr: item.token_qr,
+    tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
+    responsavel: ctx.responsavel,
+    nomeLoja: ctx.nomeLoja,
+    dataGeracaoIso: ctx.agoraIso,
+  }));
+}
+
 function mensagemConfirmarGuiaPdfEetiquetas(total: number, formato: FormatoEtiqueta): string {
   const cfg = FORMATO_CONFIG[formato];
   if (cfg.dualPorFolha) {
@@ -51,12 +76,12 @@ function mensagemConfirmarGuiaPdfEetiquetas(total: number, formato: FormatoEtiqu
     return (
       `Será baixado o PDF da guia de separação e aberta a janela de impressão de ${total} etiqueta(s) ` +
       `(${folhas} folha(s) física(s) 60×30 mm, 2 QR por folha). ` +
-      `O formato de etiqueta segue o selecionado na tela Etiquetas. Deseja continuar?`
+      `Formato de etiqueta: 60×30 mm (fluxo operacional). Deseja continuar?`
     );
   }
   return (
     `Será baixado o PDF da guia e aberta a impressão de ${total} etiqueta(s) (${cfg.label}). ` +
-    `O formato segue o selecionado na tela Etiquetas. Deseja continuar?`
+    `Na separação indústria → loja o padrão é 60×30 mm. Deseja continuar?`
   );
 }
 
@@ -285,31 +310,28 @@ export default function SepararPorLojaPage() {
     setItensEscaneados(prev => prev.filter(i => i.id !== id));
   };
 
-  const executarUpsertEAbrirJanelaEtiquetas = async () => {
+  const executarUpsertEAbrirJanelaEtiquetas = async (
+    itens: ItemEscaneado[],
+    lote: string,
+    nomeLojaDestino: string
+  ) => {
     await upsertEtiquetasSeparacaoLoja(
-      itensEscaneados.map((item) => ({
+      itens.map((item) => ({
         id: item.id,
         produto_id: item.produto_id,
         data_validade: item.data_validade,
       })),
-      { lote: 'SEPARACAO-LOJA', mode: 'impresso_agora' }
+      { lote, mode: 'impresso_agora' }
     );
 
-    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     const agora = new Date().toISOString();
     const abriu = await imprimirEtiquetasEmJobUnico(
-      itensEscaneados.map((item) => ({
-        id: item.id,
-        produtoNome: item.produto_nome,
-        dataManipulacao: agora,
-        dataValidade: item.data_validade || agora,
-        lote: 'SEPARACAO-LOJA',
-        tokenQr: item.token_qr,
-        tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
-        responsavel: usuario?.nome || 'OPERADOR',
+      montarEtiquetasSeparacaoParaImpressao(itens, {
+        lote,
         nomeLoja: nomeLojaDestino,
-        dataGeracaoIso: agora,
-      })),
+        responsavel: usuario?.nome || 'OPERADOR',
+        agoraIso: agora,
+      }),
       FORMATO_ETIQUETA_FLUXO_OPERACIONAL
     );
     if (!abriu) {
@@ -319,11 +341,13 @@ export default function SepararPorLojaPage() {
 
   const imprimirEtiquetasSeparacao = async () => {
     if (itensEscaneados.length === 0) return;
+    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
     if (!confirmarImpressao(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
 
+    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     setImprimindoEtiquetas(true);
     try {
-      await executarUpsertEAbrirJanelaEtiquetas();
+      await executarUpsertEAbrirJanelaEtiquetas(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
     } finally {
@@ -333,6 +357,7 @@ export default function SepararPorLojaPage() {
 
   const guiaPdfEImprimirEtiquetas = async () => {
     if (itensEscaneados.length === 0) return;
+    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
     if (
       !window.confirm(
         mensagemConfirmarGuiaPdfEetiquetas(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)
@@ -340,11 +365,12 @@ export default function SepararPorLojaPage() {
     )
       return;
 
+    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     setImprimindoEtiquetas(true);
     try {
       const emitidoEm = new Date().toISOString();
       const nomeOrigem = warehouses.find((l) => l.id === origemId)?.nome || '—';
-      const nomeDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+      const nomeDestino = nomeLojaDestino;
       baixarGuiaSeparacaoPdf({
         nomeOrigem,
         nomeDestino,
@@ -355,7 +381,7 @@ export default function SepararPorLojaPage() {
         emitidoEmIso: emitidoEm,
       });
       await new Promise((r) => setTimeout(r, 400));
-      await executarUpsertEAbrirJanelaEtiquetas();
+      await executarUpsertEAbrirJanelaEtiquetas(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao gerar guia ou imprimir etiquetas');
     } finally {
@@ -369,21 +395,24 @@ export default function SepararPorLojaPage() {
       `Confirmar criação da separação com ${itensEscaneados.length} item(ns)?`
     );
     if (!confirmou) return;
+
+    const snapshotItens = [...itensEscaneados];
+    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+
     setSaving(true);
     try {
-      // Criar viagem
       const viagem = await criarViagem({ status: 'PENDING' });
+      const loteEtiqueta = `SEP-${viagem.id}`;
 
       await upsertEtiquetasSeparacaoLoja(
-        itensEscaneados.map((item) => ({
+        snapshotItens.map((item) => ({
           id: item.id,
           produto_id: item.produto_id,
           data_validade: item.data_validade,
         })),
-        { lote: `SEP-${viagem.id}`, mode: 'manter_impressa_se_existir' }
+        { lote: loteEtiqueta, mode: 'manter_impressa_se_existir' }
       );
 
-      // Criar transferência
       await criarTransferencia(
         {
           tipo: 'WAREHOUSE_STORE',
@@ -393,7 +422,7 @@ export default function SepararPorLojaPage() {
           criado_por: usuario.id,
           status: 'AWAITING_ACCEPT',
         },
-        itensEscaneados.map(i => i.id)
+        snapshotItens.map((i) => i.id)
       );
 
       setSucesso(true);
@@ -402,6 +431,17 @@ export default function SepararPorLojaPage() {
       setResumoReposicao([]);
       setMensagemReposicao('');
       setMostrarEntradaManual(false);
+
+      if (confirmarImpressao(snapshotItens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) {
+        setImprimindoEtiquetas(true);
+        try {
+          await executarUpsertEAbrirJanelaEtiquetas(snapshotItens, loteEtiqueta, nomeLojaDestino);
+        } catch (err: unknown) {
+          alert(err instanceof Error ? err.message : 'Falha ao abrir impressão das etiquetas da remessa');
+        } finally {
+          setImprimindoEtiquetas(false);
+        }
+      }
     } catch (err: any) {
       alert(err?.message || 'Erro');
     } finally {
@@ -426,7 +466,10 @@ export default function SepararPorLojaPage() {
           <CheckCircle className="w-6 h-6 text-green-500" />
           <div>
             <p className="font-semibold text-green-800">Separação criada!</p>
-            <p className="text-sm text-green-600">Aguardando aceite do motorista</p>
+            <p className="text-sm text-green-600">
+              Aguardando aceite do motorista. As etiquetas impressas agora batem com esta remessa; se cancelou a impressão,
+              evite usar folhas antigas na loja.
+            </p>
           </div>
           <button onClick={() => setSucesso(false)} className="ml-auto"><X className="w-4 h-4 text-green-400" /></button>
         </div>
@@ -644,9 +687,10 @@ export default function SepararPorLojaPage() {
             Guia PDF + imprimir etiquetas
           </Button>
           <p className="text-xs text-gray-600 mb-3">
-            Baixa o PDF da guia (resumo por produto + lista por unidade com tokens) e, em seguida, abre a janela de impressão
-            das etiquetas — mesmo fluxo de <Link href="/etiquetas" className="text-blue-600 underline underline-offset-2">Etiquetas</Link>
-            (formato padrão escolhido lá). Na térmica, use o diálogo do sistema; na guia, impressora A4 ou &quot;Salvar como PDF&quot;.
+            Baixa o PDF da guia (resumo por produto + lista por unidade com tokens) e, em seguida, abre a impressão das etiquetas
+            em <strong>60×30 mm</strong> (fluxo operacional). O caminho recomendado para o QR bater no recebimento é{' '}
+            <strong>Criar separação</strong> primeiro e imprimir quando o sistema perguntar. Na térmica, use o diálogo do sistema;
+            na guia, A4 ou &quot;Salvar como PDF&quot;.
           </p>
 
           <Button
@@ -664,9 +708,9 @@ export default function SepararPorLojaPage() {
             Só imprimir etiquetas
           </Button>
           <p className="text-xs text-gray-500 -mt-2 mb-3">
-            Ao imprimir ou ao criar a separação, o sistema grava/atualiza a linha em <strong>etiquetas</strong> (mesmo id do
-            item), lote <code className="text-[11px]">SEPARACAO-LOJA</code> ou <code className="text-[11px]">SEP-…</code>{' '}
-            (viagem). Itens sem validade usam data sentinela, como na entrada de compra.
+            O sistema grava <strong>etiquetas</strong> por item: lote <code className="text-[11px]">SEP-…</code> após criar a
+            remessa (etiquetas alinhadas ao recebimento) ou <code className="text-[11px]">SEPARACAO-LOJA</code> se imprimir antes
+            (somente se depois registrar a separação com a mesma lista). Itens sem validade usam data sentinela, como na compra.
           </p>
 
           <Button variant="primary" className="w-full" onClick={criarSeparacao} disabled={saving || itensEscaneados.length === 0}>

@@ -1,6 +1,9 @@
 import { Usuario } from '@/types/database';
 
-/** UUID da loja quando o usuário é operador de loja com local padrão definido. */
+/**
+ * UUID da loja (`STORE`) quando o usuário é operador de loja com `local_padrao_id`.
+ * Usado para escopo único em estoque, recebimento, validades etc. — nunca listar indústria/outras lojas.
+ */
 export function idLocalLojaOperadora(usuario: Usuario | null): string | null {
   if (usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id) {
     return usuario.local_padrao_id;

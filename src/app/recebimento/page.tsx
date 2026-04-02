@@ -104,7 +104,9 @@ export default function RecebimentoPage() {
       const item = await getItemPorCodigoEscaneado(tk);
       if (!item) { setErro('Item não encontrado. Confira o código e tente novamente.'); return; }
       if (itensEsperados.length > 0 && !itensEsperados.some((e) => e.id === item.id)) {
-        setErro('Este item não pertence à transferência selecionada');
+        setErro(
+          'Este item existe no sistema, mas não consta nesta transferência. Confira se a etiqueta é desta remessa e se a separação foi registrada com as mesmas unidades (imprimir após «Criar separação» evita divergência).'
+        );
         return;
       }
       let duplicado = false;
