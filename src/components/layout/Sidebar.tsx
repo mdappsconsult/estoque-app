@@ -36,7 +36,7 @@ const menuItems: { name: string; href: string; icon: any; badge?: string }[] = [
   { name: 'Transf. Loja → Loja', href: '/transferencia-loja', icon: Repeat2 },
   { name: 'Aceites Pendentes', href: '/aceites-pendentes', icon: ClipboardCheck },
   { name: 'Baixa Diária', href: '/baixa-diaria', icon: Archive },
-  { name: 'Contagem da Loja', href: '/contagem-loja', icon: ClipboardCheck },
+  { name: 'Declarar estoque (loja)', href: '/contagem-loja', icon: ClipboardCheck },
   { name: 'Perdas', href: '/perdas', icon: AlertTriangle },
   { name: 'Estoque', href: '/estoque', icon: Archive },
   { name: 'Rastreio por QR', href: '/rastreio-qr', icon: Search },

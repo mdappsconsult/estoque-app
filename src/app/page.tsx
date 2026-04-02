@@ -36,7 +36,7 @@ const features: HomeFeature[] = [
   { title: 'Transf. Loja → Loja', description: 'Emergencial com aceite.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/transferencia-loja' },
   { title: 'Aceites Pendentes', description: 'Aceitar/recusar.', icon: ClipboardCheck, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/aceites-pendentes' },
   { title: 'Baixa Diária', description: 'Baixa por QR.', icon: Archive, iconBg: 'bg-orange-100', iconColor: 'text-orange-600', href: '/baixa-diaria' },
-  { title: 'Contagem da Loja', description: 'Contagem para reposição.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem-loja' },
+  { title: 'Declarar estoque na loja', description: 'Informe quantas unidades você tem de cada produto.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem-loja' },
   { title: 'Perdas / Descarte', description: 'Descarte com motivo.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/perdas' },
   { title: 'Contagem', description: 'Inventário por produto.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem' },
   { title: 'Estoque', description: 'Leitura atual.', icon: Boxes, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/estoque' },

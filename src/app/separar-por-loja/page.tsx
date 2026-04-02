@@ -14,6 +14,7 @@ import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
 import { criarViagem } from '@/lib/services/viagens';
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
+import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   confirmarImpressao,
   imprimirEtiquetasEmJobUnico,
@@ -223,21 +224,34 @@ export default function SepararPorLojaPage() {
 
   const imprimirEtiquetasSeparacao = async () => {
     if (itensEscaneados.length === 0) return;
-    if (!confirmarImpressao(itensEscaneados.length)) return;
+    const formato = obterFormatoImpressaoPadrao();
+    if (!confirmarImpressao(itensEscaneados.length, formato)) return;
 
     setImprimindoEtiquetas(true);
     try {
-      const formato = obterFormatoImpressaoPadrao();
+      await upsertEtiquetasSeparacaoLoja(
+        itensEscaneados.map((item) => ({
+          id: item.id,
+          produto_id: item.produto_id,
+          data_validade: item.data_validade,
+        })),
+        { lote: 'SEPARACAO-LOJA', mode: 'impresso_agora' }
+      );
+
+      const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+      const agora = new Date().toISOString();
       const abriu = imprimirEtiquetasEmJobUnico(
         itensEscaneados.map((item) => ({
           id: item.id,
           produtoNome: item.produto_nome,
-          dataManipulacao: new Date().toISOString(),
-          dataValidade: item.data_validade || new Date().toISOString(),
+          dataManipulacao: agora,
+          dataValidade: item.data_validade || agora,
           lote: 'SEPARACAO-LOJA',
           tokenQr: item.token_qr,
           tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
           responsavel: usuario?.nome || 'OPERADOR',
+          nomeLoja: nomeLojaDestino,
+          dataGeracaoIso: agora,
         })),
         formato
       );
@@ -261,6 +275,15 @@ export default function SepararPorLojaPage() {
     try {
       // Criar viagem
       const viagem = await criarViagem({ status: 'PENDING' });
+
+      await upsertEtiquetasSeparacaoLoja(
+        itensEscaneados.map((item) => ({
+          id: item.id,
+          produto_id: item.produto_id,
+          data_validade: item.data_validade,
+        })),
+        { lote: `SEP-${viagem.id}`, mode: 'manter_impressa_se_existir' }
+      );
 
       // Criar transferência
       await criarTransferencia(
@@ -346,12 +369,16 @@ export default function SepararPorLojaPage() {
             {modoSeparacao === 'reposicao' && (
               <div className="space-y-3">
                 <p className="text-xs text-gray-600 leading-relaxed">
-                  Os valores de <strong>mínimo</strong> vêm do cadastro{' '}
+                  O <strong>mínimo</strong> vem de{' '}
                   <Link href="/cadastros/reposicao-loja" className="text-blue-600 underline underline-offset-2">
                     Reposição de estoque por loja
                   </Link>
-                  . O <strong>faltante</strong> é mínimo menos quantidade contada na loja; use &quot;Carregar faltantes&quot;
-                  e depois &quot;Aplicar sugestão automática&quot; para pré-selecionar itens disponíveis na origem.
+                  . A <strong>quantidade contada</strong> vem do que o funcionário informa em{' '}
+                  <Link href="/contagem-loja" className="text-blue-600 underline underline-offset-2">
+                    Declarar estoque na loja
+                  </Link>
+                  . O <strong>faltante</strong> é mínimo menos o que tem na loja. Use &quot;Carregar faltantes&quot; e
+                  depois &quot;Aplicar sugestão automática&quot; para pré-selecionar itens na origem.
                 </p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => void carregarResumoReposicao()} disabled={carregandoReposicao}>
@@ -477,6 +504,11 @@ export default function SepararPorLojaPage() {
             {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
             Imprimir etiquetas da separação
           </Button>
+          <p className="text-xs text-gray-500 -mt-2 mb-3">
+            Ao imprimir ou ao criar a separação, o sistema grava/atualiza a linha em <strong>etiquetas</strong> (mesmo id do
+            item), lote <code className="text-[11px]">SEPARACAO-LOJA</code> ou <code className="text-[11px]">SEP-…</code>{' '}
+            (viagem). Itens sem validade usam data sentinela, como na entrada de compra.
+          </p>
 
           <Button variant="primary" className="w-full" onClick={criarSeparacao} disabled={saving || itensEscaneados.length === 0}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Truck className="w-4 h-4 mr-2" />}

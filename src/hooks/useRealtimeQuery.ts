@@ -13,6 +13,10 @@ interface UseRealtimeQueryOptions<T> {
   enabled?: boolean;
   transform?: (data: any[]) => T[] | Promise<T[]>;
   pageSize?: number;
+  /** Se definido, não conta a tabela inteira: busca só as N linhas mais recentes (útil com `orderBy` decrescente). */
+  maxRows?: number;
+  /** Atrasa refetch após evento realtime (ms). Evita tempestade de requisições. */
+  refetchDebounceMs?: number;
 }
 
 interface UseRealtimeQueryResult<T> {
@@ -34,6 +38,8 @@ export function useRealtimeQuery<T = any>(
     enabled = true,
     transform,
     pageSize = 1000,
+    maxRows,
+    refetchDebounceMs = 0,
   } = options;
 
   const [data, setData] = useState<T[]>([]);
@@ -41,6 +47,7 @@ export function useRealtimeQuery<T = any>(
   const [error, setError] = useState<Error | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inFlightRef = useRef<Promise<void> | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
     if (inFlightRef.current) {
@@ -66,52 +73,65 @@ export function useRealtimeQuery<T = any>(
         const result: any[] = [];
         const batchSize = Math.max(1, Math.min(pageSize, 1000));
 
-        const { count, error: countError } = await applyClauses(
-          supabase.from(table).select('*', { count: 'exact', head: true })
-        );
-        if (countError) throw countError;
-
-        const total = count ?? 0;
-        if (total === 0) {
-          setData([]);
-          setError(null);
-          return;
-        }
-
-        const offsets: number[] = [];
-        for (let offset = 0; offset < total; offset += batchSize) {
-          offsets.push(offset);
-        }
-
-        // Reduz latência total em tabelas grandes sem sobrecarregar o banco.
-        const maxParallel = 4;
-        const pagesByOffset = new Map<number, any[]>();
-
-        for (let i = 0; i < offsets.length; i += maxParallel) {
-          const chunk = offsets.slice(i, i + maxParallel);
-          const responses = await Promise.all(
-            chunk.map(async (offset) => {
-              const { data: page, error: fetchError } = await applyClauses(
-                supabase
-                  .from(table)
-                  .select(select)
-                  .range(offset, offset + batchSize - 1)
-              );
-              if (fetchError) throw fetchError;
-              return { offset, page: page || [] };
-            })
+        if (maxRows != null && maxRows > 0) {
+          const cap = maxRows;
+          for (let offset = 0; offset < cap; offset += batchSize) {
+            const end = Math.min(offset + batchSize - 1, cap - 1);
+            const { data: page, error: fetchError } = await applyClauses(
+              supabase.from(table).select(select).range(offset, end)
+            );
+            if (fetchError) throw fetchError;
+            const chunk = page || [];
+            result.push(...chunk);
+            if (chunk.length === 0 || chunk.length < end - offset + 1) break;
+          }
+        } else {
+          const { count, error: countError } = await applyClauses(
+            supabase.from(table).select('*', { count: 'exact', head: true })
           );
+          if (countError) throw countError;
 
-          responses.forEach(({ offset, page }) => {
-            pagesByOffset.set(offset, page);
-          });
+          const total = count ?? 0;
+          if (total === 0) {
+            setData([]);
+            setError(null);
+            return;
+          }
+
+          const offsets: number[] = [];
+          for (let offset = 0; offset < total; offset += batchSize) {
+            offsets.push(offset);
+          }
+
+          const maxParallel = 4;
+          const pagesByOffset = new Map<number, any[]>();
+
+          for (let i = 0; i < offsets.length; i += maxParallel) {
+            const chunkOffsets = offsets.slice(i, i + maxParallel);
+            const responses = await Promise.all(
+              chunkOffsets.map(async (offset) => {
+                const { data: page, error: fetchError } = await applyClauses(
+                  supabase
+                    .from(table)
+                    .select(select)
+                    .range(offset, offset + batchSize - 1)
+                );
+                if (fetchError) throw fetchError;
+                return { offset, page: page || [] };
+              })
+            );
+
+            responses.forEach(({ offset, page }) => {
+              pagesByOffset.set(offset, page);
+            });
+          }
+
+          offsets
+            .sort((a, b) => a - b)
+            .forEach((offset) => {
+              result.push(...(pagesByOffset.get(offset) || []));
+            });
         }
-
-        offsets
-          .sort((a, b) => a - b)
-          .forEach((offset) => {
-            result.push(...(pagesByOffset.get(offset) || []));
-          });
 
         const finalData = transform
           ? await transform(result)
@@ -133,7 +153,18 @@ export function useRealtimeQuery<T = any>(
     } finally {
       inFlightRef.current = null;
     }
-  }, [table, select, filter?.column, filter?.value, filters, orderBy?.column, orderBy?.ascending, transform, pageSize]);
+  }, [
+    table,
+    select,
+    filter?.column,
+    filter?.value,
+    filters,
+    orderBy?.column,
+    orderBy?.ascending,
+    transform,
+    pageSize,
+    maxRows,
+  ]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -143,6 +174,18 @@ export function useRealtimeQuery<T = any>(
 
     // Subscribe para mudanças em tempo real
     const filtroRealtime = (filters && filters.length > 0 ? filters[0] : filter) || null;
+    const scheduleRefetch = () => {
+      if (refetchDebounceMs > 0) {
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = setTimeout(() => {
+          debounceTimerRef.current = null;
+          void fetchData();
+        }, refetchDebounceMs);
+      } else {
+        void fetchData();
+      }
+    };
+
     const channel = supabase
       .channel(`realtime-${table}-${filtroRealtime?.value || 'all'}`)
       .on(
@@ -153,10 +196,8 @@ export function useRealtimeQuery<T = any>(
           table: table,
           ...(filtroRealtime ? { filter: `${filtroRealtime.column}=eq.${filtroRealtime.value}` } : {}),
         },
-        (_payload) => {
-          // Re-fetch ao receber qualquer mudança
-          // Mais simples e seguro que tentar merge manual
-          fetchData();
+        () => {
+          scheduleRefetch();
         }
       )
       .subscribe();
@@ -164,11 +205,15 @@ export function useRealtimeQuery<T = any>(
     channelRef.current = channel;
 
     return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [enabled, fetchData]);
+  }, [enabled, fetchData, refetchDebounceMs]);
 
   return { data, loading, error, refetch: fetchData };
 }

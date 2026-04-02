@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, ClipboardCheck, Loader2 } from 'lucide-react';
+import { CheckCircle, ClipboardCheck, Loader2, Package } from 'lucide-react';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import { useAuth } from '@/hooks/useAuth';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { Local } from '@/types/database';
 import {
+  ensureTodosProdutosElegiveisNaLoja,
   getConfigProdutosLoja,
   getContagensLoja,
   salvarContagensLoja,
@@ -16,6 +16,11 @@ import {
   LojaProdutoConfigRow,
   LojaContagemRow,
 } from '@/lib/services/reposicao-loja';
+
+function parseQtd(raw: string): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && !Number.isNaN(n) ? Math.max(0, Math.floor(n)) : 0;
+}
 
 export default function ContagemLojaPage() {
   const { usuario } = useAuth();
@@ -44,6 +49,14 @@ export default function ContagemLojaPage() {
     setLojaId(lojaInicial);
   }, [lojaInicial]);
 
+  const configsOrdenados = useMemo(
+    () =>
+      [...configs].sort((a, b) =>
+        (a.produto?.nome || '').localeCompare(b.produto?.nome || '', 'pt-BR')
+      ),
+    [configs]
+  );
+
   const carregarDados = async (idLoja: string) => {
     if (!idLoja) {
       setConfigs([]);
@@ -54,7 +67,11 @@ export default function ContagemLojaPage() {
     setLoading(true);
     setErro('');
     try {
-      const [configData, contagensData] = await Promise.all([getConfigProdutosLoja(idLoja), getContagensLoja(idLoja)]);
+      await ensureTodosProdutosElegiveisNaLoja(idLoja);
+      const [configData, contagensData] = await Promise.all([
+        getConfigProdutosLoja(idLoja),
+        getContagensLoja(idLoja),
+      ]);
       const ativos = configData.filter(
         (config) =>
           config.ativo_na_loja &&
@@ -93,7 +110,7 @@ export default function ContagemLojaPage() {
     }
     const payload = configs.map((config) => ({
       produtoId: config.produto_id,
-      quantidadeContada: Number(contagens[config.produto_id] || 0),
+      quantidadeContada: parseQtd(contagens[config.produto_id] ?? '0'),
     }));
 
     setSaving(true);
@@ -107,32 +124,42 @@ export default function ContagemLojaPage() {
       setSucesso(true);
       await carregarDados(lojaId);
     } catch (err: unknown) {
-      setErro(err instanceof Error ? err.message : 'Falha ao enviar contagem');
+      setErro(err instanceof Error ? err.message : 'Falha ao enviar');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-          <ClipboardCheck className="w-5 h-5 text-purple-600" />
+          <Package className="w-5 h-5 text-purple-600" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Contagem da loja</h1>
-          <p className="text-sm text-gray-500">Envie a contagem atual para gerar reposição automática</p>
+          <h1 className="text-2xl font-bold text-gray-900">Declarar estoque na loja</h1>
+          <p className="text-sm text-gray-500">
+            Para cada produto abaixo, informe <span className="text-gray-700 font-medium">só quantas unidades você tem</span>{' '}
+            em estoque na loja (produtos fechados prontos para venda). Não precisa calcular nada além disso.
+          </p>
         </div>
       </div>
 
       {sucesso && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
-          <CheckCircle className="w-6 h-6 text-green-500" />
-          <div>
-            <p className="font-semibold text-green-800">Contagem enviada com sucesso</p>
-            <p className="text-sm text-green-600">A separação já pode usar os faltantes calculados para esta loja.</p>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+          <CheckCircle className="w-6 h-6 text-green-500 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="font-semibold text-green-800">Registro salvo</p>
+            <p className="text-sm text-green-700 mt-1">Suas quantidades foram enviadas. Obrigado.</p>
           </div>
-          <button className="ml-auto text-green-500" onClick={() => setSucesso(false)}>x</button>
+          <button
+            type="button"
+            className="ml-auto text-green-600 hover:text-green-800 shrink-0"
+            aria-label="Fechar"
+            onClick={() => setSucesso(false)}
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -149,54 +176,69 @@ export default function ContagemLojaPage() {
           disabled={Boolean(usuario?.local_padrao_id)}
         />
         {usuario?.local_padrao_id && (
-          <p className="text-xs text-gray-500">
-            Loja travada pelo seu perfil operacional.
-          </p>
+          <p className="text-xs text-gray-500">Loja fixa conforme seu cadastro de operador de loja.</p>
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="w-4 h-4 text-purple-600" />
+            <h2 className="text-sm font-semibold text-gray-900">Produtos</h2>
+          </div>
+          <span className="text-xs text-gray-500">{configsOrdenados.length} itens</span>
+        </div>
+
         {loading ? (
-          <div className="py-10 flex justify-center">
+          <div className="py-12 flex justify-center">
             <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
           </div>
-        ) : configs.length === 0 ? (
-          <p className="text-sm text-gray-500 py-8 text-center">
-            Esta loja não tem produtos ativos para contagem. Peça ao estoque para configurar em Cadastros.
+        ) : configsOrdenados.length === 0 ? (
+          <p className="text-sm text-gray-500 py-10 px-4 text-center">
+            Não há produtos para declarar nesta loja no momento. Se algo estiver faltando na lista, avise o estoque.
           </p>
         ) : (
           <>
-            <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
-              {configs.map((config) => (
-                <div key={config.id} className="border border-gray-200 rounded-lg p-3">
-                  <div className="flex flex-col md:flex-row md:items-center gap-3">
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{config.produto?.nome || 'Produto'}</p>
-                      <p className="text-xs text-gray-500">Mínimo da loja: {config.estoque_minimo_loja}</p>
-                    </div>
-                    <Input
-                      type="number"
-                      min="0"
-                      className="w-full md:w-44"
-                      value={contagens[config.produto_id] ?? '0'}
-                      onChange={(e) =>
-                        setContagens((prev) => ({
-                          ...prev,
-                          [config.produto_id]: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              ))}
+            <div className="max-h-[min(70vh,520px)] overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-gray-500 border-b border-gray-200 bg-white sticky top-0 z-[1]">
+                    <th className="px-4 py-2.5">Produto</th>
+                    <th className="px-4 py-2.5 w-[8rem] text-center sm:text-left">Quantidade que tenho</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {configsOrdenados.map((config) => (
+                    <tr key={config.id} className="hover:bg-gray-50/60">
+                      <td className="px-4 py-2 text-gray-900">{config.produto?.nome || 'Produto'}</td>
+                      <td className="px-4 py-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          inputMode="numeric"
+                          aria-label={`Quantidade em estoque de ${config.produto?.nome || 'produto'}`}
+                          className="w-full max-w-[6.5rem] sm:ml-0 mx-auto block px-2 py-1.5 text-sm text-center sm:text-left tabular-nums border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-500"
+                          value={contagens[config.produto_id] ?? '0'}
+                          onChange={(e) =>
+                            setContagens((prev) => ({
+                              ...prev,
+                              [config.produto_id]: e.target.value,
+                            }))
+                          }
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            {erro && <p className="text-sm text-red-500 mt-3">{erro}</p>}
+            {erro && <p className="text-sm text-red-600 px-4 py-2 border-t border-red-100 bg-red-50/50">{erro}</p>}
 
-            <div className="mt-4">
-              <Button variant="primary" className="w-full" onClick={() => void salvar()} disabled={saving}>
+            <div className="p-4 border-t border-gray-100">
+              <Button variant="primary" className="w-full sm:w-auto" onClick={() => void salvar()} disabled={saving}>
                 {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Enviar contagem
+                Salvar estoque declarado
               </Button>
             </div>
           </>

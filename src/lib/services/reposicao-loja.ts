@@ -130,6 +130,37 @@ export async function ensureTodosProdutosNaLoja(lojaId: string, produtoIds: stri
   }
 }
 
+/** IDs de produtos ativos elegíveis para reposição/contagem (mesmo critério do cadastro de mínimos). */
+export async function listarIdsProdutosElegiveisReposicaoLoja(): Promise<string[]> {
+  const pageSize = 1000;
+  const ids: string[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('produtos')
+      .select('id, status, origem, escopo_reposicao')
+      .eq('status', 'ativo')
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    for (const row of chunk as { id: string; origem?: string; escopo_reposicao?: string }[]) {
+      if (participaReposicaoLoja(row.escopo_reposicao, row.origem)) {
+        ids.push(row.id);
+      }
+    }
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return ids;
+}
+
+/** Garante `loja_produtos_config` para todos os produtos elegíveis (alinha lista ao cadastro de reposição). */
+export async function ensureTodosProdutosElegiveisNaLoja(lojaId: string): Promise<void> {
+  const ids = await listarIdsProdutosElegiveisReposicaoLoja();
+  await ensureTodosProdutosNaLoja(lojaId, ids);
+}
+
 export async function upsertConfigProdutoLoja(input: {
   lojaId: string;
   produtoId: string;

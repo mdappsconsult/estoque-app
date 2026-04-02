@@ -91,11 +91,14 @@ export default function ProducaoPage() {
 
   const imprimirEtiquetasGeradas = async () => {
     if (etiquetasPendentesImpressao.length === 0) return;
-    if (!confirmarImpressao(etiquetasPendentesImpressao.length)) return;
+    const formato = obterFormatoImpressaoPadrao();
+    if (!confirmarImpressao(etiquetasPendentesImpressao.length, formato)) return;
 
     setImprimindo(true);
     try {
-      const formato = obterFormatoImpressaoPadrao();
+      const agora = new Date().toISOString();
+      const nomeLocal =
+        localSelecionadoNome !== '-' ? localSelecionadoNome : 'Indústria';
       const abriuImpressao = imprimirEtiquetasEmJobUnico(
         etiquetasPendentesImpressao.map((etiqueta) => ({
           id: etiqueta.id,
@@ -106,6 +109,8 @@ export default function ProducaoPage() {
           tokenQr: etiqueta.tokenQr,
           tokenShort: etiqueta.tokenShort || etiqueta.id.slice(0, 8).toUpperCase(),
           responsavel: usuario?.nome || 'OPERADOR',
+          nomeLoja: nomeLocal,
+          dataGeracaoIso: agora,
         })),
         formato
       );

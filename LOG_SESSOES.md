@@ -1,5 +1,36 @@
 # Log de Sessões
 
+### Sessão - 2026-04-01 - Teste de impressão de etiqueta (impressora física)
+- `label-print.ts`: `gerarEtiquetasDemonstracaoImpressao` (60×30 com 2 amostras; legado com 1).
+- Nova rota `/teste-impressao-etiqueta` + link em **Etiquetas**; `ROUTE_PERMISSIONS` / `ROUTE_UI_META`.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-01 - Separar por Loja: upsert em `etiquetas` + orientação para zerar tabela
+- **`etiquetas.ts`:** `upsertEtiquetasSeparacaoLoja` (chunks) — impressão marca `impressa`; criação de separação preserva `impressa` existente; `excluida: false`; validade sentinela alinhada à compra.
+- **`separar-por-loja`:** chama upsert antes da janela de impressão e após `criarViagem` (lote `SEP-{viagem.id}`); texto curto na UI sobre persistência.
+- **Operação:** `DELETE`/limpar `etiquetas` no Supabase não apaga `itens` nem estoque agregado; novas linhas voltam conforme impressão/separação.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-01 - Etiquetas 60×30 mm: 2 QR por folha + dados mínimos
+- `label-print.ts`: novo formato **60x30** (padrão): duas metades por página, divisor **pontilhado** (`border-left` na coluna direita); cada metade: loja/local, produto, QR, data gerada. `EtiquetaParaImpressao` ganha `nomeLoja` e `dataGeracaoIso`. Emparelhamento de itens + `confirmarImpressao` informa folhas físicas.
+- **Separar por Loja:** `nomeLoja` = loja destino selecionada. **Produção:** `nomeLoja` = local da produção. **Etiquetas:** `dataGeracaoIso` = `created_at`.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-01 - Etiquetas: página travando
+- **Causa:** `transform` inline no `useRealtimeQuery` gerava nova função a cada render → `fetchData` mudava → `useEffect` disparava refetch em loop. Tabela grande: `COUNT` + milhares de linhas + `.in('id', ids)` gigante.
+- **Hook `useRealtimeQuery`:** opções `maxRows` (busca só N linhas sem contar tabela inteira) e `refetchDebounceMs` (debounce no realtime).
+- **`etiquetas`:** `useCallback` no transform; busca de `itens` em lotes de 400; `maxRows: 5000` + debounce 500ms; agrupamento com `Map` + `useMemo`; aviso na UI sobre limite das mais recentes.
+- **Validação:** `npx tsc --noEmit`.
+
+### Sessão - 2026-04-01 - Declarar estoque: sem mínimo/falta para o funcionário
+- `contagem-loja`: remove colunas e textos de **mínimo** e **faltante**; só **produto** + **quantidade que tenho**; sucesso e vazio sem jargão de estoque.
+
+### Sessão - 2026-04-01 - Declarar estoque na loja (fluxo funcionário × reposição)
+- `reposicao-loja.ts`: `listarIdsProdutosElegiveisReposicaoLoja` + `ensureTodosProdutosElegiveisNaLoja` para igualar lista ao cadastro de mínimos.
+- `contagem-loja`: UX renomeada (título, tabela Mín./Tenho/Falta, links para reposição e Separar por Loja); `ensure` antes de carregar configs.
+- Home, Sidebar e `ROUTE_UI_META`: rótulos alinhados. `separar-por-loja` (modo reposição): texto explica origem do mínimo e da contagem.
+- **Validação:** `npx tsc --noEmit`.
+
 ### Sessão - 2026-04-01 - Deploy (push main)
 - Commit `e094ca2`: tratamento de erro em `cadastros/reposicao-loja` + log da sessão de correção Supabase. Push para `origin/main`; build `npm run build` OK antes do commit.
 

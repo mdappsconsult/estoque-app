@@ -1,6 +1,71 @@
 import { supabase } from '@/lib/supabase';
 import { Etiqueta, EtiquetaInsert } from '@/types/database';
 
+/** Mesmo critério de `lotes-compra`: produto sem validade no item. */
+const DATA_SENTINELA_SEM_VALIDADE = '2999-12-31';
+
+export type UpsertEtiquetaSeparacaoItem = {
+  id: string;
+  produto_id: string;
+  data_validade?: string | null;
+};
+
+/**
+ * Garante linhas em `etiquetas` (id = id do item) para itens da separação indústria → loja.
+ * - `impresso_agora`: marca impressa (fluxo "Imprimir etiquetas").
+ * - `manter_impressa_se_existir`: novo registro sai impressa=false; se já existir, não zera impressa=true.
+ */
+export async function upsertEtiquetasSeparacaoLoja(
+  itens: UpsertEtiquetaSeparacaoItem[],
+  options: { lote: string; mode: 'impresso_agora' | 'manter_impressa_se_existir' }
+): Promise<void> {
+  if (itens.length === 0) return;
+
+  const ids = itens.map((i) => i.id);
+  const impressaPorId = new Map<string, boolean>();
+
+  if (options.mode === 'manter_impressa_se_existir') {
+    const chunkSize = 500;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const slice = ids.slice(i, i + chunkSize);
+      const { data, error } = await supabase.from('etiquetas').select('id, impressa').in('id', slice);
+      if (error) throw error;
+      (data || []).forEach((row: { id: string; impressa: boolean }) => {
+        impressaPorId.set(row.id, row.impressa === true);
+      });
+    }
+  }
+
+  const agora = new Date().toISOString();
+  const rows: EtiquetaInsert[] = itens.map((item) => {
+    const validade =
+      item.data_validade && String(item.data_validade).trim()
+        ? item.data_validade!
+        : DATA_SENTINELA_SEM_VALIDADE;
+    const impressa =
+      options.mode === 'impresso_agora'
+        ? true
+        : impressaPorId.get(item.id) === true;
+
+    return {
+      id: item.id,
+      produto_id: item.produto_id,
+      data_producao: agora,
+      data_validade: validade,
+      lote: options.lote,
+      impressa,
+      excluida: false,
+    };
+  });
+
+  const upsertChunk = 200;
+  for (let i = 0; i < rows.length; i += upsertChunk) {
+    const chunk = rows.slice(i, i + upsertChunk);
+    const { error } = await supabase.from('etiquetas').upsert(chunk, { onConflict: 'id' });
+    if (error) throw error;
+  }
+}
+
 export interface EtiquetaCompleta extends Etiqueta {
   produto: {
     id: string;
