@@ -21,11 +21,11 @@ export default function TesteImpressaoEtiquetaPage() {
     setFormato(obterFormatoImpressaoPadrao());
   }, []);
 
-  const gerarEImprimir = () => {
+  const gerarEImprimir = async () => {
     const amostras = gerarEtiquetasDemonstracaoImpressao(formato);
     setAbrindo(true);
     try {
-      const ok = imprimirEtiquetasEmJobUnico(amostras, formato);
+      const ok = await imprimirEtiquetasEmJobUnico(amostras, formato);
       if (!ok) {
         alert('Não foi possível abrir a janela de impressão. Libere pop-ups e tente de novo.');
       }
@@ -78,7 +78,12 @@ export default function TesteImpressaoEtiquetaPage() {
           ))}
         </select>
 
-        <Button variant="primary" className="w-full" onClick={gerarEImprimir} disabled={abrindo}>
+        <Button
+          variant="primary"
+          className="w-full"
+          onClick={() => void gerarEImprimir()}
+          disabled={abrindo}
+        >
           {abrindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
           Gerar e abrir impressão
         </Button>

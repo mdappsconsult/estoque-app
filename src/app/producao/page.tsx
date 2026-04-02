@@ -13,8 +13,8 @@ import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
 import {
   confirmarImpressao,
+  FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
   imprimirEtiquetasEmJobUnico,
-  obterFormatoImpressaoPadrao,
 } from '@/lib/printing/label-print';
 
 export default function ProducaoPage() {
@@ -91,15 +91,14 @@ export default function ProducaoPage() {
 
   const imprimirEtiquetasGeradas = async () => {
     if (etiquetasPendentesImpressao.length === 0) return;
-    const formato = obterFormatoImpressaoPadrao();
-    if (!confirmarImpressao(etiquetasPendentesImpressao.length, formato)) return;
+    if (!confirmarImpressao(etiquetasPendentesImpressao.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
 
     setImprimindo(true);
     try {
       const agora = new Date().toISOString();
       const nomeLocal =
         localSelecionadoNome !== '-' ? localSelecionadoNome : 'Indústria';
-      const abriuImpressao = imprimirEtiquetasEmJobUnico(
+      const abriuImpressao = await imprimirEtiquetasEmJobUnico(
         etiquetasPendentesImpressao.map((etiqueta) => ({
           id: etiqueta.id,
           produtoNome: produtoParaImpressao,
@@ -112,7 +111,7 @@ export default function ProducaoPage() {
           nomeLoja: nomeLocal,
           dataGeracaoIso: agora,
         })),
-        formato
+        FORMATO_ETIQUETA_FLUXO_OPERACIONAL
       );
       if (!abriuImpressao) {
         throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');

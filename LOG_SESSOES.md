@@ -1,5 +1,14 @@
 # Log de Sessões
 
+### Sessão - 2026-04-02 - Deploy (push main) — etiquetas operacionais
+- Push após correção 60×30 fixo + QR `qrcode`; CI/GitHub Actions e Railway conforme projeto.
+- **Validação pré-push:** `npm run build` OK.
+
+### Sessão - 2026-04-02 - Etiquetas: 60×30 fixo na separação/produção + QR local (`qrcode`)
+- **Causa:** `localStorage` com formato **60×60** (tela Etiquetas) fazia **Separar por Loja** imprimir legado; QR remoto podia falhar ou sair ilegível na térmica.
+- `FORMATO_ETIQUETA_FLUXO_OPERACIONAL`; `imprimirEtiquetasEmJobUnico` **async**, PNG via `qrcode` + `@types/qrcode`; bitmap mínimo ~256px; dependência `qrcode`.
+- **Validação:** `npm run build`.
+
 ### Sessão - 2026-04-02 - Deploy (push main)
 - Commit `9b06390` em `origin/main` (`github.com/mdappsconsult/estoque-app`); **GitHub Actions** CI e deploy **Railway** conforme integração do projeto.
 - **Validação pré-push:** `npm run build` OK.

@@ -1,6 +1,14 @@
+import QRCode from 'qrcode';
+
 export type FormatoEtiqueta = '60x30' | '60x60' | '58x40' | '50x30';
 
 export const FORMATO_IMPRESSAO_STORAGE_KEY = 'etiqueta_formato_padrao';
+
+/**
+ * Formato usado em **Separar por Loja** e **Produção** (não lê `localStorage`).
+ * Evita impressão 60×60 legada quando alguém escolheu outro formato na tela Etiquetas nesse navegador.
+ */
+export const FORMATO_ETIQUETA_FLUXO_OPERACIONAL: FormatoEtiqueta = '60x30';
 
 export const FORMATO_CONFIG: Record<
   FormatoEtiqueta,
@@ -96,23 +104,39 @@ function extrairVolumeProduto(nome: string): string {
  * O CSS limita o tamanho físico em mm; bitmap pequeno (~80px) vira “borrão” na térmica após raster do SO/driver.
  */
 function pixelsQrParaImpressao(qrSizeMm: number): number {
-  return Math.max(220, Math.round(qrSizeMm * 22));
+  return Math.max(256, Math.round(qrSizeMm * 24));
 }
 
-/** Uma metade da folha 60×30: loja, produto, QR, data de geração. */
-function gerarCelula60x30(item: EtiquetaParaImpressao, qrSizeMm: number, classeExtra = ''): string {
+/** QR gerado no próprio browser (sem api.qrserver.com) — mais confiável em produção e para térmica. */
+async function qrTokenParaDataUrl(token: string, qrSizeMm: number): Promise<string> {
+  const raw = (token || '').trim() || '—';
+  const px = Math.max(pixelsQrParaImpressao(qrSizeMm), 180);
+  return QRCode.toDataURL(raw, {
+    width: px,
+    margin: 1,
+    errorCorrectionLevel: 'M',
+    color: { dark: '#000000', light: '#ffffff' },
+  });
+}
+
+/** Uma metade da folha 60×30: loja, produto, QR (data URL), data de geração. */
+function gerarCelula60x30(
+  item: EtiquetaParaImpressao,
+  qrSizeMm: number,
+  classeExtra: string,
+  qrDataUrl: string
+): string {
   const loja = escaparHtml((item.nomeLoja || '—').trim() || '—');
   const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 36));
   const dataGer = escaparHtml(formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao));
   const qrPx = pixelsQrParaImpressao(qrSizeMm);
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&ecc=M&margin=2&data=${encodeURIComponent(item.tokenQr)}`;
 
   return `
     <div class="celula-60x30${classeExtra}">
       <div class="celula-60x30-stack">
         <div class="cel-loja">${loja}</div>
         <div class="cel-prod">${produto}</div>
-        <img class="cel-qr" src="${qrUrl}" alt="" width="${qrPx}" height="${qrPx}" />
+        <img class="cel-qr" src="${qrDataUrl}" alt="" width="${qrPx}" height="${qrPx}" />
         <div class="cel-data">${dataGer}</div>
       </div>
     </div>
@@ -122,16 +146,22 @@ function gerarCelula60x30(item: EtiquetaParaImpressao, qrSizeMm: number, classeE
 function gerarFolha60x30Par(
   esquerda: EtiquetaParaImpressao,
   direita: EtiquetaParaImpressao | null,
-  qrSizeMm: number
+  qrSizeMm: number,
+  qrDataUrlEsq: string,
+  qrDataUrlDir: string | null
 ): string {
-  const celEsq = gerarCelula60x30(esquerda, qrSizeMm, '');
+  const celEsq = gerarCelula60x30(esquerda, qrSizeMm, '', qrDataUrlEsq);
   const celDir = direita
-    ? gerarCelula60x30(direita, qrSizeMm, ' celula-direita-pontilhada')
+    ? gerarCelula60x30(direita, qrSizeMm, ' celula-direita-pontilhada', qrDataUrlDir!)
     : `<div class="celula-60x30 celula-vazia celula-direita-pontilhada"><span class="cel-vazia-txt">—</span></div>`;
   return `<div class="folha-60x30">${celEsq}${celDir}</div>`;
 }
 
-function gerarHtmlEtiquetaLegado(item: EtiquetaParaImpressao, formato: Exclude<FormatoEtiqueta, '60x30'>): string {
+function gerarHtmlEtiquetaLegado(
+  item: EtiquetaParaImpressao,
+  formato: Exclude<FormatoEtiqueta, '60x30'>,
+  qrDataUrl: string
+): string {
   const cfg = FORMATO_CONFIG[formato];
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
@@ -141,8 +171,6 @@ function gerarHtmlEtiquetaLegado(item: EtiquetaParaImpressao, formato: Exclude<F
   const tokenQr = escaparHtml(item.tokenQr);
   const manipulacao = escaparHtml(formatarDataPtBr(item.dataManipulacao));
   const validade = escaparHtml(formatarDataPtBr(item.dataValidade));
-  const qrPx = Math.max(pixelsQrParaImpressao(cfg.qrSizeMm), 180);
-  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&ecc=M&margin=1&data=${encodeURIComponent(item.tokenQr)}`;
 
   return `
     <div class="etiqueta">
@@ -173,7 +201,7 @@ function gerarHtmlEtiquetaLegado(item: EtiquetaParaImpressao, formato: Exclude<F
           <div class="token-qr">${tokenQr}</div>
           <div class="lote">LOTE: ${lote}</div>
         </div>
-        <img class="qr" src="${qrImageUrl}" alt="QR Code" />
+        <img class="qr" src="${qrDataUrl}" alt="QR Code" />
       </div>
     </div>
   `;
@@ -404,7 +432,10 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
   `;
 }
 
-export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], formato: FormatoEtiqueta): boolean {
+export async function imprimirEtiquetasEmJobUnico(
+  etiquetas: EtiquetaParaImpressao[],
+  formato: FormatoEtiqueta
+): Promise<boolean> {
   if (typeof window === 'undefined' || etiquetas.length === 0) return false;
 
   const agoraIso = new Date().toISOString();
@@ -418,11 +449,16 @@ export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], 
   let estilos: string;
 
   if (formato === '60x30') {
+    const qrPorIndice = await Promise.all(
+      itens.map((it) => qrTokenParaDataUrl(it.tokenQr, cfg.qrSizeMm))
+    );
     const pedacos: string[] = [];
     for (let i = 0; i < itens.length; i += 2) {
       const esq = itens[i];
       const dir = itens[i + 1] ?? null;
-      pedacos.push(gerarFolha60x30Par(esq, dir, cfg.qrSizeMm));
+      pedacos.push(
+        gerarFolha60x30Par(esq, dir, cfg.qrSizeMm, qrPorIndice[i], dir ? qrPorIndice[i + 1] : null)
+      );
     }
     htmlCorpo = pedacos
       .map((bloco, idx) => (idx < pedacos.length - 1 ? `${bloco}<div class="page-break"></div>` : bloco))
@@ -442,10 +478,13 @@ export function imprimirEtiquetasEmJobUnico(etiquetas: EtiquetaParaImpressao[], 
       .page-break { break-after: page; page-break-after: always; }
     `;
   } else {
+    const qrLegado = await Promise.all(
+      itens.map((item) => qrTokenParaDataUrl(item.tokenQr, cfg.qrSizeMm))
+    );
     htmlCorpo = itens
       .map((item, index) => {
         const quebra = index < itens.length - 1 ? '<div class="page-break"></div>' : '';
-        return `${gerarHtmlEtiquetaLegado(item, formato)}${quebra}`;
+        return `${gerarHtmlEtiquetaLegado(item, formato, qrLegado[index])}${quebra}`;
       })
       .join('');
     estilos = `

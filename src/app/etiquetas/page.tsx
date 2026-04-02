@@ -155,7 +155,7 @@ export default function EtiquetasPage() {
     setErroImpressao('');
 
     try {
-      const sucesso = imprimirEtiquetasEmJobUnico(
+      const sucesso = await imprimirEtiquetasEmJobUnico(
         lista.map((e) => ({
           id: e.id,
           produtoNome: e.produto?.nome || 'Produto',

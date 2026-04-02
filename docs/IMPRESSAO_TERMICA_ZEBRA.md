@@ -101,7 +101,7 @@ Sem calibração, a impressora **não sabe** onde termina cada etiqueta.
 
 - Uma **página** de impressão = **uma etiqueta física** 60×30 mm com **dois QRs** lado a lado (recorte no pontilhado no meio).
 - O layout 60×30 usa **`display: table` / `table-cell`** com metades em **mm fixos** (em vez de flex), para drivers térmicos não deslocarem tudo para um canto da etiqueta.
-- QR é imagem remota (`api.qrserver.com`) — precisa de **internet** no momento da impressão.
+- O QR é gerado **no navegador** (biblioteca `qrcode`, PNG em data URL) — **não** depende de serviço externo na hora de imprimir.
 
 ## 5. Se ainda falhar
 

@@ -18,8 +18,8 @@ import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   confirmarImpressao,
   FORMATO_CONFIG,
+  FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
   imprimirEtiquetasEmJobUnico,
-  obterFormatoImpressaoPadrao,
   type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
 import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
@@ -295,10 +295,9 @@ export default function SepararPorLojaPage() {
       { lote: 'SEPARACAO-LOJA', mode: 'impresso_agora' }
     );
 
-    const formato = obterFormatoImpressaoPadrao();
     const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     const agora = new Date().toISOString();
-    const abriu = imprimirEtiquetasEmJobUnico(
+    const abriu = await imprimirEtiquetasEmJobUnico(
       itensEscaneados.map((item) => ({
         id: item.id,
         produtoNome: item.produto_nome,
@@ -311,7 +310,7 @@ export default function SepararPorLojaPage() {
         nomeLoja: nomeLojaDestino,
         dataGeracaoIso: agora,
       })),
-      formato
+      FORMATO_ETIQUETA_FLUXO_OPERACIONAL
     );
     if (!abriu) {
       throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
@@ -320,8 +319,7 @@ export default function SepararPorLojaPage() {
 
   const imprimirEtiquetasSeparacao = async () => {
     if (itensEscaneados.length === 0) return;
-    const formato = obterFormatoImpressaoPadrao();
-    if (!confirmarImpressao(itensEscaneados.length, formato)) return;
+    if (!confirmarImpressao(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
 
     setImprimindoEtiquetas(true);
     try {
@@ -335,8 +333,12 @@ export default function SepararPorLojaPage() {
 
   const guiaPdfEImprimirEtiquetas = async () => {
     if (itensEscaneados.length === 0) return;
-    const formato = obterFormatoImpressaoPadrao();
-    if (!window.confirm(mensagemConfirmarGuiaPdfEetiquetas(itensEscaneados.length, formato))) return;
+    if (
+      !window.confirm(
+        mensagemConfirmarGuiaPdfEetiquetas(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)
+      )
+    )
+      return;
 
     setImprimindoEtiquetas(true);
     try {
