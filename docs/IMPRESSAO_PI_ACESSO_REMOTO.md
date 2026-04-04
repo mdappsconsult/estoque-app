@@ -15,6 +15,7 @@ O Raspberry fica na **rede local** (`192.168.x.x`). Nenhum computador na interne
 
 ### Duas pontes (estoque e indústria)
 
+- **Guia passo a passo para o segundo Raspberry (indústria):** `docs/RASPBERRY_INDUSTRIA_NOVO_PI.md` (Wi‑Fi, `.env`, `PI_TUNNEL_PAPEL=industria`, systemd, validação).
 - **`estoque`**: fluxo atual de separação loja; primeiro Pi costuma usar esta linha.
 - **`industria`**: segunda ponte para quando houver outro Raspberry (ex.: etiquetas na indústria). Cada linha tem o seu **`tunnel_sync_secret`** no banco (copiar do SQL Editor para o `.env` **daquele** Pi).
 - No `.env` do Pi que sincroniza o túnel: **`PI_TUNNEL_PAPEL=industria`** (o script `cloudflared-quick-tunnel-sync.sh` envia `p_papel` na RPC). O Pi de estoque pode omitir (padrão `estoque`).

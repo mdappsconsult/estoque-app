@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-03 - Doc: novo Raspberry indústria (`RASPBERRY_INDUSTRIA_NOVO_PI.md`)
+- **Doc:** guia operacional para segundo Pi (`papel = industria`): o que passar sem SSH, checklist físico, pacotes, `.env` com `PI_TUNNEL_PAPEL`, systemd, validação e troubleshooting; link em `IMPRESSAO_PI_ACESSO_REMOTO.md` e `CONTEXTO_ATUAL.md`.
+- **Validação:** revisão interna do texto; sem alteração de código.
+
 ### Sessão - 2026-04-03 - Config impressoras: duas pontes Pi (estoque / indústria)
 - **Banco:** migração `20260406120000_config_impressao_pi_papel.sql` — coluna `papel` (única), linha **industria** + `tunnel_sync_secret` próprio; RPC `sync_pi_tunnel_ws_url` com `p_papel` (default estoque); `GRANT UPDATE` em URL/token/fila para anon (tela de config).
 - **App:** `/configuracoes/impressoras` (ADMIN_MASTER/MANAGER); `GET /api/impressoras/status?papel=` (health do túnel); `resolvePiPrintConnection` / `usePiPrintBridgeConfig({ papel })`; Separar por Loja → **estoque**; teste de impressão com `?papel=industria` opcional.

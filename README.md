@@ -115,7 +115,7 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 **Impressão Pi / Zebra (60×30)** — o app fala com o serviço `pi-print-ws` no Raspberry (`scripts/pi-print-ws` + CUPS).
 
-- **Produção / “de qualquer lugar”:** não precisa de `.env` por máquina. Aplique a migração `supabase/migrations/20260404140000_config_impressao_pi.sql` e preencha a tabela **`config_impressao_pi`** com URL **`wss://…`** (túnel até o Pi, ex. Cloudflare Tunnel). Guia: **`docs/IMPRESSAO_PI_ACESSO_REMOTO.md`**.
+- **Produção / “de qualquer lugar”:** não precisa de `.env` por máquina. Aplique as migrações de `config_impressao_pi` (incl. `papel` estoque/industria) e preencha **`wss://…`** no Supabase. Guias: **`docs/IMPRESSAO_PI_ACESSO_REMOTO.md`**, segundo Raspberry na indústria: **`docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`**.
 - **Só desenvolvimento na mesma LAN** (opcional), pode forçar via env (tem prioridade sobre o Supabase):
 
 ```env
