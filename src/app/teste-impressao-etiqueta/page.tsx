@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Printer, Loader2, ArrowLeft, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
@@ -15,13 +16,18 @@ import {
   obterFormatoImpressaoPadrao,
 } from '@/lib/printing/label-print';
 import { enviarHtmlParaPiPrintBridge } from '@/lib/printing/pi-print-ws-client';
+import type { ImpressaoPiPapel } from '@/lib/services/config-impressao-pi';
 
-export default function TesteImpressaoEtiquetaPage() {
+function TesteImpressaoEtiquetaInner() {
+  const searchParams = useSearchParams();
+  const papelParam = searchParams.get('papel');
+  const papel: ImpressaoPiPapel = papelParam === 'industria' ? 'industria' : 'estoque';
+
   const {
     loading: piCfgLoading,
     available: piPrintAvailable,
     connection: piConnection,
-  } = usePiPrintBridgeConfig();
+  } = usePiPrintBridgeConfig({ papel });
   const [formato, setFormato] = useState<FormatoEtiqueta>('60x30');
   const [abrindo, setAbrindo] = useState(false);
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
@@ -55,7 +61,7 @@ export default function TesteImpressaoEtiquetaPage() {
   const gerarEImprimirNoPi = async () => {
     if (!piPrintAvailable || !piConnection) {
       alert(
-        'Configure config_impressao_pi no Supabase (wss:// via túnel) ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+        'Configure a ponte no Supabase (wss:// via túnel) ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md e Configurações → Impressoras.'
       );
       return;
     }
@@ -66,6 +72,7 @@ export default function TesteImpressaoEtiquetaPage() {
       await enviarHtmlParaPiPrintBridge(html, {
         jobName: `teste-impressao-${formato}`,
         connection: piConnection,
+        papel,
       });
       alert('Amostra enviada para impressão na estação (Raspberry / Zebra).');
     } catch (err: unknown) {
@@ -96,6 +103,11 @@ export default function TesteImpressaoEtiquetaPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+          Ponte Pi: <strong>{papel === 'estoque' ? 'estoque (padrão)' : 'indústria'}</strong>. Para testar a segunda ponte, abra esta página com{' '}
+          <code className="text-[11px]">?papel=industria</code> na URL.
+        </p>
+
         <p className="text-sm text-gray-600">
           Gera a mesma página de impressão usada em <strong>Separar por Loja</strong> e <strong>Etiquetas</strong>, com
           textos e QRs de exemplo. A janela abre e o navegador chama a impressão automaticamente — escolha sua impressora
@@ -150,9 +162,9 @@ export default function TesteImpressaoEtiquetaPage() {
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Para <strong>Pi / Zebra</strong> a partir de qualquer lugar: túnel no Raspberry + URL{' '}
             <code className="text-[11px]">wss://…</code> em <code className="text-[11px]">config_impressao_pi</code> no
-            Supabase. Em LAN, pode usar <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL</code> no{' '}
-            <code className="text-[11px]">.env.local</code>. Guia:{' '}
-            <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>.
+            Supabase (papel <code className="text-[11px]">{papel}</code>). Em LAN, pode usar{' '}
+            <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL</code> no <code className="text-[11px]">.env.local</code>.
+            Guia: <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>.
           </p>
         )}
         {avisoHttpsPi && (
@@ -173,5 +185,20 @@ export default function TesteImpressaoEtiquetaPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function TesteImpressaoEtiquetaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-24 text-gray-500 gap-2">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          Carregando…
+        </div>
+      }
+    >
+      <TesteImpressaoEtiquetaInner />
+    </Suspense>
   );
 }

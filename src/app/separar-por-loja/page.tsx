@@ -97,7 +97,7 @@ export default function SepararPorLojaPage() {
     loading: piCfgLoading,
     available: piPrintAvailable,
     connection: piConnection,
-  } = usePiPrintBridgeConfig();
+  } = usePiPrintBridgeConfig({ papel: 'estoque' });
   const { data: locais, loading } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const lojas = locais.filter(l => l.tipo === 'STORE');
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');

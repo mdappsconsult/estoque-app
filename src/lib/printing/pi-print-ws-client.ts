@@ -3,10 +3,13 @@
  *
  * Ordem de resolução da URL:
  * 1. `NEXT_PUBLIC_PI_PRINT_WS_URL` (+ token/fila opcionais) — útil em dev/local.
- * 2. Tabela Supabase `config_impressao_pi` (id=1) — URL pública `wss://` (túnel), sem .env em cada PC.
+ * 2. Tabela Supabase `config_impressao_pi` por `papel` (estoque | industria) — URL pública `wss://`.
  */
 
-import { getConfigImpressaoPi } from '@/lib/services/config-impressao-pi';
+import {
+  type ImpressaoPiPapel,
+  getConfigImpressaoPiByPapel,
+} from '@/lib/services/config-impressao-pi';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -41,13 +44,16 @@ function connectionFromEnv(): PiPrintConnection | null {
 
 /**
  * URL efetiva do bridge: .env tem prioridade; senão lê `config_impressao_pi` no Supabase.
+ * @param papel — `estoque` (separação/loja) ou `industria` (segundo Pi). Ignorado quando há env global.
  */
-export async function resolvePiPrintConnection(): Promise<PiPrintConnection | null> {
+export async function resolvePiPrintConnection(
+  papel: ImpressaoPiPapel = 'estoque'
+): Promise<PiPrintConnection | null> {
   const fromEnv = connectionFromEnv();
   if (fromEnv) return fromEnv;
 
   try {
-    const row = await getConfigImpressaoPi();
+    const row = await getConfigImpressaoPiByPapel(papel);
     if (!row) return null;
     const url = trim(row.ws_public_url);
     if (!url) return null;
@@ -93,17 +99,21 @@ export async function enviarHtmlParaPiPrintBridge(
     jobName?: string;
     queue?: string;
     timeoutMs?: number;
-    /** Se omitido, chama `resolvePiPrintConnection()` de novo. */
+    /** Qual ponte no Supabase quando não há `connection` nem env (default estoque). */
+    papel?: ImpressaoPiPapel;
+    /** Se omitido, chama `resolvePiPrintConnection(papel)` de novo. */
     connection?: PiPrintConnection | null;
   }
 ): Promise<void> {
   if (typeof window === 'undefined') {
     throw new Error('Impressão Pi só pode ser chamada no navegador.');
   }
-  const conn = options?.connection ?? (await resolvePiPrintConnection());
+  const papel = options?.papel ?? 'estoque';
+  const conn =
+    options?.connection ?? (await resolvePiPrintConnection(papel));
   if (!conn) {
     throw new Error(
-      'Impressão na estação não configurada. Use NEXT_PUBLIC_PI_PRINT_WS_URL no ambiente ou preencha a tabela config_impressao_pi no Supabase (URL wss:// do túnel no Raspberry). Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+      'Impressão na estação não configurada. Use NEXT_PUBLIC_PI_PRINT_WS_URL no ambiente ou preencha config_impressao_pi no Supabase (papel estoque/industria). Veja Configurações → Impressoras e docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
     );
   }
   const wsUrl = buildWebSocketUrlFromConnection(conn);

@@ -158,6 +158,7 @@ export type Database = {
       config_impressao_pi: {
         Row: {
           id: number;
+          papel: 'estoque' | 'industria';
           ws_public_url: string;
           ws_token: string;
           cups_queue: string;
@@ -166,6 +167,7 @@ export type Database = {
         };
         Insert: {
           id?: number;
+          papel?: 'estoque' | 'industria';
           ws_public_url?: string;
           ws_token?: string;
           cups_queue?: string;
@@ -174,6 +176,7 @@ export type Database = {
         };
         Update: {
           id?: number;
+          papel?: 'estoque' | 'industria';
           ws_public_url?: string;
           ws_token?: string;
           cups_queue?: string;

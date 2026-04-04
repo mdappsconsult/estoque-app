@@ -69,6 +69,7 @@ const menuExpandable = [
     icon: Settings,
     items: [
       { name: 'Perfil', href: '/configuracoes/perfil' },
+      { name: 'Impressoras (Pi)', href: '/configuracoes/impressoras' },
       { name: 'Permissões', href: '/configuracoes/permissoes' },
     ]
   },

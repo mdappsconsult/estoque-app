@@ -5,8 +5,10 @@ import {
   type PiPrintConnection,
   resolvePiPrintConnection,
 } from '@/lib/printing/pi-print-ws-client';
+import type { ImpressaoPiPapel } from '@/lib/services/config-impressao-pi';
 
-export function usePiPrintBridgeConfig() {
+export function usePiPrintBridgeConfig(options?: { papel?: ImpressaoPiPapel }) {
+  const papel = options?.papel ?? 'estoque';
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState<PiPrintConnection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +17,7 @@ export function usePiPrintBridgeConfig() {
     let cancelled = false;
     void (async () => {
       try {
-        const c = await resolvePiPrintConnection();
+        const c = await resolvePiPrintConnection(papel);
         if (!cancelled) {
           setConnection(c);
           setError(null);
@@ -32,7 +34,7 @@ export function usePiPrintBridgeConfig() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [papel]);
 
   return {
     loading,

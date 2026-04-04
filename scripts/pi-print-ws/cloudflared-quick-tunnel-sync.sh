@@ -32,12 +32,16 @@ sync_url_to_supabase() {
   fi
 
   local body code out
+  # PI_TUNNEL_PAPEL=industria no .env do segundo Raspberry (padrão: estoque).
+  _PAPEL="${PI_TUNNEL_PAPEL:-estoque}"
+
   body="$(
-    HTTPS_URL="$https_url" PI_TUNNEL_SYNC_SECRET="$_TUNNEL_SYNC_SECRET" python3 <<'PY'
+    HTTPS_URL="$https_url" PI_TUNNEL_SYNC_SECRET="$_TUNNEL_SYNC_SECRET" PI_TUNNEL_PAPEL="$_PAPEL" python3 <<'PY'
 import json, os
 print(json.dumps({
   "p_sync_secret": os.environ["PI_TUNNEL_SYNC_SECRET"],
   "p_https_url": os.environ["HTTPS_URL"],
+  "p_papel": os.environ.get("PI_TUNNEL_PAPEL") or "estoque",
 }))
 PY
   )" || return 0

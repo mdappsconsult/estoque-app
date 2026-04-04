@@ -1,5 +1,12 @@
 # Log de Sessões
 
+### Sessão - 2026-04-03 - Config impressoras: duas pontes Pi (estoque / indústria)
+- **Banco:** migração `20260406120000_config_impressao_pi_papel.sql` — coluna `papel` (única), linha **industria** + `tunnel_sync_secret` próprio; RPC `sync_pi_tunnel_ws_url` com `p_papel` (default estoque); `GRANT UPDATE` em URL/token/fila para anon (tela de config).
+- **App:** `/configuracoes/impressoras` (ADMIN_MASTER/MANAGER); `GET /api/impressoras/status?papel=` (health do túnel); `resolvePiPrintConnection` / `usePiPrintBridgeConfig({ papel })`; Separar por Loja → **estoque**; teste de impressão com `?papel=industria` opcional.
+- **Pi:** `cloudflared-quick-tunnel-sync.sh` envia `p_papel` a partir de **`PI_TUNNEL_PAPEL`** (padrão estoque).
+- **Docs:** `docs/IMPRESSAO_PI_ACESSO_REMOTO.md`, `docs/consultas-sql/config-impressao-pi.sql`.
+- **Validação:** `npm run lint` e `npm run build` OK. Migração aplicada no Supabase via MCP neste ambiente.
+
 ### Sessão - 2026-04-05 - ESLint: projeto sem erros + CI com `npm run lint`
 - **Código:** substituição de `any` em catches e joins Supabase; `errMessage()` em `src/lib/errMessage.ts`; tipos em `ProdutoModal`, `useRealtimeQuery`, serviços e páginas; `eslint-disable` pontual (`react-hooks/set-state-in-effect`, `exhaustive-deps`, PostgREST dinâmico).
 - **Config:** `eslint.config.mjs` ignora `supabase/run-schema*.mjs`.

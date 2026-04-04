@@ -2,7 +2,7 @@
 
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
-  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -52,6 +52,7 @@ const features: HomeFeature[] = [
   { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
   { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
+  { title: 'Impressoras (Pi)', description: 'Ponte estoque e indústria.', icon: Printer, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-700', href: '/configuracoes/impressoras' },
   { title: 'Permissões', description: 'Quem acessa cada tela (admin).', icon: Shield, iconBg: 'bg-red-50', iconColor: 'text-red-600', href: '/configuracoes/permissoes' },
 ];
 
@@ -80,7 +81,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
     },
   ],
   MANAGER: [
@@ -103,7 +104,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Cadastros',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/configuracoes/perfil'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
     },
   ],
   OPERATOR_WAREHOUSE: [

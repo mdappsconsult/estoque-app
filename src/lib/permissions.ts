@@ -36,6 +36,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/cadastros/usuarios': ['ADMIN_MASTER'],
   '/contagem-loja': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE'],
   '/configuracoes/perfil': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
+  '/configuracoes/impressoras': ['ADMIN_MASTER', 'MANAGER'],
   '/configuracoes/permissoes': ['ADMIN_MASTER'],
 };
 
@@ -84,6 +85,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/cadastros/usuarios', label: 'Cadastro — usuários', section: 'Cadastros' },
   { path: '/contagem-loja', label: 'Declarar estoque na loja', section: 'Operações' },
   { path: '/configuracoes/perfil', label: 'Config. — meu perfil', section: 'Configurações' },
+  { path: '/configuracoes/impressoras', label: 'Config. — impressoras (Pi)', section: 'Configurações' },
   { path: '/configuracoes/permissoes', label: 'Config. — permissões', section: 'Configurações' },
 ];
 
