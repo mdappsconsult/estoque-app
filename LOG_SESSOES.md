@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-05 - Git: push main impressão Pi + migrações
+- **Commit** `a55960b` em `main`: impressão via Pi (WS), `config_impressao_pi`, RPC de sync do túnel, scripts `pi-print-ws`, docs e ajustes de tipo em `separar-por-loja` / `label-print` / `database.ts`.
+- **Testes:** `npm run build` OK; `eslint` nos ficheiros tocados neste commit OK. O `npm run lint` global do repo ainda acusa erros antigos em outras páginas (CI só roda build).
+- **Push:** `origin/main` atualizado (`github.com/mdappsconsult/estoque-app`).
+
 ### Sessão - 2026-04-05 - Mac dev: SSH por chave para o Pi
 - **Chave:** `~/.ssh/id_ed25519` (Ed25519, sem passphrase — só para dev; pode proteger com `-p` depois).
 - **Pi:** chave pública em `authorized_keys` do utilizador `kim`; login testado com `BatchMode` (sem password).
