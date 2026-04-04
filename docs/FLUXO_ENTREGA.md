@@ -10,15 +10,16 @@ Documento canônico para **não quebrar** o caminho: código → validação →
 
 ```bash
 npm ci   # ou npm install
+npm run lint
 npm run build
 ```
 
-Se o build falhar, **não** faça merge/push para `main`.
+Se o lint ou o build falhar, **não** faça merge/push para `main`.
 
 ## 2. Repositório Git (fonte da verdade)
 
 - Trabalho integrado em **`main`** (ou PR → revisão → merge em `main`).
-- Após push em `main`, o **GitHub Actions** roda `CI` (`npm ci` + `npm run build`). Deploy só faz sentido com **CI verde**.
+- Após push em `main`, o **GitHub Actions** roda `CI` (`npm ci` + `npm run lint` + `npm run build`). Deploy só faz sentido com **CI verde**.
 
 ## 3. Deploy do app (Railway)
 
@@ -46,12 +47,11 @@ Regra detalhada: `.cursor/rules/contexto-operacional.mdc` e `AGENTS.md`.
 
 ## 6. O que o CI **não** cobre ainda
 
-- **`npm run lint`** hoje acusa muitos avisos/erros legados; o gate oficial é **`npm run build`** (inclui checagem TypeScript do Next).
 - Testes E2E / RLS em produção: evoluir conforme prioridade.
 
 ## Checklist rápido antes de considerar “pronto”
 
-- [ ] `npm run build` OK localmente  
+- [ ] `npm run lint` e `npm run build` OK localmente  
 - [ ] Push/PR com CI verde  
 - [ ] Migrations aplicadas no Supabase **de produção** se o diff tocar schema  
 - [ ] `CONTEXTO_ATUAL.md` / `LOG_SESSOES.md` se for mudança operacional relevante  

@@ -5,7 +5,7 @@ import { Search, Edit2, Trash2, Snowflake, Thermometer, Loader2 } from 'lucide-r
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
-import ProdutoModal from '@/components/produtos/ProdutoModal';
+import ProdutoModal, { type ProdutoModalSavePayload } from '@/components/produtos/ProdutoModal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
 import { Produto } from '@/types/database';
@@ -28,20 +28,36 @@ const LABEL_ORIGEM: Record<string, string> = {
   AMBOS: 'Ambos',
 };
 
+type ProdutoRowRaw = Record<string, unknown> & { id: string; familia_id?: string | null };
+type GrupoEmb = { id: string; nome: string; cor: string };
+type PgGrupoRow = { grupos: GrupoEmb | GrupoEmb[] | null };
+
+function primeiroGrupoRel(g: PgGrupoRow['grupos']): GrupoEmb | null {
+  if (g == null) return null;
+  return Array.isArray(g) ? (g[0] ?? null) : g;
+}
+
 export default function ProdutosPage() {
   const { data: produtosRaw, loading, refetch } = useRealtimeQuery<ProdutoComGrupos>({
     table: 'produtos',
     select: '*',
     orderBy: { column: 'nome', ascending: true },
     transform: async (prods) => {
-      const famIds = [...new Set(prods.map((p: any) => p.familia_id).filter(Boolean))] as string[];
+      const rows = prods as ProdutoRowRaw[];
+      const famIds = [
+        ...new Set(
+          rows
+            .map((p) => p.familia_id)
+            .filter((x): x is string => typeof x === 'string' && x.length > 0)
+        ),
+      ];
       let famMap = new Map<string, FamiliaRow>();
       if (famIds.length > 0) {
         const { data: fams } = await supabase.from('familias').select('id, nome, cor').in('id', famIds);
         famMap = new Map((fams || []).map((f) => [f.id, f]));
       }
       const result = await Promise.all(
-        prods.map(async (produto: any) => {
+        rows.map(async (produto) => {
           const { data: gruposData } = await supabase
             .from('produto_grupos')
             .select('grupo_id, grupos(id, nome, cor)')
@@ -53,10 +69,12 @@ export default function ProdutosPage() {
           return {
             ...produto,
             origem: (produto.origem as Produto['origem']) ?? 'AMBOS',
-            estoque_minimo: produto.estoque_minimo ?? 0,
-            custo_referencia: produto.custo_referencia ?? null,
+            estoque_minimo: (produto.estoque_minimo as number | undefined) ?? 0,
+            custo_referencia: (produto.custo_referencia as number | null | undefined) ?? null,
             familia: produto.familia_id ? famMap.get(produto.familia_id) ?? null : null,
-            grupos: (gruposData || []).map((pg: any) => pg.grupos),
+            grupos: (gruposData || [])
+              .map((pg: PgGrupoRow) => primeiroGrupoRel(pg.grupos))
+              .filter((g): g is GrupoEmb => g != null),
             conservacoes: conservacoesData || [],
           } as ProdutoComGrupos;
         })
@@ -101,7 +119,7 @@ export default function ProdutosPage() {
     }
   };
 
-  const handleSalvarProduto = async (produtoData: any) => {
+  const handleSalvarProduto = async (produtoData: ProdutoModalSavePayload) => {
     try {
       if (produtoEditando) {
         const { error: updateError } = await supabase
@@ -139,7 +157,14 @@ export default function ProdutosPage() {
         await supabase.from('conservacoes').delete().eq('produto_id', produtoEditando.id);
         if (produtoData.conservacoes?.length > 0) {
           await supabase.from('conservacoes').insert(
-            produtoData.conservacoes.map((c: any) => ({ produto_id: produtoEditando.id, tipo: c.tipo, status: c.status, dias: c.dias, horas: c.horas, minutos: c.minutos }))
+            produtoData.conservacoes.map((c) => ({
+              produto_id: produtoEditando.id,
+              tipo: c.tipo,
+              status: c.status,
+              dias: c.dias,
+              horas: c.horas,
+              minutos: c.minutos,
+            }))
           );
         }
       } else {
@@ -175,7 +200,14 @@ export default function ProdutosPage() {
         }
         if (produtoData.conservacoes?.length > 0) {
           await supabase.from('conservacoes').insert(
-            produtoData.conservacoes.map((c: any) => ({ produto_id: novoProduto.id, tipo: c.tipo, status: c.status, dias: c.dias, horas: c.horas, minutos: c.minutos }))
+            produtoData.conservacoes.map((c) => ({
+              produto_id: novoProduto.id,
+              tipo: c.tipo,
+              status: c.status,
+              dias: c.dias,
+              horas: c.horas,
+              minutos: c.minutos,
+            }))
           );
         }
         await supabase.from('estoque').insert({ produto_id: novoProduto.id, quantidade: 0 });

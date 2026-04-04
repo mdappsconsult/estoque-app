@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { criarLoteCompra } from '@/lib/services/lotes-compra';
 import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
+import { errMessage } from '@/lib/errMessage';
 
 type UnidadeCompra = 'UN' | 'CAIXA' | 'FARDO';
 interface FamiliaOpt {
@@ -177,8 +178,8 @@ export default function EntradaCompraPage() {
       setModalCategoriaAberto(false);
       setCategoriaEditandoId(null);
       setCategoriaNome('');
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar família');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao salvar família'));
     } finally {
       setSavingCategoria(false);
     }
@@ -242,8 +243,8 @@ export default function EntradaCompraPage() {
       setModalEmbalagemAberto(false);
       setEmbalagemEditandoId(null);
       setEmbalagemNome('');
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar tipo de embalagem');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao salvar tipo de embalagem'));
     } finally {
       setSavingEmbalagem(false);
     }
@@ -378,8 +379,8 @@ export default function EntradaCompraPage() {
         itens_por_embalagem: '1',
       });
       setHintCompra(null);
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao registrar compra');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao registrar compra'));
     } finally {
       setSaving(false);
     }
@@ -479,8 +480,8 @@ export default function EntradaCompraPage() {
         });
         await handleProdutoChange(criado.id);
       }
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao criar produto');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao criar produto'));
     } finally {
       setSavingProduto(false);
     }

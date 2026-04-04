@@ -1,13 +1,13 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Archive, Loader2, QrCode, CheckCircle, X, AlertCircle } from 'lucide-react';
+import { Archive, Loader2, QrCode, CheckCircle, AlertCircle } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import Badge from '@/components/ui/Badge';
 import QRScanner from '@/components/QRScanner';
 import { useAuth } from '@/hooks/useAuth';
 import { baixarItem, getItemPorCodigoEscaneado } from '@/lib/services/itens';
+import { errMessage } from '@/lib/errMessage';
 
 interface BaixaResult {
   token_qr: string;
@@ -60,8 +60,16 @@ export default function BaixaDiariaPage() {
         itensBaixadosRef.current.add(item.id);
         setResultados(prev => [{ token_qr: item.token_qr, nome: item.produto?.nome || '', success: true }, ...prev]);
       }
-    } catch (err: any) {
-      setResultados(prev => [{ token_qr: token, nome: token, success: false, error: err?.message || 'Não foi possível buscar o item. Tente novamente.' }, ...prev]);
+    } catch (err: unknown) {
+      setResultados((prev) => [
+        {
+          token_qr: token,
+          nome: token,
+          success: false,
+          error: errMessage(err, 'Não foi possível buscar o item. Tente novamente.'),
+        },
+        ...prev,
+      ]);
     } finally {
       setTokenInput('');
       setProcessando(false);

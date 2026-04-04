@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-05 - ESLint: projeto sem erros + CI com `npm run lint`
+- **Código:** substituição de `any` em catches e joins Supabase; `errMessage()` em `src/lib/errMessage.ts`; tipos em `ProdutoModal`, `useRealtimeQuery`, serviços e páginas; `eslint-disable` pontual (`react-hooks/set-state-in-effect`, `exhaustive-deps`, PostgREST dinâmico).
+- **Config:** `eslint.config.mjs` ignora `supabase/run-schema*.mjs`.
+- **CI:** `.github/workflows/ci.yml` passa a executar **ESLint** antes do build.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-04-05 - Git: push main impressão Pi + migrações
 - **Commit** `a55960b` em `main`: impressão via Pi (WS), `config_impressao_pi`, RPC de sync do túnel, scripts `pi-print-ws`, docs e ajustes de tipo em `separar-por-loja` / `label-print` / `database.ts`.
 - **Testes:** `npm run build` OK; `eslint` nos ficheiros tocados neste commit OK. O `npm run lint` global do repo ainda acusa erros antigos em outras páginas (CI só roda build).

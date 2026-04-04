@@ -1,12 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileText, Loader2, Download } from 'lucide-react';
+import { FileText, Loader2 } from 'lucide-react';
 import Select from '@/components/ui/Select';
-import Badge from '@/components/ui/Badge';
-import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
-import { Local } from '@/types/database';
+import { errMessage } from '@/lib/errMessage';
 
 type Relatorio = 'movimento' | 'consumo' | 'transferencias' | 'estoque_loja' | 'perdas';
 
@@ -21,9 +19,7 @@ const RELATORIOS: { value: Relatorio; label: string }[] = [
 interface ReportRow { label: string; values: Record<string, string | number> }
 
 export default function RelatoriosPage() {
-  const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const [tipo, setTipo] = useState<Relatorio>('movimento');
-  const [localId, setLocalId] = useState('');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [colunas, setColunas] = useState<string[]>([]);
@@ -54,11 +50,21 @@ export default function RelatoriosPage() {
         
         // Agrupar por produto
         const map: Record<string, { nome: string; count: number }> = {};
-        (baixas7 || []).forEach((b: any) => {
-          const pid = b.item?.produto_id;
-          const nome = b.item?.produto?.nome || '?';
+        type Baixa7Row = { item?: { produto_id?: string; produto?: { nome?: string } | { nome?: string }[] | null } | null };
+        const normItemBaixa = (row: Baixa7Row) => {
+          const it = row.item;
+          if (it == null) return { produto_id: undefined as string | undefined, nome: '?' };
+          const inner = Array.isArray(it) ? it[0] : it;
+          const pid = inner?.produto_id;
+          const p = inner?.produto;
+          const prod = p == null ? null : Array.isArray(p) ? p[0] : p;
+          const nome = prod?.nome || '?';
+          return { produto_id: pid, nome };
+        };
+        ((baixas7 || []) as unknown as Baixa7Row[]).forEach((b) => {
+          const { produto_id: pid, nome } = normItemBaixa(b);
           if (!pid) return;
-          if (!map[pid]) map[pid] = { nome, count: 0 };
+          if (!map[pid]) map[pid] = { nome: nome || '?', count: 0 };
           map[pid].count++;
         });
 
@@ -71,23 +77,48 @@ export default function RelatoriosPage() {
         const { data: trans } = await supabase.from('transferencias').select('id, status, origem:locais!origem_id(nome), destino:locais!destino_id(nome), transferencia_itens(id, recebido)').order('created_at', { ascending: false }).limit(50);
         
         setColunas(['Origem', 'Destino', 'Enviados', 'Recebidos', 'Status']);
-        setRows((trans || []).map((t: any) => ({
-          label: `#${t.id.slice(0, 8)}`,
-          values: {
-            Origem: t.origem?.nome || '?',
-            Destino: t.destino?.nome || '?',
-            Enviados: t.transferencia_itens?.length || 0,
-            Recebidos: t.transferencia_itens?.filter((ti: any) => ti.recebido).length || 0,
-            Status: t.status,
-          },
-        })));
+        type NomeRow = { nome?: string } | { nome?: string }[] | null | undefined;
+        type TransRelRow = {
+          id: string;
+          status: string;
+          origem?: NomeRow;
+          destino?: NomeRow;
+          transferencia_itens?: { recebido?: boolean }[] | null;
+        };
+        const nomeJoin = (v: NomeRow) => {
+          if (v == null) return '?';
+          const o = Array.isArray(v) ? v[0] : v;
+          return (o && typeof o === 'object' && 'nome' in o && typeof o.nome === 'string' ? o.nome : null) || '?';
+        };
+        setRows(((trans || []) as unknown as TransRelRow[]).map((t) => {
+          const ti = (t.transferencia_itens ?? []) as { recebido?: boolean }[];
+          return {
+            label: `#${t.id.slice(0, 8)}`,
+            values: {
+              Origem: nomeJoin(t.origem),
+              Destino: nomeJoin(t.destino),
+              Enviados: ti.length,
+              Recebidos: ti.filter((x) => x.recebido).length,
+              Status: t.status,
+            },
+          };
+        }));
       } else if (tipo === 'estoque_loja') {
         const { data: itensData } = await supabase.from('itens').select('estado, local_atual_id, local_atual:locais!local_atual_id(nome)').eq('estado', 'EM_ESTOQUE');
         
         const map: Record<string, { nome: string; count: number }> = {};
-        (itensData || []).forEach((i: any) => {
+        type ItemLojaRow = {
+          local_atual_id?: string | null;
+          local_atual?: { nome?: string } | { nome?: string }[] | null;
+        };
+        const nomeLocal = (la: ItemLojaRow['local_atual']) => {
+          if (la == null) return 'Sem local';
+          const o = Array.isArray(la) ? la[0] : la;
+          return o?.nome || 'Sem local';
+        };
+        ((itensData || []) as unknown as ItemLojaRow[]).forEach((i) => {
           const lid = i.local_atual_id || 'sem_local';
-          if (!map[lid]) map[lid] = { nome: (i.local_atual as any)?.nome || 'Sem local', count: 0 };
+          if (!map[lid]) map[lid] = { nome: nomeLocal(i.local_atual), count: 0 };
           map[lid].count++;
         });
 
@@ -97,7 +128,14 @@ export default function RelatoriosPage() {
         const { data: perdasData } = await supabase.from('perdas').select('*, item:itens(produto:produtos(nome)), local:locais(nome)').order('created_at', { ascending: false }).limit(100);
         
         setColunas(['Produto', 'Local', 'Motivo', 'Data']);
-        setRows((perdasData || []).map((p: any) => ({
+        type PerdaRelRow = {
+          id: string;
+          created_at: string;
+          motivo: string;
+          item?: { produto?: { nome?: string } } | null;
+          local?: { nome?: string } | null;
+        };
+        setRows((perdasData || []).map((p: PerdaRelRow) => ({
           label: `#${p.id.slice(0, 8)}`,
           values: {
             Produto: p.item?.produto?.nome || '?',
@@ -107,14 +145,17 @@ export default function RelatoriosPage() {
           },
         })));
       }
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { gerar(); }, [tipo]);
+  useEffect(() => {
+    void gerar();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch só quando o tipo de relatório muda
+  }, [tipo]);
 
   return (
     <div className="max-w-4xl mx-auto">

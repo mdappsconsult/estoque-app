@@ -4,6 +4,7 @@ import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
   ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
@@ -14,7 +15,7 @@ import { PerfilUsuario } from '@/types/database';
 type HomeFeature = {
   title: string;
   description: string;
-  icon: any;
+  icon: LucideIcon;
   iconBg: string;
   iconColor: string;
   href: string;

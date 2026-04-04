@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { aceitarViagem, iniciarViagem } from '@/lib/services/viagens';
 import { supabase } from '@/lib/supabase';
 import { useState, useEffect } from 'react';
+import { errMessage } from '@/lib/errMessage';
 
 interface ViagemRow {
   id: string;
@@ -19,9 +20,15 @@ interface ViagemRow {
 
 interface TransRow {
   id: string;
-  destino: { nome: string };
+  destino: { nome: string } | { nome: string }[] | null;
   status: string;
   transferencia_itens: { id: string }[];
+}
+
+function destinoNome(d: TransRow['destino']): string | undefined {
+  if (d == null) return undefined;
+  const o = Array.isArray(d) ? d[0] : d;
+  return o?.nome;
 }
 
 export default function ViagemAceitePage() {
@@ -44,7 +51,7 @@ export default function ViagemAceitePage() {
           .from('transferencias')
           .select('id, status, destino:locais!destino_id(nome), transferencia_itens(id)')
           .eq('viagem_id', v.id);
-        map[v.id] = (data || []) as any;
+        map[v.id] = (data || []) as unknown as TransRow[];
       }
       setTransMap(map);
     };
@@ -56,7 +63,11 @@ export default function ViagemAceitePage() {
     const confirmou = window.confirm('Confirmar aceite desta viagem?');
     if (!confirmou) return;
     setLoadingAction(viagemId);
-    try { await aceitarViagem(viagemId, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
+    try {
+      await aceitarViagem(viagemId, usuario.id);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
+    }
     setLoadingAction(null);
   };
 
@@ -65,7 +76,11 @@ export default function ViagemAceitePage() {
     const confirmou = window.confirm('Confirmar início desta viagem?');
     if (!confirmou) return;
     setLoadingAction(viagemId);
-    try { await iniciarViagem(viagemId, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
+    try {
+      await iniciarViagem(viagemId, usuario.id);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
+    }
     setLoadingAction(null);
   };
 
@@ -82,7 +97,7 @@ export default function ViagemAceitePage() {
     const nomes = Array.from(
       new Set(
         trans
-          .map((t) => t.destino?.nome)
+          .map((t) => destinoNome(t.destino))
           .filter((nome): nome is string => Boolean(nome))
       )
     );
@@ -124,7 +139,7 @@ export default function ViagemAceitePage() {
                 <div className="space-y-1 mb-3">
                   {trans.map(t => (
                     <div key={t.id} className="text-sm text-gray-600 flex items-center gap-2">
-                      <span>→ {(t.destino as any)?.nome}</span>
+                      <span>→ {destinoNome(t.destino) ?? '—'}</span>
                       <span className="text-xs text-gray-400">({t.transferencia_itens?.length || 0} itens)</span>
                     </div>
                   ))}

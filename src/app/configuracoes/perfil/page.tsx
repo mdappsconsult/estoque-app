@@ -8,6 +8,7 @@ import Badge from '@/components/ui/Badge';
 import { useAuth } from '@/hooks/useAuth';
 import { updateUsuario } from '@/lib/services/usuarios';
 import { useRouter } from 'next/navigation';
+import { errMessage } from '@/lib/errMessage';
 
 const perfilLabel: Record<string, string> = {
   ADMIN_MASTER: 'Admin Master',
@@ -39,8 +40,8 @@ export default function PerfilPage() {
       localStorage.setItem('estoque_usuario', JSON.stringify(updated));
       setSucesso(true);
       setTimeout(() => setSucesso(false), 3000);
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
     } finally {
       setSaving(false);
     }

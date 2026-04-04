@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { Transferencia, TransferenciaInsert, TransferenciaUpdate } from '@/types/database';
+import { Transferencia, TransferenciaInsert } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
 
 export interface TransferenciaCompleta extends Transferencia {

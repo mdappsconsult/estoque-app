@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { Divergencia, DivergenciaUpdate } from '@/types/database';
+import { Divergencia } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
 
 export interface DivergenciaCompleta extends Divergencia {

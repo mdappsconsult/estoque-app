@@ -7,6 +7,7 @@ import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { resolverDivergencia } from '@/lib/services/divergencias';
+import { errMessage } from '@/lib/errMessage';
 
 interface DivRow {
   id: string;
@@ -38,7 +39,11 @@ export default function DivergenciasPage() {
   const handleResolver = async (id: string) => {
     if (!usuario) return;
     setActionLoading(id);
-    try { await resolverDivergencia(id, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
+    try {
+      await resolverDivergencia(id, usuario.id);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
+    }
     setActionLoading(null);
   };
 

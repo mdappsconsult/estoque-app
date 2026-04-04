@@ -38,7 +38,7 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 
 ## Fluxo contínuo (resumo)
 
-1. **`npm run build`** local antes de integrar em `main`.
+1. **`npm run lint`** e **`npm run build`** locais antes de integrar em `main`.
 2. **GitHub Actions** (`CI`) em todo push/PR para `main` — precisa ficar **verde**.
 3. **Railway** faz o deploy a partir do Git (recomendado ligar o repo no dashboard) ou via `railway up`.
 4. **Migrations** no Supabase de produção quando o schema mudar.

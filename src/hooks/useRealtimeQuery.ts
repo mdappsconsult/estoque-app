@@ -11,7 +11,7 @@ interface UseRealtimeQueryOptions<T> {
   filters?: { column: string; value: string | number }[];
   orderBy?: { column: string; ascending?: boolean };
   enabled?: boolean;
-  transform?: (data: any[]) => T[] | Promise<T[]>;
+  transform?: (data: Record<string, unknown>[]) => T[] | Promise<T[]>;
   pageSize?: number;
   /** Se definido, não conta a tabela inteira: busca só as N linhas mais recentes (útil com `orderBy` decrescente). */
   maxRows?: number;
@@ -26,7 +26,7 @@ interface UseRealtimeQueryResult<T> {
   refetch: () => Promise<void>;
 }
 
-export function useRealtimeQuery<T = any>(
+export function useRealtimeQuery<T = Record<string, unknown>>(
   options: UseRealtimeQueryOptions<T>
 ): UseRealtimeQueryResult<T> {
   const {
@@ -57,6 +57,8 @@ export function useRealtimeQuery<T = any>(
     const task = (async () => {
       try {
         const filtrosAplicados = [...(filters || []), ...(filter ? [filter] : [])];
+        /* Encadeamento dinâmico do client PostgREST (tipos internos não expostos de forma estável). */
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         const applyClauses = <Q,>(query: Q): Q => {
           let q: any = query;
           filtrosAplicados.forEach((f) => {
@@ -69,8 +71,9 @@ export function useRealtimeQuery<T = any>(
           }
           return q as Q;
         };
+        /* eslint-enable @typescript-eslint/no-explicit-any */
 
-        const result: any[] = [];
+        const result: unknown[] = [];
         const batchSize = Math.max(1, Math.min(pageSize, 1000));
 
         if (maxRows != null && maxRows > 0) {
@@ -104,7 +107,7 @@ export function useRealtimeQuery<T = any>(
           }
 
           const maxParallel = 4;
-          const pagesByOffset = new Map<number, any[]>();
+          const pagesByOffset = new Map<number, unknown[]>();
 
           for (let i = 0; i < offsets.length; i += maxParallel) {
             const chunkOffsets = offsets.slice(i, i + maxParallel);
@@ -134,7 +137,7 @@ export function useRealtimeQuery<T = any>(
         }
 
         const finalData = transform
-          ? await transform(result)
+          ? await transform(result as Record<string, unknown>[])
           : (result as T[]);
 
         setData(finalData);
@@ -153,6 +156,8 @@ export function useRealtimeQuery<T = any>(
     } finally {
       inFlightRef.current = null;
     }
+    // filter/orderBy: colunas em deps; objetos completos gerariam refetch em todo render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ver comentário acima
   }, [
     table,
     select,
@@ -213,6 +218,7 @@ export function useRealtimeQuery<T = any>(
         supabase.removeChannel(channelRef.current);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- canal realtime usa só fetchData estável por tabela
   }, [enabled, fetchData, refetchDebounceMs]);
 
   return { data, loading, error, refetch: fetchData };

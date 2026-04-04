@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, Loader2, QrCode, Clock, MapPin, User } from 'lucide-react';
+import { Search, Loader2, Clock, MapPin, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import QRScanner from '@/components/QRScanner';
@@ -102,7 +102,7 @@ export default function RastreioQRPage() {
           <div className="relative">
             <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
             <div className="space-y-4">
-              {timeline.map((t, i) => (
+              {timeline.map((t) => (
                 <div key={t.id} className="relative pl-10">
                   <div className="absolute left-2.5 w-3 h-3 rounded-full bg-red-500 border-2 border-white" />
                   <div className="bg-white rounded-xl border border-gray-200 p-3">

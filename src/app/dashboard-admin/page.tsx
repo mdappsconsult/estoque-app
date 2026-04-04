@@ -1,7 +1,6 @@
 'use client';
 
 import { BarChart3, Loader2, Boxes, Truck, Archive, Timer, AlertTriangle } from 'lucide-react';
-import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 
 interface ItemRow { id: string; estado: string; data_validade: string | null; created_at: string }

@@ -41,7 +41,7 @@ export default function LocaisPage() {
         await createLocal({ nome: form.nome, tipo: form.tipo, endereco: form.endereco || null });
       }
       setModalOpen(false);
-    } catch (err) {
+    } catch {
       alert('Erro ao salvar local');
     }
   };

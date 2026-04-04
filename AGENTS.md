@@ -16,5 +16,5 @@
 - Atualizar os dois arquivos ao finalizar mudancas relevantes:
   - `CONTEXTO_ATUAL.md` (estado atual)
   - `LOG_SESSOES.md` (historico da sessao)
-- Antes de dar por encerrada uma mudanca que vai para `main`: garantir que **`npm run build`** passa (o CI do GitHub roda o mesmo gate).
+- Antes de dar por encerrada uma mudanca que vai para `main`: garantir que **`npm run lint`** e **`npm run build`** passam (o CI do GitHub roda os mesmos gates).
 - **MCP Supabase** deve apontar para o mesmo projeto que `.env.local`: `npm run sync:mcp-supabase` (e reiniciar MCP). Conferir ref: `npm run env:supabase-ref`. SQL de apoio: `docs/consultas-sql/`. Ver `docs/SUPABASE_AMBIENTE_E_MCP.md`.

@@ -5,9 +5,9 @@ import { AlertTriangle, Loader2, QrCode, CheckCircle, AlertCircle } from 'lucide
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
-import Badge from '@/components/ui/Badge';
 import { useAuth } from '@/hooks/useAuth';
 import { getItemByTokenQR, descartarItem, ItemCompleto } from '@/lib/services/itens';
+import { errMessage } from '@/lib/errMessage';
 
 const MOTIVOS = [
   { value: 'vencido', label: 'Produto vencido' },
@@ -54,8 +54,8 @@ export default function PerdasPage() {
       setSucesso(true);
       setItem(null);
       setTokenInput('');
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
     } finally {
       setSaving(false);
     }

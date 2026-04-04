@@ -9,7 +9,8 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { createUsuario, updateUsuario, deleteUsuario } from '@/lib/services/usuarios';
-import { Local, Usuario } from '@/types/database';
+import { Local, Usuario, UsuarioInsert } from '@/types/database';
+import { errMessage } from '@/lib/errMessage';
 
 const PERFIS = [
   { value: 'ADMIN_MASTER', label: 'Admin Master' },
@@ -47,8 +48,12 @@ function idsLocaisPermitidosParaPerfil(
   return new Set(lista.map((l) => l.id));
 }
 
+type UsuarioListaRow = Usuario & {
+  local_padrao?: { id: string; nome: string; tipo?: string } | null;
+};
+
 export default function UsuariosPage() {
-  const { data: usuarios, loading } = useRealtimeQuery<Usuario & { local_padrao?: { id: string; nome: string } | null }>({
+  const { data: usuarios, loading } = useRealtimeQuery<UsuarioListaRow>({
     table: 'usuarios',
     select: '*, local_padrao:locais!local_padrao_id(id, nome)',
     orderBy: { column: 'nome', ascending: true },
@@ -71,7 +76,7 @@ export default function UsuariosPage() {
     setModalOpen(true);
   };
 
-  const openEdit = (u: Usuario) => {
+  const openEdit = (u: UsuarioListaRow) => {
     setEditando(u);
     setForm({ nome: u.nome, telefone: u.telefone, perfil: u.perfil, local_padrao_id: u.local_padrao_id || '' });
     setModalOpen(true);
@@ -92,11 +97,18 @@ export default function UsuariosPage() {
       if (editando) {
         await updateUsuario(editando.id, payload);
       } else {
-        await createUsuario(payload as any);
+        const insert: UsuarioInsert = {
+          nome: payload.nome,
+          telefone: payload.telefone,
+          perfil: payload.perfil,
+          local_padrao_id: payload.local_padrao_id,
+          status: 'ativo',
+        };
+        await createUsuario(insert);
       }
       setModalOpen(false);
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao salvar'));
     }
   };
 
@@ -154,7 +166,7 @@ export default function UsuariosPage() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant={perfilBadge(u.perfil)} size="sm">{perfilLabel(u.perfil)}</Badge>
                 <span className="text-xs text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" />{u.telefone}</span>
-                {(u as any).local_padrao && <span className="text-xs text-gray-400">• {(u as any).local_padrao.nome}</span>}
+                {u.local_padrao && <span className="text-xs text-gray-400">• {u.local_padrao.nome}</span>}
               </div>
             </div>
             <div className="flex gap-1">

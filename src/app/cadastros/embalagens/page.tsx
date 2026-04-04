@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
+import { errMessage } from '@/lib/errMessage';
 
 interface GrupoEmb {
   id: string;
@@ -82,8 +83,8 @@ export default function EmbalagensPage() {
       setEditando(null);
       setNome('');
       await refetch();
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar tipo de embalagem');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao salvar tipo de embalagem'));
     } finally {
       setSaving(false);
     }
@@ -100,8 +101,8 @@ export default function EmbalagensPage() {
       const { error } = await supabase.from('grupos').delete().eq('id', item.id);
       if (error) throw error;
       await refetch();
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao excluir tipo de embalagem');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao excluir tipo de embalagem'));
     }
   };
 

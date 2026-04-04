@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "supabase/run-schema.mjs",
+    "supabase/run-schema2.mjs",
+    "supabase/run-schema3.mjs",
   ]),
 ]);
 

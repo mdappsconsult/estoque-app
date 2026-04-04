@@ -44,11 +44,33 @@ interface ProdutoEditando {
   conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
 }
 
+/** Payload enviado por `onSave` (cadastro de produto). */
+export interface ProdutoModalSavePayload {
+  nome: string;
+  medida: string;
+  unidadeMedida: string;
+  familiaId: string | null;
+  embalagemGrupoIds: string[];
+  marca: string;
+  fornecedor: string | null;
+  sif: string;
+  origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
+  estoqueMinimo: number;
+  custoReferencia: number | null;
+  conservacoes: Array<{ tipo: string; status: string; dias: number; horas: number; minutos: number }>;
+  validadeDias: number;
+  validadeHoras: number;
+  validadeMinutos: number;
+  exibirHorarioEtiqueta: boolean;
+  contagemDoDia: boolean;
+  escopoReposicao: 'loja' | 'industria';
+}
+
 interface ProdutoModalProps {
   isOpen: boolean;
   onClose: () => void;
   produto?: ProdutoEditando | null;
-  onSave: (produto: any) => void;
+  onSave: (produto: ProdutoModalSavePayload) => void;
 }
 
 const unidadesMedida = [
@@ -106,6 +128,8 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
   }, [isOpen]);
 
   useEffect(() => {
+    /* Sincroniza estado local ao trocar `produto` / abrir modal (edição vs criação). */
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (produto) {
       const escopo = produto.escopo_reposicao;
       // Sem escopo no banco: COMPRA/AMBOS = fluxo fornecedor (entra em reposição de loja); só PRODUCAO = indústria.
@@ -161,6 +185,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         contagemDoDia: false,
       });
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [produto, isOpen]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -214,7 +239,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       validadeMinutos: validadeMinutosFinal,
       exibirHorarioEtiqueta: formData.exibirHorarioEtiqueta,
       contagemDoDia: formData.contagemDoDia,
-      escopoReposicao: tipoCadastro === 'INDUSTRIA' ? 'industria' : 'loja',
+      escopoReposicao: (tipoCadastro === 'INDUSTRIA' ? 'industria' : 'loja') as ProdutoModalSavePayload['escopoReposicao'],
     };
 
     onSave(produtoData);

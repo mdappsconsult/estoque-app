@@ -8,6 +8,7 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { supabase } from '@/lib/supabase';
+import { errMessage } from '@/lib/errMessage';
 
 interface Familia {
   id: string;
@@ -87,8 +88,8 @@ export default function CategoriasPage() {
       setEditando(null);
       setNome('');
       await refetch();
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar família');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao salvar família'));
     } finally {
       setSaving(false);
     }
@@ -106,8 +107,8 @@ export default function CategoriasPage() {
       const { error } = await supabase.from('familias').delete().eq('id', categoria.id);
       if (error) throw error;
       await refetch();
-    } catch (err: any) {
-      alert(err?.message || 'Erro ao excluir família');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro ao excluir família'));
     }
   };
 

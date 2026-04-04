@@ -12,6 +12,7 @@ import { getItemByTokenQR } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
 import { Local } from '@/types/database';
 import { idLocalLojaOperadora } from '@/lib/operador-loja-scope';
+import { errMessage } from '@/lib/errMessage';
 
 export default function TransferenciaLojaPage() {
   const { usuario } = useAuth();
@@ -62,8 +63,8 @@ export default function TransferenciaLojaPage() {
       );
       setSucesso(true);
       setItens([]);
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
     } finally {
       setSaving(false);
     }

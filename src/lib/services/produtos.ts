@@ -21,6 +21,9 @@ export interface ProdutoCompleto extends Produto {
   conservacoes: Conservacao[];
 }
 
+type ProdutoRowDb = Produto & { familias?: Familia | Familia[] | null };
+type ProdutoGrupoJoinRow = { grupos: Grupo | Grupo[] | null };
+
 // Buscar todos os produtos
 export async function getProdutos(): Promise<ProdutoCompleto[]> {
   const { data: produtos, error } = await supabase
@@ -31,7 +34,7 @@ export async function getProdutos(): Promise<ProdutoCompleto[]> {
   if (error) throw error;
 
   const produtosCompletos = await Promise.all(
-    (produtos || []).map(async (row: any) => {
+    (produtos || []).map(async (row: ProdutoRowDb) => {
       const { familias: famRaw, ...produto } = row;
       const [gruposResult, conservacoesResult] = await Promise.all([
         supabase
@@ -47,7 +50,9 @@ export async function getProdutos(): Promise<ProdutoCompleto[]> {
       return {
         ...produto,
         familia: normalizarUm<Familia>(famRaw),
-        grupos: (gruposResult.data || []).map((pg: any) => pg.grupos),
+        grupos: (gruposResult.data || [])
+          .map((pg: ProdutoGrupoJoinRow) => normalizarUm<Grupo>(pg.grupos))
+          .filter((g): g is Grupo => g != null),
         conservacoes: conservacoesResult.data || [],
       };
     })
@@ -67,7 +72,7 @@ export async function getProdutoById(id: string): Promise<ProdutoCompleto | null
   if (error) throw error;
   if (!row) return null;
 
-  const { familias: famRaw, ...produto } = row as any;
+  const { familias: famRaw, ...produto } = row as ProdutoRowDb;
 
   const [gruposResult, conservacoesResult] = await Promise.all([
     supabase
@@ -83,7 +88,9 @@ export async function getProdutoById(id: string): Promise<ProdutoCompleto | null
   return {
     ...produto,
     familia: normalizarUm<Familia>(famRaw),
-    grupos: (gruposResult.data || []).map((pg: any) => pg.grupos),
+    grupos: (gruposResult.data || [])
+      .map((pg: ProdutoGrupoJoinRow) => normalizarUm<Grupo>(pg.grupos))
+      .filter((g): g is Grupo => g != null),
     conservacoes: conservacoesResult.data || [],
   };
 }

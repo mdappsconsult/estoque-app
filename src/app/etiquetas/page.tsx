@@ -54,9 +54,9 @@ const CHUNK_ITENS = 400;
 export default function EtiquetasPage() {
   const { usuario } = useAuth();
 
-  const enrichEtiquetasComItens = useCallback(async (rows: any[]): Promise<EtiquetaRow[]> => {
-    const ids = rows.map((row) => row.id);
-    if (ids.length === 0) return rows as EtiquetaRow[];
+  const enrichEtiquetasComItens = useCallback(async (rows: Record<string, unknown>[]): Promise<EtiquetaRow[]> => {
+    const ids = rows.map((row) => row.id).filter((id): id is string => typeof id === 'string');
+    if (ids.length === 0) return rows as unknown as EtiquetaRow[];
 
     const itemMap = new Map<string, { id: string; token_qr: string; token_short: string | null }>();
     for (let i = 0; i < ids.length; i += CHUNK_ITENS) {
@@ -71,8 +71,8 @@ export default function EtiquetasPage() {
 
     return rows.map((row) => ({
       ...row,
-      item: itemMap.get(row.id) || null,
-    })) as EtiquetaRow[];
+      item: itemMap.get(String(row.id)) || null,
+    })) as unknown as EtiquetaRow[];
   }, []);
 
   const { data: etiquetas, loading } = useRealtimeQuery<EtiquetaRow>({

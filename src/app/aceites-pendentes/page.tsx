@@ -8,6 +8,7 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { aceitarTransferencia, despacharTransferencia } from '@/lib/services/transferencias';
 import { filtrarAceitesPorOperadorLoja } from '@/lib/operador-loja-scope';
+import { errMessage } from '@/lib/errMessage';
 
 interface TransRow {
   id: string;
@@ -42,7 +43,11 @@ export default function AceitesPendentesPage() {
     const confirmou = window.confirm('Confirmar aceite desta transferência?');
     if (!confirmou) return;
     setActionLoading(id);
-    try { await aceitarTransferencia(id, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
+    try {
+      await aceitarTransferencia(id, usuario.id);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
+    }
     setActionLoading(null);
   };
 
@@ -51,7 +56,11 @@ export default function AceitesPendentesPage() {
     const confirmou = window.confirm('Confirmar despacho desta transferência?');
     if (!confirmou) return;
     setActionLoading(id);
-    try { await despacharTransferencia(id, usuario.id); } catch (err: any) { alert(err?.message || 'Erro'); }
+    try {
+      await despacharTransferencia(id, usuario.id);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
+    }
     setActionLoading(null);
   };
 

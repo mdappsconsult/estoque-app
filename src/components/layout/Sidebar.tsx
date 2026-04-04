@@ -19,13 +19,14 @@ import {
   Settings,
   ChevronDown
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import clsx from 'clsx';
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 
-const menuItems: { name: string; href: string; icon: any; badge?: string }[] = [
+const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string }[] = [
   { name: 'Início', href: '/', icon: Home },
   { name: 'Scanner', href: '/qrcode', icon: QrCode },
   { name: 'Registrar Compra', href: '/entrada-compra', icon: PackagePlus },

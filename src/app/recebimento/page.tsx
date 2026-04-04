@@ -10,6 +10,7 @@ import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
+import { errMessage } from '@/lib/errMessage';
 import { receberTransferencia } from '@/lib/services/transferencias';
 import { filtrarRecebimentoPorLoja } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
@@ -67,13 +68,31 @@ export default function RecebimentoPage() {
           .select('item_id, item:itens!item_id(id, token_qr, token_short, produto:produtos(nome))')
           .eq('transferencia_id', selecionada);
         if (error) throw error;
-        const itens = (data || [])
-          .map((row: any) => ({
-            id: row.item?.id || row.item_id,
-            token_qr: row.item?.token_qr || '',
-            token_short: row.item?.token_short || null,
-            nome: row.item?.produto?.nome || 'Produto',
-          }))
+        type ItemJoin = {
+          id?: string;
+          token_qr?: string;
+          token_short?: string | null;
+          produto?: { nome?: string } | { nome?: string }[] | null;
+        };
+        type TiRow = { item_id: string; item: ItemJoin | ItemJoin[] | null };
+        const normItem = (item: TiRow['item']): ItemJoin | null => {
+          if (item == null) return null;
+          return Array.isArray(item) ? (item[0] ?? null) : item;
+        };
+        const normProd = (p: ItemJoin['produto']): { nome?: string } | null => {
+          if (p == null) return null;
+          return Array.isArray(p) ? (p[0] ?? null) : p;
+        };
+        const itens = ((data || []) as TiRow[])
+          .map((row) => {
+            const it = normItem(row.item);
+            return {
+              id: it?.id || row.item_id,
+              token_qr: it?.token_qr || '',
+              token_short: it?.token_short || null,
+              nome: normProd(it?.produto)?.nome || 'Produto',
+            };
+          })
           .filter((item: ItemEsperado) => Boolean(item.id));
         setItensEsperados(itens);
       } catch {
@@ -172,8 +191,8 @@ export default function RecebimentoPage() {
       setResultado({ divergencias: res.divergencias.length });
       setItensRecebidos([]);
       setSelecionada('');
-    } catch (err: any) {
-      setErro(err?.message || 'Erro ao confirmar recebimento');
+    } catch (err: unknown) {
+      setErro(errMessage(err, 'Erro ao confirmar recebimento'));
     } finally {
       setSaving(false);
     }

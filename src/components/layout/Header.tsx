@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, LogOut, FileText, Warehouse } from 'lucide-react';
+import { ChevronDown, LogOut, Warehouse } from 'lucide-react';
 import clsx from 'clsx';
 
 export default function Header() {

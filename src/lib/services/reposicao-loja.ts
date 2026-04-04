@@ -69,7 +69,16 @@ export interface ResumoReposicaoLojaRow {
 const SELECT_LOJA_PRODUTO_CONFIG =
   'id, loja_id, produto_id, ativo_na_loja, estoque_minimo_loja, produto:produtos(id, nome, status, origem, escopo_reposicao)';
 
-function mapRowLojaProdutoConfig(row: any): LojaProdutoConfigRow {
+type RawLojaProdutoConfigRow = {
+  id: string;
+  loja_id: string;
+  produto_id: string;
+  ativo_na_loja: boolean;
+  estoque_minimo_loja: number;
+  produto: unknown;
+};
+
+function mapRowLojaProdutoConfig(row: RawLojaProdutoConfigRow): LojaProdutoConfigRow {
   return {
     id: row.id,
     loja_id: row.loja_id,
@@ -96,7 +105,7 @@ export async function getConfigProdutosLoja(lojaId: string): Promise<LojaProduto
 
     if (error) throw error;
     const chunk = data || [];
-    chunk.forEach((row: any) => acumulado.push(mapRowLojaProdutoConfig(row)));
+    chunk.forEach((row: RawLojaProdutoConfigRow) => acumulado.push(mapRowLojaProdutoConfig(row)));
     if (chunk.length < pageSize) break;
     from += pageSize;
   }
@@ -195,7 +204,16 @@ export async function getContagensLoja(lojaId: string): Promise<LojaContagemRow[
     .eq('loja_id', lojaId);
 
   if (error) throw error;
-  return (data || []).map((row: any) => ({
+  type RawContagemRow = {
+    id: string;
+    loja_id: string;
+    produto_id: string;
+    quantidade_contada: number;
+    contado_por: string | null;
+    contado_em: string;
+    usuario: unknown;
+  };
+  return (data || []).map((row: RawContagemRow) => ({
     id: row.id,
     loja_id: row.loja_id,
     produto_id: row.produto_id,

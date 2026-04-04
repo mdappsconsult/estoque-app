@@ -8,7 +8,7 @@ import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { createContagem } from '@/lib/services/contagem';
-import { supabase } from '@/lib/supabase';
+import { errMessage } from '@/lib/errMessage';
 
 interface EstoqueRow {
   id: string;
@@ -55,8 +55,8 @@ export default function ContagemPage() {
       await createContagem(usuario.nome, itens);
       setSucesso(true);
       setContagens({});
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Erro'));
     } finally {
       setSaving(false);
     }
