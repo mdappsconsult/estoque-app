@@ -159,10 +159,9 @@ function gerarFolha60x30Par(
 
 function gerarHtmlEtiquetaLegado(
   item: EtiquetaParaImpressao,
-  formato: Exclude<FormatoEtiqueta, '60x30'>,
+  _formato: Exclude<FormatoEtiqueta, '60x30'>,
   qrDataUrl: string
 ): string {
-  const cfg = FORMATO_CONFIG[formato];
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
   const lote = escaparHtml(item.lote || '-');
@@ -432,11 +431,15 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
   `;
 }
 
-export async function imprimirEtiquetasEmJobUnico(
+/**
+ * HTML completo (sem `window.print`) para envio à ponte WebSocket no Raspberry (Chromium → CUPS).
+ * Requer ambiente com `window` (cliente); retorna string vazia se `etiquetas` estiver vazio.
+ */
+export async function gerarDocumentoHtmlEtiquetas(
   etiquetas: EtiquetaParaImpressao[],
   formato: FormatoEtiqueta
-): Promise<boolean> {
-  if (typeof window === 'undefined' || etiquetas.length === 0) return false;
+): Promise<string> {
+  if (etiquetas.length === 0) return '';
 
   const agoraIso = new Date().toISOString();
   const itens = etiquetas.map((e) => ({
@@ -503,24 +506,28 @@ export async function imprimirEtiquetasEmJobUnico(
     `;
   }
 
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"/><title>&#8203;</title><style>${estilos}</style></head><body>${htmlCorpo}</body></html>`;
+}
+
+export async function imprimirEtiquetasEmJobUnico(
+  etiquetas: EtiquetaParaImpressao[],
+  formato: FormatoEtiqueta
+): Promise<boolean> {
+  if (typeof window === 'undefined' || etiquetas.length === 0) return false;
+
+  const doc = await gerarDocumentoHtmlEtiquetas(etiquetas, formato);
+  if (!doc) return false;
+
+  const comPrint = doc.replace(
+    '</body>',
+    `<script>window.onload=function(){window.print();};</script></body>`
+  );
+
   const janela = window.open('', '_blank', 'width=420,height=560');
   if (!janela) return false;
 
   janela.document.open();
-  janela.document.write(`
-    <html>
-      <head>
-        <title>&#8203;</title>
-        <style>${estilos}</style>
-      </head>
-      <body>
-        ${htmlCorpo}
-        <script>
-          window.onload = function() { window.print(); };
-        </script>
-      </body>
-    </html>
-  `);
+  janela.document.write(comPrint);
   janela.document.close();
   return true;
 }

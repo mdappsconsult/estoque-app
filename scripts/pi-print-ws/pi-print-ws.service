@@ -1,0 +1,17 @@
+[Unit]
+Description=WebSocket print bridge (HTML para PDF via Chromium -> CUPS)
+After=network-online.target cups.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kim
+Group=kim
+WorkingDirectory=/home/kim/pi-print-ws
+EnvironmentFile=/home/kim/pi-print-ws/.env
+ExecStart=/usr/bin/node /home/kim/pi-print-ws/server.mjs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

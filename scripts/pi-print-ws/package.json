@@ -1,0 +1,15 @@
+{
+  "name": "pi-print-ws",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ponte WebSocket no Raspberry Pi: HTML de etiquetas -> PDF (Chromium) -> CUPS",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.8.0",
+    "ws": "^8.18.1"
+  }
+}

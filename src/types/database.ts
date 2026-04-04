@@ -155,6 +155,32 @@ export type Database = {
           minutos?: number;
         };
       };
+      config_impressao_pi: {
+        Row: {
+          id: number;
+          ws_public_url: string;
+          ws_token: string;
+          cups_queue: string;
+          tunnel_sync_secret: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          ws_public_url?: string;
+          ws_token?: string;
+          cups_queue?: string;
+          tunnel_sync_secret?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          ws_public_url?: string;
+          ws_token?: string;
+          cups_queue?: string;
+          tunnel_sync_secret?: string | null;
+          updated_at?: string;
+        };
+      };
       recebimentos: {
         Row: {
           id: string;
@@ -734,9 +760,9 @@ export type Database = {
         };
       };
     };
-    Views: {};
-    Functions: {};
-    Enums: {};
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
   };
 };
 
@@ -752,6 +778,9 @@ export type GrupoInsert = Database['public']['Tables']['grupos']['Insert'];
 
 export type Conservacao = Database['public']['Tables']['conservacoes']['Row'];
 export type ConservacaoInsert = Database['public']['Tables']['conservacoes']['Insert'];
+
+export type ConfigImpressaoPi = Database['public']['Tables']['config_impressao_pi']['Row'];
+export type ConfigImpressaoPiUpdate = Database['public']['Tables']['config_impressao_pi']['Update'];
 
 export type Recebimento = Database['public']['Tables']['recebimentos']['Row'];
 export type RecebimentoInsert = Database['public']['Tables']['recebimentos']['Insert'];

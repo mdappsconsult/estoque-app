@@ -1,5 +1,62 @@
 # Log de Sessões
 
+### Sessão - 2026-04-05 - Mac dev: SSH por chave para o Pi
+- **Chave:** `~/.ssh/id_ed25519` (Ed25519, sem passphrase — só para dev; pode proteger com `-p` depois).
+- **Pi:** chave pública em `authorized_keys` do utilizador `kim`; login testado com `BatchMode` (sem password).
+- **Atalho:** `~/.ssh/config` com host **`pi-estoque`** → `ssh pi-estoque` (IP `192.168.1.159`).
+- **Nota:** se o IP do Pi mudar na WLAN, ajustar `HostName` no `config` ou usar IP fixo no router.
+
+### Sessão - 2026-04-05 - Pi: .env com Supabase + deploy do script de sync (SSH)
+- **Pi (`kim@192.168.1.159`):** `~/pi-print-ws/.env` ganhou `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PI_TUNNEL_SYNC_SECRET` (alinhado ao banco); script `cloudflared-quick-tunnel-sync.sh` e unit `cloudflared-pi-print-ws.service` atualizados; `systemctl restart cloudflared-pi-print-ws`.
+- **Supabase:** `ws_public_url` atualizado automaticamente para o novo host quick após reinício do túnel.
+- **Script:** variáveis sensíveis deixam de ser exportadas antes do `cloudflared` (evita aparecerem no `journalctl` no mapa de env do túnel).
+- **Validação:** `SELECT ws_public_url` coerente com o túnel ativo; logs sem eco de `PI_TUNNEL_SYNC_SECRET` após o fix.
+
+### Sessão - 2026-04-05 - Supabase: sync automático da URL do túnel quick (Pi → RPC)
+- **Migrações:** `20260405100000_sync_pi_tunnel_ws_url_rpc.sql` — coluna `tunnel_sync_secret`, função `sync_pi_tunnel_ws_url`; `20260405100001_config_impressao_pi_column_privileges_tunnel_secret.sql` — anon/authenticated só leem colunas públicas da tabela (sem expor `tunnel_sync_secret` na API).
+- **Pi (repo):** `scripts/pi-print-ws/cloudflared-quick-tunnel-sync.sh` + unit `cloudflared-pi-print-ws.service` chama o script; `.env` com `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PI_TUNNEL_SYNC_SECRET`.
+- **Doc:** `docs/IMPRESSAO_PI_ACESSO_REMOTO.md` (dois tipos de token); `docs/consultas-sql/config-impressao-pi.sql`; tipos `database.ts`.
+- **Validação:** `npm run build` OK; migrações aplicadas no projeto via MCP.
+
+### Sessão - 2026-04-04 - Pi: systemd `cloudflared-pi-print-ws` + `config_impressao_pi` com wss
+- **Pi:** unit `cloudflared-pi-print-ws.service` instalada via `scp` + `sudo mv` (evita corrupção com heredoc/`sudo -S`); `cloudflared tunnel --url http://127.0.0.1:8765`, utilizador `kim`, `After=pi-print-ws.service`. Ficheiro versionado: `scripts/pi-print-ws/cloudflared-pi-print-ws.service`.
+- **Supabase:** `UPDATE` em `config_impressao_pi` (id=1): `ws_public_url` = **wss://** do host quick tunnel atual, `ws_token` alinhado ao `PRINT_WS_TOKEN` do Pi, `cups_queue = ZebraZD220`.
+- **Nota:** túnel **quick** (`trycloudflare.com`) pode trocar de hostname ao reiniciar o serviço — atualizar `ws_public_url` no banco ou migrar para túnel nomeado (Zero Trust).
+- **Validação:** `systemctl` enable/start OK; `journalctl` com URL do túnel; `SELECT` confirma linha no Supabase (sem expor token).
+
+### Sessão - 2026-04-04 - Supabase: migração `config_impressao_pi` aplicada (MCP)
+- **MCP Supabase:** `apply_migration` com o SQL de `20260404140000_config_impressao_pi.sql`; tabela **`public.config_impressao_pi`** criada (1 linha default), RLS + policy `allow_all_config_impressao_pi`.
+- **Cloudflare API (MCP):** tentativa de listar túneis retornou erro de autenticação no token da sessão — reautenticar MCP Cloudflare no Cursor se for necessário automatizar túneis pela API.
+- **Validação:** `list_tables` confirma `config_impressao_pi` no projeto ligado ao MCP.
+
+### Sessão - 2026-04-04 - Impressão Pi: URL no Supabase + acesso remoto (wss)
+- **Motivo:** evitar `NEXT_PUBLIC_PI_PRINT_WS_URL` em cada PC; imprimir via Railway/HTTPS exige **wss://** (túnel no Raspberry).
+- **Banco:** migração `20260404140000_config_impressao_pi.sql` — tabela `config_impressao_pi` (singleton id=1). `resolvePiPrintConnection()`: env primeiro, senão Supabase.
+- **Front:** `usePiPrintBridgeConfig`, páginas Separar por Loja e teste de impressão atualizadas. Doc `docs/IMPRESSAO_PI_ACESSO_REMOTO.md` + `docs/consultas-sql/config-impressao-pi.sql`.
+- **Tipos:** `config_impressao_pi` em `database.ts`.
+- **Validação:** `npm run build` OK. **Deploy SQL:** aplicar migração no projeto Supabase em uso.
+
+### Sessão - 2026-04-04 - Teste de impressão: botão Pi / Zebra
+- **`/teste-impressao-etiqueta`:** mesmo fluxo WebSocket que Separar por Loja (`gerarDocumentoHtmlEtiquetas` + `enviarHtmlParaPiPrintBridge`), job name `teste-impressao-{formato}`; avisos se env Pi ausente ou HTTPS+ws.
+- **Validação:** `npm run build` OK.
+
+### Sessão - 2026-04-04 - Separar por Loja: impressão WebSocket → Pi (Zebra)
+- **Front:** `gerarDocumentoHtmlEtiquetas` em `label-print.ts`; `pi-print-ws-client.ts` (`enviarHtmlParaPiPrintBridge`, `preferCssPageSize`). **Separar por Loja:** botão **Imprimir na estação (Pi / Zebra)**; pós-**Criar separação** com `NEXT_PUBLIC_PI_PRINT_WS_URL` tenta Pi e faz fallback para `imprimirEtiquetasEmJobUnico` se falhar.
+- **Pi (repo):** `server.mjs` aceita `preferCssPageSize` no JSON para PDF multipágina via `@page` + `page-break`.
+- **Doc:** `README.md` — variáveis `NEXT_PUBLIC_PI_PRINT_*`; `CONTEXTO_ATUAL.md` atualizado.
+- **Validação:** `npm run build` OK.
+
+### Sessão - 2026-04-04 - Raspberry Pi: Zebra ZD220 USB + CUPS
+- **Hardware:** `lsusb` — Zebra ZTC ZD220-203dpi ZPL (`0a5f:0164`). **CUPS:** fila `ZebraZD220`, backend `usb://Zebra%20Technologies/ZTC%20ZD220-203dpi%20ZPL?serial=…`, modelo **Zebra ZPL Label Printer** (`drv:///sample.drv/zebra.ppd`, driver genérico do pacote CUPS; aviso de depreciação do `lpadmin -m` é esperado nas versões novas).
+- **Padrões:** `PageSize=Custom.60x30mm`, `Resolution=203dpi`, `MediaType=Thermal Direct`; impressora padrão do sistema = `ZebraZD220`. Teste ZPL raw: job concluído com sucesso.
+- **`pi-print-ws`:** `CUPS_QUEUE=ZebraZD220` no `~/pi-print-ws/.env`; serviço reiniciado.
+
+### Sessão - 2026-04-04 - Raspberry Pi: ponte WebSocket para impressão (CUPS)
+- **SSH** em `kim@192.168.1.159` (Raspbian trixie): `nodejs`/`npm` via apt; projeto `~/pi-print-ws` com `ws` + `puppeteer-core` (Chromium `/usr/bin/chromium`); serviço **systemd** `pi-print-ws.service` (boot). Health HTTP `http://IP:8765/health`. Payload JSON: `{ type: \"print\", html, widthMm?, heightMm?, jobName?, queue? }`.
+- **CUPS:** `kim` adicionado a `lpadmin`; **nenhuma fila** no momento do teste — `lp` retorna até cadastrar impressora. Smoke test local no Pi: WebSocket + PDF OK, `lp` falhou só por falta de destino padrão.
+- **Repo:** `scripts/pi-print-ws/` (`server.mjs`, `package.json`, `pi-print-ws.service`).
+- **Validação:** `npm run build` no estoque-app OK.
+
 ### Sessão - 2026-04-02 - Estoque: primeira carga operadora sem vazar consolidado
 - **Problema:** na abertura de **Estoque** como `OPERATOR_STORE`, o primeiro fetch às vezes ia com `usuario === null` (antes do effect do `useAuth`), `p_local_id` nulo na RPC e lista “de todos os locais”; ao mudar o filtro de estado e voltar, uma nova busca com loja correta mostrava só o estoque real da loja.
 - **Correção:** `usuarioEscopo = usuario ?? getUsuarioLogado()` para derivar `localIdEfetivo` / perfil; contador de geração em `carregarResumoEstoque` e `carregarResumoMinimo` para não aplicar resposta antiga por cima da atual.

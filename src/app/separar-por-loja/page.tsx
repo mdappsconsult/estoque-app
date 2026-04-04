@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown } from 'lucide-react';
+import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
+import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { useAuth } from '@/hooks/useAuth';
 import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
@@ -19,10 +20,15 @@ import {
   confirmarImpressao,
   FORMATO_CONFIG,
   FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
+  gerarDocumentoHtmlEtiquetas,
   imprimirEtiquetasEmJobUnico,
   type EtiquetaParaImpressao,
   type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
+import {
+  enviarHtmlParaPiPrintBridge,
+  type PiPrintConnection,
+} from '@/lib/printing/pi-print-ws-client';
 import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
 import { supabase } from '@/lib/supabase';
 import { Local } from '@/types/database';
@@ -87,6 +93,11 @@ function mensagemConfirmarGuiaPdfEetiquetas(total: number, formato: FormatoEtiqu
 
 export default function SepararPorLojaPage() {
   const { usuario } = useAuth();
+  const {
+    loading: piCfgLoading,
+    available: piPrintAvailable,
+    connection: piConnection,
+  } = usePiPrintBridgeConfig();
   const { data: locais, loading } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const lojas = locais.filter(l => l.tipo === 'STORE');
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
@@ -105,6 +116,8 @@ export default function SepararPorLojaPage() {
   const [saving, setSaving] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
+  /** HTTPS + ws:// bloqueado pelo navegador (conteúdo misto). */
+  const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const reposicaoSyncEpoch = useRef(0);
 
   /** Busca faltantes da loja + disponível na origem (sem alterar estado de loading). */
@@ -157,7 +170,8 @@ export default function SepararPorLojaPage() {
         .order('created_at', { ascending: true });
       if (itensError) throw itensError;
 
-      const porProduto = new Map<string, any[]>();
+      type ItemOrigemItens = NonNullable<typeof itensOrigem>[number];
+      const porProduto = new Map<string, ItemOrigemItens[]>();
       (itensOrigem || []).forEach((item) => {
         const atual = porProduto.get(item.produto_id) || [];
         atual.push(item);
@@ -254,6 +268,15 @@ export default function SepararPorLojaPage() {
     return () => window.clearTimeout(timer);
   }, [modoSeparacao, origemId, destinoId, loadResumoReposicaoData, aplicarSugestaoAPartirDeResumo]);
 
+  useEffect(() => {
+    if (!piConnection?.wsUrl) {
+      setAvisoHttpsPi(false);
+      return;
+    }
+    const u = piConnection.wsUrl.toLowerCase();
+    setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
+  }, [piConnection]);
+
   const processarEscaneamento = async (codigo?: string) => {
     const raw = (codigo ?? tokenInput).trim();
     if (!raw) return;
@@ -310,11 +333,11 @@ export default function SepararPorLojaPage() {
     setItensEscaneados(prev => prev.filter(i => i.id !== id));
   };
 
-  const executarUpsertEAbrirJanelaEtiquetas = async (
+  const upsertEMontarEtiquetasImpressaoSeparacao = async (
     itens: ItemEscaneado[],
     lote: string,
     nomeLojaDestino: string
-  ) => {
+  ): Promise<EtiquetaParaImpressao[]> => {
     await upsertEtiquetasSeparacaoLoja(
       itens.map((item) => ({
         id: item.id,
@@ -323,20 +346,36 @@ export default function SepararPorLojaPage() {
       })),
       { lote, mode: 'impresso_agora' }
     );
-
     const agora = new Date().toISOString();
-    const abriu = await imprimirEtiquetasEmJobUnico(
-      montarEtiquetasSeparacaoParaImpressao(itens, {
-        lote,
-        nomeLoja: nomeLojaDestino,
-        responsavel: usuario?.nome || 'OPERADOR',
-        agoraIso: agora,
-      }),
-      FORMATO_ETIQUETA_FLUXO_OPERACIONAL
-    );
+    return montarEtiquetasSeparacaoParaImpressao(itens, {
+      lote,
+      nomeLoja: nomeLojaDestino,
+      responsavel: usuario?.nome || 'OPERADOR',
+      agoraIso: agora,
+    });
+  };
+
+  const executarUpsertEAbrirJanelaEtiquetas = async (
+    itens: ItemEscaneado[],
+    lote: string,
+    nomeLojaDestino: string
+  ) => {
+    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(itens, lote, nomeLojaDestino);
+    const abriu = await imprimirEtiquetasEmJobUnico(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
     if (!abriu) {
       throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
     }
+  };
+
+  const executarUpsertEImprimirPi = async (
+    itens: ItemEscaneado[],
+    lote: string,
+    nomeLojaDestino: string,
+    conn: PiPrintConnection
+  ) => {
+    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(itens, lote, nomeLojaDestino);
+    const html = await gerarDocumentoHtmlEtiquetas(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
+    await enviarHtmlParaPiPrintBridge(html, { jobName: lote, connection: conn });
   };
 
   const imprimirEtiquetasSeparacao = async () => {
@@ -350,6 +389,29 @@ export default function SepararPorLojaPage() {
       await executarUpsertEAbrirJanelaEtiquetas(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
+    } finally {
+      setImprimindoEtiquetas(false);
+    }
+  };
+
+  const imprimirEtiquetasSeparacaoNoPi = async () => {
+    if (itensEscaneados.length === 0) return;
+    if (!piPrintAvailable || !piConnection) {
+      alert(
+        'Impressão na estação indisponível. Preencha a tabela config_impressao_pi no Supabase (URL wss:// do túnel) ou defina NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+      );
+      return;
+    }
+    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
+    if (!confirmarImpressao(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
+
+    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+    setImprimindoEtiquetas(true);
+    try {
+      await executarUpsertEImprimirPi(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino, piConnection);
+      alert('Etiquetas enviadas para impressão na estação (Raspberry / Zebra).');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
     } finally {
       setImprimindoEtiquetas(false);
     }
@@ -435,15 +497,34 @@ export default function SepararPorLojaPage() {
       if (confirmarImpressao(snapshotItens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) {
         setImprimindoEtiquetas(true);
         try {
-          await executarUpsertEAbrirJanelaEtiquetas(snapshotItens, loteEtiqueta, nomeLojaDestino);
+          if (piPrintAvailable && piConnection) {
+            try {
+              await executarUpsertEImprimirPi(snapshotItens, loteEtiqueta, nomeLojaDestino, piConnection);
+            } catch (piErr: unknown) {
+              const agora = new Date().toISOString();
+              const etiquetasFallback = montarEtiquetasSeparacaoParaImpressao(snapshotItens, {
+                lote: loteEtiqueta,
+                nomeLoja: nomeLojaDestino,
+                responsavel: usuario?.nome || 'OPERADOR',
+                agoraIso: agora,
+              });
+              const abriu = await imprimirEtiquetasEmJobUnico(etiquetasFallback, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
+              if (!abriu) throw piErr;
+              alert(
+                `A estação Pi não respondeu; abrimos a impressão no navegador.\n${piErr instanceof Error ? piErr.message : String(piErr)}`
+              );
+            }
+          } else {
+            await executarUpsertEAbrirJanelaEtiquetas(snapshotItens, loteEtiqueta, nomeLojaDestino);
+          }
         } catch (err: unknown) {
           alert(err instanceof Error ? err.message : 'Falha ao abrir impressão das etiquetas da remessa');
         } finally {
           setImprimindoEtiquetas(false);
         }
       }
-    } catch (err: any) {
-      alert(err?.message || 'Erro');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro');
     } finally {
       setSaving(false);
     }
@@ -707,10 +788,52 @@ export default function SepararPorLojaPage() {
             {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
             Só imprimir etiquetas
           </Button>
+
+          <Button
+            variant="outline"
+            className="w-full mb-3 border-emerald-200 bg-emerald-50/80 text-emerald-900 hover:bg-emerald-100"
+            onClick={() => void imprimirEtiquetasSeparacaoNoPi()}
+            disabled={imprimindoEtiquetas || itensEscaneados.length === 0 || piCfgLoading || !piPrintAvailable}
+            title={
+              piCfgLoading
+                ? 'Carregando configuração da estação…'
+                : !piPrintAvailable
+                  ? 'Configure config_impressao_pi no Supabase ou NEXT_PUBLIC_PI_PRINT_WS_URL'
+                  : itensEscaneados.length === 0
+                    ? 'Inclua itens em Itens separados'
+                    : 'Envia as etiquetas 60×30 para o Raspberry Pi (WebSocket → Zebra)'
+            }
+          >
+            {imprimindoEtiquetas ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Server className="w-4 h-4 mr-2" />
+            )}
+            Imprimir na estação (Pi / Zebra)
+          </Button>
+          {!piCfgLoading && !piPrintAvailable && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              Para imprimir na estação <strong>de qualquer lugar</strong>, use um <strong>túnel</strong> no Raspberry até a
+              porta do <code className="text-[11px]">pi-print-ws</code> e grave a URL <code className="text-[11px]">wss://…</code>{' '}
+              na tabela <code className="text-[11px]">config_impressao_pi</code> no Supabase (migração{' '}
+              <code className="text-[11px]">20260404140000_config_impressao_pi.sql</code>). Em dev na mesma LAN, pode usar{' '}
+              <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL</code> no <code className="text-[11px]">.env.local</code>.
+              Guia: <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>.
+            </p>
+          )}
+          {avisoHttpsPi && (
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 mb-3">
+              Esta página está em <strong>HTTPS</strong> e a URL do Pi usa <strong>ws://</strong> — o navegador costuma
+              bloquear (conteúdo misto). Use o app em <strong>http://localhost</strong> na mesma rede do Pi ou configure{' '}
+              <strong>wss://</strong> no Raspberry.
+            </p>
+          )}
           <p className="text-xs text-gray-500 -mt-2 mb-3">
             O sistema grava <strong>etiquetas</strong> por item: lote <code className="text-[11px]">SEP-…</code> após criar a
             remessa (etiquetas alinhadas ao recebimento) ou <code className="text-[11px]">SEPARACAO-LOJA</code> se imprimir antes
             (somente se depois registrar a separação com a mesma lista). Itens sem validade usam data sentinela, como na compra.
+            Com Pi configurado, após <strong>Criar separação</strong> a impressão tenta a <strong>estação</strong> primeiro; se
+            falhar, abre o navegador.
           </p>
 
           <Button variant="primary" className="w-full" onClick={criarSeparacao} disabled={saving || itensEscaneados.length === 0}>

@@ -2,24 +2,42 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Printer, Loader2, ArrowLeft } from 'lucide-react';
+import { Printer, Loader2, ArrowLeft, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
+import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import {
   FORMATO_CONFIG,
   FORMATO_IMPRESSAO_STORAGE_KEY,
   FormatoEtiqueta,
+  gerarDocumentoHtmlEtiquetas,
   gerarEtiquetasDemonstracaoImpressao,
   imprimirEtiquetasEmJobUnico,
   obterFormatoImpressaoPadrao,
 } from '@/lib/printing/label-print';
+import { enviarHtmlParaPiPrintBridge } from '@/lib/printing/pi-print-ws-client';
 
 export default function TesteImpressaoEtiquetaPage() {
+  const {
+    loading: piCfgLoading,
+    available: piPrintAvailable,
+    connection: piConnection,
+  } = usePiPrintBridgeConfig();
   const [formato, setFormato] = useState<FormatoEtiqueta>('60x30');
   const [abrindo, setAbrindo] = useState(false);
+  const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
 
   useEffect(() => {
     setFormato(obterFormatoImpressaoPadrao());
   }, []);
+
+  useEffect(() => {
+    if (!piConnection?.wsUrl) {
+      setAvisoHttpsPi(false);
+      return;
+    }
+    const u = piConnection.wsUrl.toLowerCase();
+    setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
+  }, [piConnection]);
 
   const gerarEImprimir = async () => {
     const amostras = gerarEtiquetasDemonstracaoImpressao(formato);
@@ -29,6 +47,29 @@ export default function TesteImpressaoEtiquetaPage() {
       if (!ok) {
         alert('Não foi possível abrir a janela de impressão. Libere pop-ups e tente de novo.');
       }
+    } finally {
+      setAbrindo(false);
+    }
+  };
+
+  const gerarEImprimirNoPi = async () => {
+    if (!piPrintAvailable || !piConnection) {
+      alert(
+        'Configure config_impressao_pi no Supabase (wss:// via túnel) ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+      );
+      return;
+    }
+    const amostras = gerarEtiquetasDemonstracaoImpressao(formato);
+    setAbrindo(true);
+    try {
+      const html = await gerarDocumentoHtmlEtiquetas(amostras, formato);
+      await enviarHtmlParaPiPrintBridge(html, {
+        jobName: `teste-impressao-${formato}`,
+        connection: piConnection,
+      });
+      alert('Amostra enviada para impressão na estação (Raspberry / Zebra).');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
     } finally {
       setAbrindo(false);
     }
@@ -87,6 +128,39 @@ export default function TesteImpressaoEtiquetaPage() {
           {abrindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
           Gerar e abrir impressão
         </Button>
+
+        <Button
+          variant="outline"
+          className="w-full border-emerald-200 bg-emerald-50/80 text-emerald-900 hover:bg-emerald-100"
+          onClick={() => void gerarEImprimirNoPi()}
+          disabled={abrindo || piCfgLoading || !piPrintAvailable}
+          title={
+            piCfgLoading
+              ? 'Carregando configuração…'
+              : !piPrintAvailable
+                ? 'config_impressao_pi no Supabase ou .env local'
+                : 'Envia a mesma amostra para o Raspberry Pi (WebSocket → Zebra)'
+          }
+        >
+          {abrindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Server className="w-4 h-4 mr-2" />}
+          Imprimir na estação (Pi / Zebra)
+        </Button>
+
+        {!piCfgLoading && !piPrintAvailable && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Para <strong>Pi / Zebra</strong> a partir de qualquer lugar: túnel no Raspberry + URL{' '}
+            <code className="text-[11px]">wss://…</code> em <code className="text-[11px]">config_impressao_pi</code> no
+            Supabase. Em LAN, pode usar <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL</code> no{' '}
+            <code className="text-[11px]">.env.local</code>. Guia:{' '}
+            <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>.
+          </p>
+        )}
+        {avisoHttpsPi && (
+          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+            Página em <strong>HTTPS</strong> com URL <strong>ws://</strong> — o navegador pode bloquear. Use{' '}
+            <strong>http://localhost</strong> na mesma rede do Pi ou <strong>wss://</strong> no Raspberry.
+          </p>
+        )}
 
         <p className="text-xs text-gray-500">
           60×30: uma folha com <strong>dois</strong> QRs (linha pontilhada no meio). Formatos legados: uma etiqueta por

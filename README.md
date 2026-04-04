@@ -113,6 +113,21 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
+**Impressão Pi / Zebra (60×30)** — o app fala com o serviço `pi-print-ws` no Raspberry (`scripts/pi-print-ws` + CUPS).
+
+- **Produção / “de qualquer lugar”:** não precisa de `.env` por máquina. Aplique a migração `supabase/migrations/20260404140000_config_impressao_pi.sql` e preencha a tabela **`config_impressao_pi`** com URL **`wss://…`** (túnel até o Pi, ex. Cloudflare Tunnel). Guia: **`docs/IMPRESSAO_PI_ACESSO_REMOTO.md`**.
+- **Só desenvolvimento na mesma LAN** (opcional), pode forçar via env (tem prioridade sobre o Supabase):
+
+```env
+NEXT_PUBLIC_PI_PRINT_WS_URL=ws://192.168.1.159:8765
+NEXT_PUBLIC_PI_PRINT_WS_TOKEN=
+NEXT_PUBLIC_PI_PRINT_QUEUE=ZebraZD220
+```
+
+Reinicie `npm run dev` após alterar env. Token em `NEXT_PUBLIC_*` vai para o bundle.
+
+**HTTPS:** use **`wss://`** na URL pública (túnel com TLS). `ws://` a partir de página `https://` costuma ser bloqueado.
+
 ## Como rodar
 
 ```bash
