@@ -99,8 +99,7 @@ export default function BaixaDiariaPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
         <QRScanner
           onScan={(code) => escanearBaixa(code)}
-          label="Escanear com câmera"
-          autoOpen={Boolean(localId)}
+          label="Ativar leitor de QR (câmera)"
         />
         <div>
           {!mostrarEntradaManual ? (

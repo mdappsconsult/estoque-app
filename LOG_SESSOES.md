@@ -1,5 +1,20 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - QR: leitor só sob demanda
+- **`QRScanner`:** padrão sem `autoOpen`; label padrão **Ativar leitor de QR (câmera)**. Removido `autoOpen` em baixa diária, recebimento, separar por loja, `/qrcode` e rastreio por QR.
+- **Doc:** `CONTEXTO_ATUAL.md` (UX de câmera).
+- **Validação:** `npm run lint` e `npm run build`.
+
+### Sessão - 2026-04-05 - Separar por Loja: manual por estoque + doc ciclo do QR
+- **App:** modo **manual** passa a listar produtos com saldo na **origem** (`getResumoEstoqueAgrupado`), filtro + tabela (origem / já na lista / livre), quantidade e botão para adicionar unidades sem escanear (até 3000 linhas consultadas por produto, FEFO). Scanner/digitação movidos para bloco opcional; texto explica fluxo real (QR físico na separação).
+- **Doc:** `CONTEXTO_ATUAL.md` — ciclo operacional do QR matriz→loja e descrição do manual atualizado.
+- **Validação:** `npm run lint` e `npm run build`.
+
+### Sessão - 2026-04-05 - CONTEXTO: visão de produto (north star)
+- **Doc:** inclusão da seção **Visão de produto (north star)** em `CONTEXTO_ATUAL.md` — missão matriz→filial, uso interno evoluindo para SaaS/multi-segmento, venda por QR com funcionário como conferente, direção fiscal (NF por imagem → dados no servidor → apoio tributário), roadmap de intenção em três eixos.
+- **Impacto:** alinha documentação canônica ao propósito de longo prazo do app; sem mudança de código ou banco.
+- **Validação:** revisão de texto; `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-04-03 - Doc: novo Raspberry indústria (`RASPBERRY_INDUSTRIA_NOVO_PI.md`)
 - **Doc:** guia operacional para segundo Pi (`papel = industria`): o que passar sem SSH, checklist físico, pacotes, `.env` com `PI_TUNNEL_PAPEL`, systemd, validação e troubleshooting; link em `IMPRESSAO_PI_ACESSO_REMOTO.md` e `CONTEXTO_ATUAL.md`.
 - **Validação:** revisão interna do texto; sem alteração de código.

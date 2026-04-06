@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown, Server } from 'lucide-react';
+import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown, Server, Plus, RefreshCw } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -15,6 +15,7 @@ import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { criarTransferencia } from '@/lib/services/transferencias';
 import { criarViagem } from '@/lib/services/viagens';
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
+import { getResumoEstoqueAgrupado, type ResumoEstoqueRow } from '@/lib/services/estoque-resumo';
 import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   confirmarImpressao,
@@ -119,6 +120,13 @@ export default function SepararPorLojaPage() {
   /** HTTPS + ws:// bloqueado pelo navegador (conteúdo misto). */
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const reposicaoSyncEpoch = useRef(0);
+  const [estoqueOrigemManual, setEstoqueOrigemManual] = useState<ResumoEstoqueRow[]>([]);
+  const [carregandoEstoqueOrigem, setCarregandoEstoqueOrigem] = useState(false);
+  const [buscaEstoqueManual, setBuscaEstoqueManual] = useState('');
+  const [qtdPorProdutoManual, setQtdPorProdutoManual] = useState<Record<string, string>>({});
+  const [adicionandoProdutoId, setAdicionandoProdutoId] = useState<string | null>(null);
+  const buscaEstoqueManualRef = useRef(buscaEstoqueManual);
+  buscaEstoqueManualRef.current = buscaEstoqueManual;
 
   /** Busca faltantes da loja + disponível na origem (sem alterar estado de loading). */
   const loadResumoReposicaoData = useCallback(async (): Promise<ResumoReposicaoTela[]> => {
@@ -268,6 +276,38 @@ export default function SepararPorLojaPage() {
     return () => window.clearTimeout(timer);
   }, [modoSeparacao, origemId, destinoId, loadResumoReposicaoData, aplicarSugestaoAPartirDeResumo]);
 
+  const jaNaListaPorProduto = useMemo(() => {
+    const m = new Map<string, number>();
+    itensEscaneados.forEach((i) => {
+      m.set(i.produto_id, (m.get(i.produto_id) || 0) + 1);
+    });
+    return m;
+  }, [itensEscaneados]);
+
+  const carregarEstoqueOrigemManual = useCallback(async () => {
+    if (!origemId) return;
+    setCarregandoEstoqueOrigem(true);
+    setErro('');
+    try {
+      const rows = await getResumoEstoqueAgrupado({
+        estado: 'EM_ESTOQUE',
+        localId: origemId,
+        busca: buscaEstoqueManualRef.current.trim() || null,
+      });
+      setEstoqueOrigemManual(rows.filter((r) => r.quantidade > 0));
+    } catch (err: unknown) {
+      setEstoqueOrigemManual([]);
+      setErro(err instanceof Error ? err.message : 'Não foi possível carregar o estoque na origem.');
+    } finally {
+      setCarregandoEstoqueOrigem(false);
+    }
+  }, [origemId]);
+
+  useEffect(() => {
+    if (modoSeparacao !== 'manual' || !origemId) return;
+    void carregarEstoqueOrigemManual();
+  }, [modoSeparacao, origemId, carregarEstoqueOrigemManual]);
+
   useEffect(() => {
     if (!piConnection?.wsUrl) {
       setAvisoHttpsPi(false);
@@ -276,6 +316,59 @@ export default function SepararPorLojaPage() {
     const u = piConnection.wsUrl.toLowerCase();
     setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
   }, [piConnection]);
+
+  const adicionarUnidadesPorProduto = async (produtoId: string, produtoNome: string) => {
+    if (!origemId) {
+      setErro('Selecione a origem (indústria).');
+      return;
+    }
+    const raw = (qtdPorProdutoManual[produtoId] ?? '1').trim();
+    const quantidade = Number.parseInt(raw, 10);
+    if (!Number.isFinite(quantidade) || quantidade < 1) {
+      setErro('Informe uma quantidade inteira maior ou igual a 1.');
+      return;
+    }
+    setErro('');
+    setAdicionandoProdutoId(produtoId);
+    try {
+      const jaSelecionados = new Set(itensEscaneados.map((i) => i.id));
+      const { data, error: qError } = await supabase
+        .from('itens')
+        .select('id, token_qr, token_short, produto_id, data_validade, produto:produtos(nome)')
+        .eq('estado', 'EM_ESTOQUE')
+        .eq('local_atual_id', origemId)
+        .eq('produto_id', produtoId)
+        .order('created_at', { ascending: true })
+        .limit(3000);
+      if (qError) throw qError;
+      const candidatos = (data || []).filter((row) => !jaSelecionados.has(row.id));
+      if (candidatos.length < quantidade) {
+        setErro(
+          `Saldo insuficiente na origem para «${produtoNome}»: ${candidatos.length} unidade(s) disponível(is) fora da lista (pedido: ${quantidade}).`
+        );
+        return;
+      }
+      const escolhidos = candidatos.slice(0, quantidade);
+      setItensEscaneados((prev) => [
+        ...prev,
+        ...escolhidos.map((item) => {
+          const prod = item.produto as { nome?: string } | null;
+          return {
+            id: item.id,
+            token_qr: item.token_qr,
+            token_short: item.token_short,
+            produto_id: item.produto_id,
+            produto_nome: prod?.nome || produtoNome,
+            data_validade: item.data_validade,
+          };
+        }),
+      ]);
+    } catch (err: unknown) {
+      setErro(err instanceof Error ? err.message : 'Não foi possível adicionar unidades.');
+    } finally {
+      setAdicionandoProdutoId(null);
+    }
+  };
 
   const processarEscaneamento = async (codigo?: string) => {
     const raw = (codigo ?? tokenInput).trim();
@@ -438,7 +531,9 @@ export default function SepararPorLojaPage() {
         nomeDestino,
         responsavel: usuario?.nome || 'OPERADOR',
         modoSeparacaoLabel:
-          modoSeparacao === 'reposicao' ? 'Reposição (mínimo × contagem na loja)' : 'Manual (scan / digitação)',
+          modoSeparacao === 'reposicao'
+            ? 'Reposição (mínimo × contagem na loja)'
+            : 'Manual (estoque na origem + QR opcional)',
         itens: itensEscaneados,
         emitidoEmIso: emitidoEm,
       });
@@ -677,46 +772,153 @@ export default function SepararPorLojaPage() {
           </div>
 
           {modoSeparacao === 'manual' && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
-              <label className="block text-sm font-medium text-gray-700">Escanear QR do item</label>
-              <QRScanner
-                onScan={(code) => void processarEscaneamento(code)}
-                label="Escanear com câmera"
-                autoOpen={Boolean(origemId && destinoId)}
-              />
-              {!mostrarEntradaManual ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setMostrarEntradaManual(true)}
-                >
-                  Não conseguiu ler? Digitar código
-                </Button>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
+            <div className="space-y-4 mb-4">
+              <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  No fluxo atual, cada <strong>unidade</strong> já tem token no sistema (ex.: após compra), mas as{' '}
+                  <strong>etiquetas com QR</strong> costumam ser impressas na <strong>separação</strong> e coladas no
+                  pacote antes do envio à loja. Por isso o caminho usual aqui é escolher o <strong>produto</strong> e a{' '}
+                  <strong>quantidade</strong> no estoque da origem; depois de <strong>Criar separação</strong>, imprima os
+                  QR quando o sistema oferecer. Scanner e digitação servem quando a unidade <strong>já</strong> tiver QR
+                  legível (reimpressão, conferência, outro cenário).
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div className="flex-1 min-w-0">
                     <Input
-                      placeholder="Digite o código QR ou token curto"
-                      value={tokenInput}
-                      onChange={(e) => setTokenInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
+                      label="Filtrar produtos"
+                      placeholder="Nome do produto…"
+                      value={buscaEstoqueManual}
+                      onChange={(e) => setBuscaEstoqueManual(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && void carregarEstoqueOrigemManual()}
                     />
-                    <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
-                      <QrCode className="w-4 h-4" />
-                    </Button>
                   </div>
                   <Button
-                    variant="ghost"
-                    className="w-full"
-                    onClick={() => {
-                      setMostrarEntradaManual(false);
-                      setTokenInput('');
-                    }}
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => void carregarEstoqueOrigemManual()}
+                    disabled={carregandoEstoqueOrigem || !origemId}
                   >
-                    Fechar digitação manual
+                    {carregandoEstoqueOrigem ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                    )}
+                    Atualizar lista
                   </Button>
                 </div>
-              )}
+                {carregandoEstoqueOrigem && (
+                  <p className="text-xs text-blue-700 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    Carregando estoque na origem…
+                  </p>
+                )}
+                {!carregandoEstoqueOrigem && estoqueOrigemManual.length === 0 && (
+                  <p className="text-xs text-gray-500">Nenhum produto com saldo na origem (com o filtro atual).</p>
+                )}
+                {estoqueOrigemManual.length > 0 && (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr className="text-left text-gray-600">
+                            <th className="px-3 py-2">Produto</th>
+                            <th className="px-3 py-2 w-14">Origem</th>
+                            <th className="px-3 py-2 w-14">Lista</th>
+                            <th className="px-3 py-2 w-14">Livre</th>
+                            <th className="px-3 py-2 w-28">Qtd</th>
+                            <th className="px-3 py-2 w-24" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {estoqueOrigemManual.map((linha) => {
+                            const naLista = jaNaListaPorProduto.get(linha.produto_id) || 0;
+                            const livre = Math.max(0, linha.quantidade - naLista);
+                            return (
+                              <tr key={linha.produto_id} className="border-t border-gray-100">
+                                <td className="px-3 py-2">{linha.produto_nome}</td>
+                                <td className="px-3 py-2 tabular-nums">{linha.quantidade}</td>
+                                <td className="px-3 py-2 tabular-nums">{naLista}</td>
+                                <td className="px-3 py-2 font-medium tabular-nums">{livre}</td>
+                                <td className="px-3 py-2">
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={livre > 0 ? livre : 1}
+                                    className="!py-1.5 text-sm"
+                                    value={qtdPorProdutoManual[linha.produto_id] ?? '1'}
+                                    onChange={(e) =>
+                                      setQtdPorProdutoManual((prev) => ({
+                                        ...prev,
+                                        [linha.produto_id]: e.target.value,
+                                      }))
+                                    }
+                                    disabled={livre === 0}
+                                    aria-label={`Quantidade para ${linha.produto_nome}`}
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Button
+                                    type="button"
+                                    variant="primary"
+                                    className="!px-2 !py-1.5"
+                                    disabled={livre === 0 || adicionandoProdutoId === linha.produto_id}
+                                    onClick={() => void adicionarUnidadesPorProduto(linha.produto_id, linha.produto_nome)}
+                                    aria-label={`Adicionar ${linha.produto_nome}`}
+                                  >
+                                    {adicionandoProdutoId === linha.produto_id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Plus className="w-4 h-4" />
+                                    )}
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+                <label className="block text-sm font-medium text-gray-700">Opcional: unidade já com QR legível</label>
+                <QRScanner
+                  onScan={(code) => void processarEscaneamento(code)}
+                  label="Ativar leitor de QR (câmera)"
+                />
+                {!mostrarEntradaManual ? (
+                  <Button variant="outline" className="w-full" onClick={() => setMostrarEntradaManual(true)}>
+                    Digitar código QR ou token
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Código QR ou token curto"
+                        value={tokenInput}
+                        onChange={(e) => setTokenInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
+                      />
+                      <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
+                        <QrCode className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      className="w-full"
+                      onClick={() => {
+                        setMostrarEntradaManual(false);
+                        setTokenInput('');
+                      }}
+                    >
+                      Fechar digitação
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -747,8 +949,9 @@ export default function SepararPorLojaPage() {
                 Eles só liberam quando existir pelo menos <strong>uma unidade</strong> na lista <strong>Itens separados</strong>{' '}
                 (cada uma com QR no estoque da origem). No <strong>modo reposição</strong>, a lista é preenchida
                 automaticamente ao escolher origem e destino (ou em <strong>Recarregar faltantes e sugestão</strong>). No{' '}
-                <strong>modo manual</strong>, escaneie ou digite o código de cada item. Se não houver saldo na origem para
-                um faltante, a lista pode vir vazia ou parcial — confira a mensagem acima da tabela.
+                <strong>modo manual</strong>, use a tabela de estoque na origem (produto + quantidade) ou, se a unidade já
+                tiver QR, scanner/digitação. Se não houver saldo na origem, a lista pode vir vazia ou parcial — confira as
+                mensagens acima.
               </p>
             </div>
           )}
@@ -760,7 +963,7 @@ export default function SepararPorLojaPage() {
             disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
             title={
               itensEscaneados.length === 0
-                ? 'Inclua itens em Itens separados (sugestão automática ou escaneamento)'
+                ? 'Inclua itens em Itens separados (reposição, estoque por produto ou QR)'
                 : undefined
             }
           >
@@ -781,7 +984,7 @@ export default function SepararPorLojaPage() {
             disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
             title={
               itensEscaneados.length === 0
-                ? 'Inclua itens em Itens separados (sugestão automática ou escaneamento)'
+                ? 'Inclua itens em Itens separados (reposição, estoque por produto ou QR)'
                 : undefined
             }
           >

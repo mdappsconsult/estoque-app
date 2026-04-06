@@ -67,7 +67,7 @@ export default function QRCodePage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 space-y-3">
-        <QRScanner onScan={(code) => buscar(code)} label="Escanear com câmera" autoOpen />
+        <QRScanner onScan={(code) => buscar(code)} label="Ativar leitor de QR (câmera)" />
         {!mostrarEntradaManual ? (
           <Button
             variant="outline"

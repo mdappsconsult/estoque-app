@@ -301,7 +301,7 @@ export default function RecebimentoPage() {
 
           <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
             <label className="block text-sm font-medium text-gray-700">Escanear QR do item recebido</label>
-            <QRScanner onScan={(code) => escanear(code)} label="Escanear com câmera" autoOpen={Boolean(selecionada)} />
+            <QRScanner onScan={(code) => escanear(code)} label="Ativar leitor de QR (câmera)" />
             {!mostrarEntradaManual ? (
               <Button
                 variant="outline"

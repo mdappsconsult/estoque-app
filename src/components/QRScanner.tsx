@@ -6,13 +6,15 @@ import Button from '@/components/ui/Button';
 
 interface QRScannerProps {
   onScan: (code: string) => void;
+  /** Texto do botão quando a câmera está desligada (ativar leitor). */
   label?: string;
+  /** Por padrão a câmera **não** inicia sozinha; use só se precisar abrir automaticamente uma vez. */
   autoOpen?: boolean;
 }
 
 export default function QRScanner({
   onScan,
-  label = 'Escanear QR Code',
+  label = 'Ativar leitor de QR (câmera)',
   autoOpen = false,
 }: QRScannerProps) {
   const [aberto, setAberto] = useState(false);

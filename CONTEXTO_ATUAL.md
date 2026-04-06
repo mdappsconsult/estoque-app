@@ -4,6 +4,13 @@
 - Controlar fluxo de itens unitários por QR entre indústria e lojas.
 - Garantir rastreabilidade completa do item no ciclo: origem -> trânsito -> destino.
 
+## Visão de produto (north star)
+- **Missão:** dar à rede o melhor caminho para o produto **entrar certo** na matriz e **seguir a rota até a filial**, com rastreio forte e operação simples na loja.
+- **Origem:** sistema criado para necessidade real da empresa; evoluir para **SaaS** e outros segmentos (ex.: farmácias e varejo afim), sem prender o desenho a um único tipo de loja.
+- **Venda na loja (direção):** cliente conclui compra com foco em **QR**; o funcionário atua como **conferente** (confirma que está pago / pode entregar), reduzindo gargalo de pagamento e dependência de PDV mal integrado.
+- **Fiscal (direção):** entrada de **nota fiscal por imagem** → checagem de qualidade → extração estruturada dos dados → persistência no servidor → uso consistente para **obrigações e planejamento tributário** (pagamento do mínimo legalmente devido com base em dados corretos).
+- **Roadmap de intenção (não prioritização técnica):** (1) consolidar logística matriz–filial e QR operacional; (2) camada de venda/checkout por QR + papel de conferência na loja; (3) pipeline fiscal digital (captura → validação → armazenamento → relatórios).
+
 ## Perfis e escopo
 - `OPERATOR_WAREHOUSE`: operação de indústria.
 - `MANAGER`: visão operacional/gerencial.
@@ -31,8 +38,8 @@
 - Atualização de estoque agregado usa `upsert` com conflito em `produto_id` (evita erro de chave única duplicada).
 - Estoque ganhou modo gerencial "Visão do dono" (ADMIN_MASTER/MANAGER) com consolidado por unidade (lojas + indústria), totais por local e distribuição por produto.
 - Baixa diária possui proteção contra leituras duplicadas da câmera e passa a resolver código escaneado por token completo/curto.
-- Baixa diária abre câmera automaticamente ao entrar na tela (quando usuário tem local padrão) e mantém digitação manual opcional via botão.
-- Padrão de UX de QR replicado: câmera autoaberta + digitação manual sob demanda (botão) em recebimento, separar por loja, scanner QR e rastreio por QR.
+- Baixa diária: leitor de QR **desligado** até o usuário tocar em **Ativar leitor de QR (câmera)**; digitação manual continua sob demanda (botão).
+- Padrão de UX de QR: **sem** abrir câmera automaticamente; botão para ativar o leitor + digitação manual sob demanda em recebimento, separar por loja, `/qrcode` e rastreio por QR.
 - Textos de UX/erro de QR padronizados nas telas operacionais (mensagens de não encontrado, falha de busca e placeholders de digitação manual).
 - Ajustes mobile-first aplicados em telas administrativas com formulários/tabelas (quebra responsiva de grids, cabeçalhos e scroll horizontal controlado em tabelas largas).
 - Registrar Compra suporta lançamento por `Unidade`, `Caixa` e `Fardo`, com conversão automática para itens unitários (QR) e custo unitário.
@@ -61,7 +68,8 @@
 - `ProdutoModal` e lista de produtos: família + embalagem separados conforme modelo acima (indústria exige família).
 - **Reposição de estoque por loja** (`Cadastros`): elegíveis = **COMPRA** (sempre); **AMBOS** só com `escopo_reposicao = loja` (cadastro fornecedor); **PRODUCAO** **nunca** entra (indústria). `escopo industria` exclui sempre. Lista usa `select *` em `produtos`. Migrações: `20260402150000` (coluna + backfill PRODUCAO); `20260402180000` (COMPRA com escopo errado → loja); `20260402181000` (AMBOS indústria com validade preenchida e escopo loja → industria). **Contagem da loja** e **Separar por Loja** (reposição) usam o mesmo critério em `participaReposicaoLoja`. `loja_produtos_config` **paginada**; **Salvar** com `confirm`.
 - **Declarar estoque na loja** (`/contagem-loja`, operador de loja): mesma lista elegível que **Reposição de estoque por loja**; `ensureTodosProdutosElegiveisNaLoja` ao carregar. **UI só para o funcionário:** produto + **quantidade que tem** (sem exibir mínimo nem faltante — isso fica com estoque/indústria em cadastro e em **Separar por Loja**). Grava `loja_contagens`.
-- `Separar por Loja` — **modo reposição:** ao definir origem e destino, carrega faltantes e **aplica sugestão** automaticamente (debounce ~450 ms; troca de loja/indústria refaz o fluxo). Botão **Recarregar faltantes e sugestão** força nova leitura. **Modo manual:** leitor QR / digitação só nesse modo (oculto na reposição). Controle de concorrência por epoch evita estado inconsistente ao trocar selects rápido.
+- **Ciclo operacional do QR (matriz → loja):** o cadastro de **produto** não implica etiqueta física; unidades entram com token em **compra/produção**. Na prática, **etiquetas com QR** são geradas na **separação para a loja** (impressão 60×30), coladas no pacote e enviadas; na loja o recebimento lê esse QR. Scanner/digitação em separação manual serve sobretudo quando a unidade **já** tem QR legível (ex.: reimpressão, conferência).
+- `Separar por Loja` — **modo reposição:** ao definir origem e destino, carrega faltantes e **aplica sugestão** automaticamente (debounce ~450 ms; troca de loja/indústria refaz o fluxo). Botão **Recarregar faltantes e sugestão** força nova leitura. **Modo manual:** lista **estoque na origem** via `resumo_estoque_agrupado` (filtro + tabela produto/qtd livre + adicionar unidades em FEFO por `created_at`); **opcional** leitor QR / digitação de token (oculto na reposição). Controle de concorrência por epoch evita estado inconsistente ao trocar selects rápido.
 - No modo reposição de `Separar por Loja`, a lista exibe apenas produtos com faltante (`mínimo_loja > contagem`), reduzindo ruído operacional.
 - `Separar por Loja`: **fluxo recomendado** — **Criar separação** e, em seguida, imprimir quando o sistema perguntar (snapshot dos mesmos `item_id` da transferência, lote `SEP-{viagem}`). **Guia PDF** e **Só imprimir** antes da separação exigem `confirm` explicando risco de QR recusado no recebimento se a lista divergir. **Gravação `etiquetas`:** id = id do item; impressão pós-separação = `impresso_agora` + lote `SEP-…`; impressão antecipada = lote `SEPARACAO-LOJA`; ao criar viagem antes (upsert `manter_impressa_se_existir`) lote `SEP-…` sem zerar `impressa` se já true. Validade ausente: sentinela `2999-12-31`. Limpeza em massa de `etiquetas` no Supabase **não remove** `itens`.
 - **Guia PDF + etiquetas** em `Separar por Loja`: PDF + janela de impressão em **60×30** (fluxo operacional); texto de confirmação alinhado a esse formato.
