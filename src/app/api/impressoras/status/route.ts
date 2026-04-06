@@ -65,7 +65,16 @@ export async function GET(req: NextRequest) {
     });
   } catch (e) {
     clearTimeout(timer);
-    const msg = formatNodeFetchError(e);
-    return NextResponse.json({ online: false, message: msg });
+    let message = formatNodeFetchError(e);
+    // Alguns runtimes em produção devolvem só "fetch failed" sem `error.cause`.
+    if (message === 'fetch failed') {
+      try {
+        const host = new URL(healthUrl).hostname;
+        message = `fetch failed — host «${host}»: costuma ser túnel quick antigo (atualize ws_public_url no Supabase / sync no Pi), Pi ou cloudflared parados, ou firewall.`;
+      } catch {
+        message += ' Confira ws_public_url (wss://) no Supabase.';
+      }
+    }
+    return NextResponse.json({ online: false, message });
   }
 }
