@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: “não sobe” em 5 min — `DEPLOYING` + incidente
+- **CLI:** deployment **`4e9aa2df`** em **`DEPLOYING`**; build Railpack **já OK** (~110 s); **Deploy logs** ainda vazios — típico com lentidão de plataforma (banner *builds slow to progress*).
+- **Git:** `git push origin main` — `70edf0b` (só `LOG_SESSOES`) alinhado com `origin`; pode surgir novo deploy por Git — **cancelar duplicados** no painel se competirem com o `4e9aa2df`.
+- **Nota:** 5 min em `DEPLOYING` durante incidente não indica falha do app; esperar ou acompanhar [status.railway.com](https://status.railway.com).
+
 ### Sessão - 2026-04-06 - Railway: fila limpa + `railway up` (último git)
 - **Contexto:** utilizador removeu deploys em `QUEUED` no dashboard; repo local = `origin/main` em `d124ae3`.
 - **Ação:** `railway up --detach` → novo deployment **BUILDING** (`4e9aa2df-…`); permaneceu um item **QUEUED** ligado ao Git (`61a62245-…`, commit `d124ae3`) — convém cancelar duplicado no painel se ambos competirem.
