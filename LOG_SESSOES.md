@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: fila limpa + `railway up` (último git)
+- **Contexto:** utilizador removeu deploys em `QUEUED` no dashboard; repo local = `origin/main` em `d124ae3`.
+- **Ação:** `railway up --detach` → novo deployment **BUILDING** (`4e9aa2df-…`); permaneceu um item **QUEUED** ligado ao Git (`61a62245-…`, commit `d124ae3`) — convém cancelar duplicado no painel se ambos competirem.
+- **Validação:** `railway deployment list --json --limit 5` após o comando.
+
 ### Sessão - 2026-04-06 - Railway: investigação via MCP (`user-railway`)
 - **MCP:** `check-railway-status` OK (CLI + login); `list-services` → 1 serviço **estoque-app**; `list-deployments` (json, limit 25/100) → **5 deployments `QUEUED`** no topo (GitHub `main`), todos **`queuedReason`: manutenção**, builder **RAILPACK**; commits mais recentes na fila incluem `fcfdc6a`, `9a1bed3`, `0b7f8db`, `8aaea55`, `7fe67a7`; deploys **Docker** antigos em **`REMOVED`**.
 - **Logs:** `get-logs` (deploy, últimas linhas) sem conteúdo útil enquanto não há deploy em execução com sucesso na janela consultada.
