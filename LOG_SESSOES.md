@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: investigação via MCP (`user-railway`)
+- **MCP:** `check-railway-status` OK (CLI + login); `list-services` → 1 serviço **estoque-app**; `list-deployments` (json, limit 25/100) → **5 deployments `QUEUED`** no topo (GitHub `main`), todos **`queuedReason`: manutenção**, builder **RAILPACK**; commits mais recentes na fila incluem `fcfdc6a`, `9a1bed3`, `0b7f8db`, `8aaea55`, `7fe67a7`; deploys **Docker** antigos em **`REMOVED`**.
+- **Logs:** `get-logs` (deploy, últimas linhas) sem conteúdo útil enquanto não há deploy em execução com sucesso na janela consultada.
+- **Conclusão:** bloqueio atual é **lado Railway (fila/manutenção)** + **vários pushes**; mitigar com `railway:prune-queued` + evitar disparos duplicados.
+
 ### Sessão - 2026-04-06 - Railway: prune-queued + token de projeto (Project-Access-Token)
 - **`RAILWAY_PROJECT_TOKEN`:** API GraphQL usa header `Project-Access-Token` (token criado em Project Settings → Tokens); `RAILWAY_TOKEN` continua para Bearer (conta/workspace).
 - **Segurança:** tokens não vão para o Git; `.env.railway.local` no `.gitignore`; revogar token se exposto.
