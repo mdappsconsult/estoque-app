@@ -1,11 +1,13 @@
 [Unit]
 Description=Cloudflare quick tunnel -> pi-print-ws (8765)
+Documentation=https://github.com/mdappsconsult/estoque-app/blob/main/docs/TUNEL_PERMANENTE_PRINT_PI.md
 After=network-online.target pi-print-ws.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Copie cloudflared-quick-tunnel-sync.sh para ~/pi-print-ws/ e chmod +x. .env: SUPABASE_URL, SUPABASE_ANON_KEY, PI_TUNNEL_SYNC_SECRET (= tunnel_sync_secret no banco).
+# Quick tunnel: sync automático no Supabase (sem colar URL). Para hostname FIXO use túnel nomeado — ver docs/TUNEL_PERMANENTE_PRINT_PI.md e cloudflared-named-tunnel.service.example.
+# .env: SUPABASE_URL, SUPABASE_ANON_KEY, PI_TUNNEL_SYNC_SECRET (= tunnel_sync_secret no banco). Opcional: PI_TUNNEL_SYNC_RETRIES (padrão 5).
 ExecStart=/usr/bin/bash /home/kim/pi-print-ws/cloudflared-quick-tunnel-sync.sh
 Restart=always
 RestartSec=10

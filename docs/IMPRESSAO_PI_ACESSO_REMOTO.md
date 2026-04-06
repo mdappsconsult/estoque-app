@@ -2,6 +2,10 @@
 
 O Raspberry fica na **rede local** (`192.168.x.x`). Nenhum computador na internet consegue abrir `ws://192.168.1.159:8765` diretamente: falta rota pública e, em páginas **HTTPS**, o navegador bloqueia **ws://** (conteúdo misto).
 
+### Produção: URL que não muda
+
+O túnel **quick** (`cloudflared tunnel --url …`) gera hostname **novo** sempre que reinicia. O script **`cloudflared-quick-tunnel-sync.sh`** atualiza o Supabase **sozinho** (sem colar no app), mas o nome ainda “gira” por limitação da Cloudflare. Para **`wss://` fixo** (ex.: `print.suaempresa.com.br`), use **túnel nomeado** no Zero Trust — guia: **`docs/TUNEL_PERMANENTE_PRINT_PI.md`**.
+
 ## O que fazer na prática
 
 1. **Túnel** da internet até o serviço `pi-print-ws` no Pi (mesma máquina onde roda a porta **8765**).

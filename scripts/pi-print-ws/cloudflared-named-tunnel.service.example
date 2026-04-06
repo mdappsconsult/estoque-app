@@ -1,0 +1,17 @@
+[Unit]
+Description=Cloudflare named tunnel -> pi-print-ws (8765, hostname fixo)
+Documentation=file:///home/kim/pi-print-ws/cloudflared-config-named-tunnel.example.yml
+After=network-online.target pi-print-ws.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ajuste --config para o seu config.yml real (credenciais do túnel nomeado).
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config /home/kim/.cloudflared/config.yml run
+Restart=always
+RestartSec=5
+User=kim
+Group=kim
+
+[Install]
+WantedBy=multi-user.target

@@ -251,6 +251,25 @@ export default function ImpressorasConfigPage() {
         </div>
       </div>
 
+      <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/90 px-4 py-3 text-sm text-indigo-950">
+        <p className="font-medium text-indigo-900">URL estável (recomendado em produção)</p>
+        <p className="mt-1 text-indigo-900/90 leading-relaxed">
+          O túnel <strong>quick</strong> Cloudflare muda o endereço a cada reinício; o Pi pode{' '}
+          <strong>atualizar o Supabase sozinho</strong> com o script <code className="text-[11px]">cloudflared-quick-tunnel-sync.sh</code>{' '}
+          (sem copiar URL no app). Para um <strong>mesmo</strong> <code className="text-[11px]">wss://</code> sempre, use{' '}
+          <strong>túnel nomeado</strong> no Cloudflare Zero Trust — guia no repositório:{' '}
+          <a
+            href="https://github.com/mdappsconsult/estoque-app/blob/main/docs/TUNEL_PERMANENTE_PRINT_PI.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 font-mono text-[13px]"
+          >
+            docs/TUNEL_PERMANENTE_PRINT_PI.md
+          </a>
+          .
+        </p>
+      </div>
+
       {loading && (
         <div className="flex items-center gap-2 text-gray-600 py-12 justify-center">
           <Loader2 className="w-6 h-6 animate-spin" />

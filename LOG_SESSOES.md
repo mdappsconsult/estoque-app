@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Pi: túnel permanente (doc) + sync quick com retentativas
+- **Doc:** `docs/TUNEL_PERMANENTE_PRINT_PI.md` — túnel nomeado Cloudflare para `wss://` fixo; quick + RPC já atualiza o banco sozinho (sem colar URL), com limitação de hostname rotativo.
+- **Script:** `cloudflared-quick-tunnel-sync.sh` — retentativas na RPC (`PI_TUNNEL_SYNC_RETRIES`, padrão 5), `grep` para URL trycloudflare, log se faltar `.env`; exemplos `cloudflared-config-named-tunnel.example.yml` e `cloudflared-named-tunnel.service.example`.
+- **UI:** faixa em **Configurações → Impressoras** com link ao guia; `IMPRESSAO_PI_ACESSO_REMOTO.md` e `CONTEXTO_ATUAL.md` atualizados.
+- **Validação:** `npm run lint` e `npm run build`.
+
 ### Sessão - 2026-04-06 - Impressoras: ajuda ENOTFOUND + doc deploy / localhost
 - **UI:** `configuracoes/impressoras` — caixa explicativa quando a verificação retorna ENOTFOUND (túnel quick / Supabase).
 - **Doc:** `FLUXO_ENTREGA.md` (tempo de deploy Railway, evitar push + `railway up` duplicado); `IMPRESSAO_PI_ACESSO_REMOTO.md` (localhost + trycloudflare).

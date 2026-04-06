@@ -1,0 +1,13 @@
+# Exemplo para túnel NOMEADO (hostname fixo).
+# 1) Crie o túnel no painel Cloudflare Zero Trust e baixe o JSON de credenciais.
+# 2) Copie este ficheiro para ~/.cloudflared/config.yml (ou caminho que passar a --config).
+# 3) Substitua TUNNEL_UUID pelo ID do túnel e ajuste credentials-file.
+# 4) Substitua print.exemplo.com pelo hostname público que configurou no painel.
+
+tunnel: TUNNEL_UUID
+credentials-file: /home/kim/.cloudflared/TUNNEL_UUID.json
+
+ingress:
+  - hostname: print.exemplo.com
+    service: http://127.0.0.1:8765
+  - service: http_status:404
