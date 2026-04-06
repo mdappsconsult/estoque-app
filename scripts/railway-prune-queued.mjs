@@ -3,8 +3,11 @@
  * Cancela deployments em QUEUED, exceto o mais recente (mesmo serviço linkado).
  * Útil quando vários pushes encheram a fila e a Railway mostra manutenção/backpressure.
  *
- * Requer token de API (conta ou workspace): https://railway.com/account/tokens
- *   export RAILWAY_TOKEN="..."
+ * Autenticação (uma das opções):
+ *   - Token de projeto (Settings → Tokens do projeto): export RAILWAY_PROJECT_TOKEN="..."
+ *   - Token de conta/workspace: https://railway.com/account/tokens → export RAILWAY_TOKEN="..."
+ *   O painel do projeto pode dizer RAILWAY_TOKEN para a CLI; na API GraphQL o token de **projeto**
+ *   usa o header Project-Access-Token (este script trata os dois).
  *
  * Opções:
  *   --dry-run     só lista o que seria cancelado
@@ -36,13 +39,28 @@ function listDeploymentsJson() {
   return JSON.parse(out);
 }
 
-async function deploymentCancel(token, id) {
+function authHeaders() {
+  const project = process.env.RAILWAY_PROJECT_TOKEN?.trim();
+  const bearer = process.env.RAILWAY_TOKEN?.trim();
+  if (project) {
+    return {
+      "Content-Type": "application/json",
+      "Project-Access-Token": project,
+    };
+  }
+  if (bearer) {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${bearer}`,
+    };
+  }
+  return null;
+}
+
+async function deploymentCancel(headers, id) {
   const res = await fetch(API, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify({
       query: "mutation ($id: String!) { deploymentCancel(id: $id) }",
       variables: { id },
@@ -60,10 +78,10 @@ async function deploymentCancel(token, id) {
 
 async function main() {
   const { dryRun, keep } = parseArgs(process.argv.slice(2));
-  const token = process.env.RAILWAY_TOKEN?.trim();
-  if (!token && !dryRun) {
+  const headers = authHeaders();
+  if (!headers && !dryRun) {
     console.error(
-      "Defina RAILWAY_TOKEN (token de conta/workspace em https://railway.com/account/tokens ).",
+      "Defina RAILWAY_PROJECT_TOKEN (token do projeto) ou RAILWAY_TOKEN (conta/workspace). Nunca commite tokens.",
     );
     process.exit(1);
   }
@@ -103,8 +121,10 @@ async function main() {
 
   if (dryRun) {
     console.log("\n--dry-run: nenhuma chamada à API.");
-    if (!token) {
-      console.log("(Com RAILWAY_TOKEN definido, os itens “cancelar” seriam enviados à API.)");
+    if (!headers) {
+      console.log(
+        "(Com RAILWAY_PROJECT_TOKEN ou RAILWAY_TOKEN definido, os itens “cancelar” seriam enviados à API.)",
+      );
     }
     return;
   }
@@ -112,7 +132,7 @@ async function main() {
   for (const d of toCancel) {
     process.stdout.write(`Cancelando ${d.id}… `);
     try {
-      const ok = await deploymentCancel(token, d.id);
+      const ok = await deploymentCancel(headers, d.id);
       console.log(ok === true ? "ok" : String(ok));
     } catch (e) {
       console.log("erro:", e.message || e);

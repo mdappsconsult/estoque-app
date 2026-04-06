@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: prune-queued + token de projeto (Project-Access-Token)
+- **`RAILWAY_PROJECT_TOKEN`:** API GraphQL usa header `Project-Access-Token` (token criado em Project Settings → Tokens); `RAILWAY_TOKEN` continua para Bearer (conta/workspace).
+- **Segurança:** tokens não vão para o Git; `.env.railway.local` no `.gitignore`; revogar token se exposto.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-06 - Railway: `railway:prune-queued` (API deploymentCancel)
 - **Contexto:** fila com vários **QUEUED** (manutenção + commits em sequência); Docker no repo foi revertido; limpar duplicados na fila exige painel ou API.
 - **Repo:** `scripts/railway-prune-queued.mjs`, `npm run railway:prune-queued` com `RAILWAY_TOKEN` (token conta/workspace); `--dry-run`, `--keep N`. Doc em `docs/FLUXO_ENTREGA.md`, `README`, `CONTEXTO`; `railway:diagnose` cita o comando.

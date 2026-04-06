@@ -28,7 +28,7 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 - **Variáveis:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no serviço (**Build** e **Runtime**).
 - **Gatilho:** push em `main` com repo ligado ao serviço. **Evite** `railway up` logo após o push (dois builds em fila).
 - **CLI (um único deploy + acompanhamento):** `npm run railway:release` → `railway up --detach` e em seguida `scripts/railway-wait-deployment.mjs` (timeout via `RAILWAY_WAIT_TIMEOUT_SEC`, padrão 900). Só listar status: `railway deployment list --json`.
-- **Cancelar fila duplicada (vários `QUEUED`):** crie um token em [railway.com/account/tokens](https://railway.com/account/tokens), exporte `RAILWAY_TOKEN`, confira com `npm run railway:prune-queued -- --dry-run`, depois `npm run railway:prune-queued` — usa a API `deploymentCancel` e mantém só o deploy **QUEUED** mais recente. O painel também permite “Abort” por deploy; `railway down` **não** cancela `QUEUED`.
+- **Cancelar fila duplicada (vários `QUEUED`):** use um token **só em variável de ambiente** (nunca em commit nem em chat). Preferência: **Project token** do projeto (Settings → Tokens) → `export RAILWAY_PROJECT_TOKEN="…"`; alternativa: token de conta/workspace em [railway.com/account/tokens](https://railway.com/account/tokens) → `RAILWAY_TOKEN`. Confira com `npm run railway:prune-queued -- --dry-run`, depois `npm run railway:prune-queued` (API `deploymentCancel`; mantém o **QUEUED** mais recente). Se o token vazar, **revogue** no painel e crie outro. O painel também permite “Abort”; `railway down` **não** cancela `QUEUED`.
 
 ### Por que o deploy “demora”
 
@@ -40,7 +40,7 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 ### Deploy não termina / fica em fila
 
 1. Rode **`npm run railway:diagnose`** (ou `railway deployment list --json`) e confira status.
-2. **Vários `QUEUED` por excesso de pushes:** `RAILWAY_TOKEN=… npm run railway:prune-queued -- --dry-run` e, se a lista fizer sentido, sem `--dry-run` (mantém 1 deploy na fila; opcional `--keep 2`).
+2. **Vários `QUEUED` por excesso de pushes:** `RAILWAY_PROJECT_TOKEN=…` (token do projeto) ou `RAILWAY_TOKEN=…` (conta/workspace), depois `npm run railway:prune-queued -- --dry-run` e, se fizer sentido, sem `--dry-run` (mantém 1 na fila; opcional `--keep 2`).
 3. **Vários `DEPLOYING` / `INITIALIZING` ao mesmo tempo** (por exemplo, builds **Docker** antigos ainda rodando depois de remover `Dockerfile` do Git): abra o projeto com **`railway open`** → serviço → **Deployments** → **cancele** os deploys presos ou obsoletos. A CLI **não** cancela fila; `railway down` remove o **último deploy com sucesso**, não serve para abortar um build preso.
 4. **`QUEUED` + “maintenance”**: fila da Railway — só esperar ou acompanhar [status](https://status.railway.com/). Reduzir `QUEUED` duplicados ajuda (`railway:prune-queued`), mas **manutenção** só some quando a plataforma normalizar.
 5. Para ver onde parou: **`railway logs --build -n 120 <id>`** e **`railway logs --deployment -n 120 <id>`** (o `<id>` vem da lista JSON).

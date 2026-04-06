@@ -33,7 +33,7 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 
 ## Deploy (produção)
 
-- App Next.js: **Railway** — build **Railpack** (Node/Next automático). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** no **build** e no runtime. Deploy manual com espera: **`npm run railway:release`** (CLI `railway` no PATH e projeto linkado). Fila com vários **`QUEUED`**: token em [railway.com/account/tokens](https://railway.com/account/tokens) → **`RAILWAY_TOKEN=… npm run railway:prune-queued -- --dry-run`** (depois sem `--dry-run`). Diagnóstico: **`npm run railway:diagnose`**; detalhes em **`docs/FLUXO_ENTREGA.md`**.
+- App Next.js: **Railway** — build **Railpack** (Node/Next automático). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** no **build** e no runtime. Deploy manual com espera: **`npm run railway:release`** (CLI `railway` no PATH e projeto linkado). Fila com vários **`QUEUED`**: **Project token** do projeto (Railway → Settings → Tokens) como **`RAILWAY_PROJECT_TOKEN`**, ou token de conta em [railway.com/account/tokens](https://railway.com/account/tokens) como **`RAILWAY_TOKEN`** — **`npm run railway:prune-queued -- --dry-run`** (depois sem `--dry-run`). Não partilhes o token; se vazar, revoga e gera outro. Diagnóstico: **`npm run railway:diagnose`**; detalhes em **`docs/FLUXO_ENTREGA.md`**.
 - Dados: **Supabase** (aplicar migrations em `supabase/migrations/` no projeto de produção quando o schema mudar).
 
 ## Fluxo contínuo (resumo)
