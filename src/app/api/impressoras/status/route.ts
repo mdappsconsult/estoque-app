@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { formatNodeFetchError } from '@/lib/errMessage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,12 +65,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (e) {
     clearTimeout(timer);
-    const msg =
-      e instanceof Error
-        ? e.name === 'AbortError'
-          ? 'Tempo esgotado ao contatar o túnel.'
-          : e.message
-        : 'Falha de rede';
+    const msg = formatNodeFetchError(e);
     return NextResponse.json({ online: false, message: msg });
   }
 }

@@ -65,6 +65,19 @@ Hostname **fixo**: não depende de sincronizar a cada reinício do quick tunnel.
 - **Tailscale / ZeroTier**: VPN entre o celular/PC e a rede da fábrica; aí você pode usar IP Tailscale com `wss` só se terminar TLS no Pi ou no proxy.
 - **ngrok** `http` com suporte a WebSocket: URL `wss://` fornecida pelo painel.
 
+## “Offline / indisponível: fetch failed” (Verificar agora)
+
+O botão **Verificar agora** chama a API do app no **Railway**, que faz um `GET https://…/health` no **mesmo host** do túnel (derivado de `wss://…` no Supabase). A mensagem genérica **`fetch failed`** no Node costuma esconder a causa; após atualizar o app, a API passa a devolver detalhes (ex.: **`ENOTFOUND`**, **`ECONNREFUSED`**, **`CERT_HAS_EXPIRED`**).
+
+| Sintoma na mensagem | O que costuma ser |
+|---------------------|-------------------|
+| **ENOTFOUND** / getaddrinfo | Host do túnel **inválido ou antigo**. Túnel **quick** Cloudflare muda o `*.trycloudflare.com` a cada reinício do `cloudflared` — confira se o Pi ainda roda o sync (`PI_TUNNEL_SYNC_SECRET`, RPC) ou atualize **`ws_public_url`** manualmente no Supabase. |
+| **ECONNREFUSED** | Túnel ou **cloudflared** não está encaminhando para o Pi, ou **`pi-print-ws`** não escuta na porta **8765** no Pi. |
+| **Tempo esgotado** | Firewall, Pi desligado, ou túnel fora do ar. |
+| **Certificado / TLS** | Host errado ou proxy intermediário. |
+
+Checklist rápido no Raspberry: `systemctl status pi-print-ws` e `systemctl status cloudflared-pi-print-ws` (ou o nome da unit do túnel); `curl -sS http://127.0.0.1:8765/health` deve conter `pi-print-ws`. No PC: abrir no navegador `https://SEU-HOST.trycloudflare.com/health` (mesmo host gravado em `wss://`).
+
 ## Segurança
 
 - URL pública + **`ws_token`** expõe a fila de impressão na internet: use **token forte** (`PRINT_WS_TOKEN`) e o **mesmo** em `config_impressao_pi.ws_token`.

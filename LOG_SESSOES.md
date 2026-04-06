@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Pi impressão: diagnóstico `fetch failed` na verificação
+- **`/api/impressoras/status`:** mensagem de erro passa a incluir `error.cause` do Node (ex. `ENOTFOUND`, `ECONNREFUSED`) via `formatNodeFetchError` em `errMessage.ts`.
+- **Doc:** seção em `docs/IMPRESSAO_PI_ACESSO_REMOTO.md` + bullet em `CONTEXTO_ATUAL.md` (Verificar agora ≠ teste da Zebra USB).
+- **Validação:** `npm run lint` e `npm run build`.
+
 ### Sessão - 2026-04-06 - Deploy: push `main` (Railway via Git)
 - **Git:** commit `7d91307` em `main` — separação manual por estoque, QR sob demanda, docs.
 - **Push:** `origin/main` atualizado; CI GitHub Actions e deploy Railway seguem o que estiver ligado ao repositório.
