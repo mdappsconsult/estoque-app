@@ -1,5 +1,15 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: publicar `railway:diagnose` + nota CLI vs Git
+- **Git:** commit do que estava pendente — `scripts/railway-diagnose.mjs`, `npm run railway:diagnose`, doc **Deploy não termina** + bullet **ACTIVE (CLI) vs QUEUED (GitHub)** em `docs/FLUXO_ENTREGA.md`; `README`, `CONTEXTO_ATUAL`.
+- **Contexto:** dashboard com deploys **ACTIVE** por `railway up` e **QUEUED** por Git por manutenção.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-04 - Railway: deploy não termina (diagnóstico + doc)
+- **Causa típica:** deploys **Docker** antigos em **`DEPLOYING`** enquanto commits novos ficam **`QUEUED`** (manutenção/fila); a CLI não cancela deployment preso.
+- **Repo:** `scripts/railway-diagnose.mjs` + `npm run railway:diagnose`; seção **“Deploy não termina”** em `docs/FLUXO_ENTREGA.md` (dashboard → cancelar presos; `railway logs` por id).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-04 - Railway: voltar ao Railpack + `railway:release`
 - **Motivo:** deploys **Docker** ficaram em **INITIALIZING** / fila **QUEUED** (manutenção/backpressure); a CLI não cancela fila — caminho estável é **Railpack** (último `SUCCESS` histórico).
 - **Repo:** removidos `Dockerfile`, `.dockerignore`, `railway.json`; `next.config.ts` sem `output: standalone`.

@@ -36,6 +36,14 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 - **Evite disparar dois deploys seguidos** no mesmo serviço: não faça `git push` e logo em seguida `railway up` sem necessidade — são **dois builds** em fila e a sensação é de atraso dobrado.
 - Mensagens **“queued due to maintenance”** ou **“system backpressure”** vêm da **plataforma** Railway; não dá para limpar só pelo repositório — espere ou ajuste no painel.
 
+### Deploy não termina / fica em fila
+
+1. Rode **`npm run railway:diagnose`** (ou `railway deployment list --json`) e confira status.
+2. **Vários `DEPLOYING` / `INITIALIZING` ao mesmo tempo** (por exemplo, builds **Docker** antigos ainda rodando depois de remover `Dockerfile` do Git): abra o projeto com **`railway open`** → serviço → **Deployments** → **cancele** os deploys presos ou obsoletos. A CLI **não** cancela fila; `railway down` remove o **último deploy com sucesso**, não serve para abortar um build preso.
+3. **`QUEUED` + “maintenance”**: fila da Railway — só esperar ou acompanhar [status](https://status.railway.com/).
+4. Para ver onde parou: **`railway logs --build -n 120 <id>`** e **`railway logs --deployment -n 120 <id>`** (o `<id>` vem da lista JSON).
+5. **ACTIVE via CLI** e **QUEUED via GitHub** ao mesmo tempo: o serviço pode estar **online** com o último `railway up`, enquanto builds disparados pelo **Git** esperam manutenção/fila — não indica que o app caiu; alinhar qual commit está em produção pelo card do deploy **ACTIVE**.
+
 ## 4. Banco Supabase (sempre que o schema mudar)
 
 - **Mesmo projeto em todo lugar:** um único Postgres por ambiente (`NEXT_PUBLIC_SUPABASE_URL`). Para o MCP do Cursor usar o mesmo ref que este repo: `npm run sync:mcp-supabase` e reiniciar o MCP; detalhes em `docs/SUPABASE_AMBIENTE_E_MCP.md`. Conferir ref: `npm run env:supabase-ref`.

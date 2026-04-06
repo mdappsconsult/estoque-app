@@ -33,7 +33,7 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 
 ## Deploy (produção)
 
-- App Next.js: **Railway** — build **Railpack** (Node/Next automático). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** no **build** e no runtime. Deploy manual com espera: **`npm run railway:release`** (CLI `railway` no PATH e projeto linkado).
+- App Next.js: **Railway** — build **Railpack** (Node/Next automático). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** no **build** e no runtime. Deploy manual com espera: **`npm run railway:release`** (CLI `railway` no PATH e projeto linkado). Se a fila não andar: **`npm run railway:diagnose`** e o guia em **`docs/FLUXO_ENTREGA.md`** (cancelar deploys presos no dashboard).
 - Dados: **Supabase** (aplicar migrations em `supabase/migrations/` no projeto de produção quando o schema mudar).
 
 ## Fluxo contínuo (resumo)

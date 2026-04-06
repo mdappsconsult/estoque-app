@@ -15,7 +15,8 @@
     "ci": "npm ci && npm run build",
     "railway:deploy": "railway up --detach",
     "railway:wait": "node scripts/railway-wait-deployment.mjs",
-    "railway:release": "railway up --detach && node scripts/railway-wait-deployment.mjs"
+    "railway:release": "railway up --detach && node scripts/railway-wait-deployment.mjs",
+    "railway:diagnose": "node scripts/railway-diagnose.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.0",
