@@ -13,6 +13,10 @@ import {
 } from '@/lib/services/config-impressao-pi';
 import { errMessage } from '@/lib/errMessage';
 
+function mensagemIndicaTunnelMorto(msg: string): boolean {
+  return /ENOTFOUND|getaddrinfo ENOTFOUND/i.test(msg);
+}
+
 const ROTULO: Record<ImpressaoPiPapel, { titulo: string; descricao: string }> = {
   estoque: {
     titulo: 'Ponte estoque (Separar por Loja)',
@@ -125,6 +129,33 @@ function ImpressoraCard({
         >
           <strong>{statusOk === true ? 'Online' : 'Offline / indisponível'}:</strong> {statusMsg}
         </p>
+      )}
+
+      {statusMsg !== null && statusOk !== true && mensagemIndicaTunnelMorto(statusMsg) && (
+        <div className="text-sm rounded-lg px-3 py-2 border border-blue-200 bg-blue-50 text-blue-950 space-y-2">
+          <p className="font-medium text-blue-900">O que significa ENOTFOUND aqui</p>
+          <p className="text-blue-900/90 leading-relaxed">
+            O app lê a URL <strong className="font-mono text-xs">wss://…</strong> abaixo (Supabase) e testa o host na
+            internet. <strong>ENOTFOUND</strong> = esse hostname <strong>não existe mais no DNS</strong> — típico do
+            túnel <strong>quick</strong> Cloudflare (<code className="text-[11px]">*.trycloudflare.com</code>) depois de
+            reiniciar o <code className="text-[11px]">cloudflared</code>: cada subdomínio é novo.
+          </p>
+          <ul className="list-disc pl-5 text-blue-900/90 space-y-1">
+            <li>
+              No Raspberry: <code className="text-[11px]">journalctl -u cloudflared-pi-print-ws -n 30 --no-pager</code>{' '}
+              (ou o serviço do túnel) e copie a URL <code className="text-[11px]">https://…trycloudflare.com</code>{' '}
+              atual; converta para <code className="text-[11px]">wss://…</code> e <strong>Salve</strong> aqui, ou deixe o
+              script de sync (<code className="text-[11px]">PI_TUNNEL_SYNC_SECRET</code>) atualizar o banco.
+            </li>
+            <li>
+              Em <strong>localhost</strong> a verificação usa o <strong>mesmo</strong> registro no Supabase que produção
+              — não é a impressora USB; é só o túnel público que está desatualizado.
+            </li>
+          </ul>
+          <p className="text-xs text-blue-800/90">
+            Doc: <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>
+          </p>
+        </div>
       )}
 
       <div className="space-y-3">

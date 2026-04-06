@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Impressoras: ajuda ENOTFOUND + doc deploy / localhost
+- **UI:** `configuracoes/impressoras` — caixa explicativa quando a verificação retorna ENOTFOUND (túnel quick / Supabase).
+- **Doc:** `FLUXO_ENTREGA.md` (tempo de deploy Railway, evitar push + `railway up` duplicado); `IMPRESSAO_PI_ACESSO_REMOTO.md` (localhost + trycloudflare).
+- **CONTEXTO_ATUAL.md** alinhado.
+- **Validação:** `npm run lint` e `npm run build`.
+
 ### Sessão - 2026-04-06 - Deploy + teste API impressoras + fallback mensagem
 - **Git:** push `389db02` + `183ab98` (`main`); `railway up --detach` após cada bloco relevante. Domínios: `estoque-app-production.up.railway.app`, `controle.acaidokim.com.br`.
 - **Teste:** `GET /api/impressoras/status?papel=estoque` em produção → `online:false` (túnel no banco com host que não resolve). Dev local com código novo → mensagem com `ENOTFOUND` + hostname.

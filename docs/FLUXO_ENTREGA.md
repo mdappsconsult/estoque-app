@@ -29,6 +29,12 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
   - **CLI:** `railway up` a partir do repositório (como registrado em `LOG_SESSOES.md`).
 - Variáveis de ambiente de produção no Railway devem espelhar o necessário para o app (Supabase URL/anon key, etc.).
 
+### Por que o deploy “demora”
+
+- Cada deploy roda de novo **instalação de dependências** + **`next build`** no servidor (costumo ver **~3–10 min**, conforme fila do Railway e cache).
+- O **GitHub Actions** (CI) também faz `npm ci` + build em paralelo no GitHub — isso **não** substitui o build do Railway; são dois processos independentes após o `push`.
+- **Evite disparar dois deploys seguidos** no mesmo serviço: não faça `git push` e logo em seguida `railway up` sem necessidade — são **dois builds** em fila e a sensação é de atraso dobrado.
+
 ## 4. Banco Supabase (sempre que o schema mudar)
 
 - **Mesmo projeto em todo lugar:** um único Postgres por ambiente (`NEXT_PUBLIC_SUPABASE_URL`). Para o MCP do Cursor usar o mesmo ref que este repo: `npm run sync:mcp-supabase` e reiniciar o MCP; detalhes em `docs/SUPABASE_AMBIENTE_E_MCP.md`. Conferir ref: `npm run env:supabase-ref`.

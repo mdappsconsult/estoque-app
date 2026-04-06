@@ -65,6 +65,12 @@ Hostname **fixo**: não depende de sincronizar a cada reinício do quick tunnel.
 - **Tailscale / ZeroTier**: VPN entre o celular/PC e a rede da fábrica; aí você pode usar IP Tailscale com `wss` só se terminar TLS no Pi ou no proxy.
 - **ngrok** `http` com suporte a WebSocket: URL `wss://` fornecida pelo painel.
 
+## Localhost e ENOTFOUND (`*.trycloudflare.com`)
+
+Ao testar **Configurações → Impressoras → Verificar agora** no **localhost**, a rota `/api/impressoras/status` ainda lê **`config_impressao_pi`** no **Supabase** (mesmo projeto que produção) e faz `GET https://…/health` no host derivado de **`ws_public_url`**.
+
+Se aparecer **`getaddrinfo ENOTFOUND …trycloudflare.com`**, o hostname gravado no banco **não resolve mais**: o túnel **quick** mudou. Atualize **`ws_public_url`** com o `wss://` atual (logs do `cloudflared` no Pi ou script de sync). Isso **não** indica falha da Zebra USB — só que a **ponte na internet** está desatualizada ou o Pi/túnel está parado.
+
 ## “Offline / indisponível: fetch failed” (Verificar agora)
 
 O botão **Verificar agora** chama a API do app no **Railway**, que faz um `GET https://…/health` no **mesmo host** do túnel (derivado de `wss://…` no Supabase). A mensagem genérica **`fetch failed`** no Node costuma esconder a causa; após atualizar o app, a API passa a devolver detalhes (ex.: **`ENOTFOUND`**, **`ECONNREFUSED`**, **`CERT_HAS_EXPIRED`**).
