@@ -16,7 +16,8 @@
     "railway:deploy": "railway up --detach",
     "railway:wait": "node scripts/railway-wait-deployment.mjs",
     "railway:release": "railway up --detach && node scripts/railway-wait-deployment.mjs",
-    "railway:diagnose": "node scripts/railway-diagnose.mjs"
+    "railway:diagnose": "node scripts/railway-diagnose.mjs",
+    "railway:prune-queued": "node scripts/railway-prune-queued.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.0",

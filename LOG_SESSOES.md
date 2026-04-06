@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: `railway:prune-queued` (API deploymentCancel)
+- **Contexto:** fila com vários **QUEUED** (manutenção + commits em sequência); Docker no repo foi revertido; limpar duplicados na fila exige painel ou API.
+- **Repo:** `scripts/railway-prune-queued.mjs`, `npm run railway:prune-queued` com `RAILWAY_TOKEN` (token conta/workspace); `--dry-run`, `--keep N`. Doc em `docs/FLUXO_ENTREGA.md`, `README`, `CONTEXTO`; `railway:diagnose` cita o comando.
+- **Validação:** `npm run lint`, `npm run build`; dry-run do script OK.
+
 ### Sessão - 2026-04-06 - Railway: publicar `railway:diagnose` + nota CLI vs Git
 - **Git:** commit do que estava pendente — `scripts/railway-diagnose.mjs`, `npm run railway:diagnose`, doc **Deploy não termina** + bullet **ACTIVE (CLI) vs QUEUED (GitHub)** em `docs/FLUXO_ENTREGA.md`; `README`, `CONTEXTO_ATUAL`.
 - **Contexto:** dashboard com deploys **ACTIVE** por `railway up` e **QUEUED** por Git por manutenção.

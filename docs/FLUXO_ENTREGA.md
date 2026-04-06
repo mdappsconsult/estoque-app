@@ -27,7 +27,8 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 - **Build:** **Railpack** (detecção automática de Node/Next pelo Railway). **Sem** `Dockerfile` / `railway.json` na raiz — builds Docker ficaram **presos em INITIALIZING** e competiam com fila/manutenção no plano hobby; Railpack é o caminho **estável** comprovado (`npm run build` + `npm run start` no serviço).
 - **Variáveis:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no serviço (**Build** e **Runtime**).
 - **Gatilho:** push em `main` com repo ligado ao serviço. **Evite** `railway up` logo após o push (dois builds em fila).
-- **CLI (um único deploy + acompanhamento):** `npm run railway:release` → `railway up --detach` e em seguida `scripts/railway-wait-deployment.mjs` (timeout via `RAILWAY_WAIT_TIMEOUT_SEC`, padrão 900). Só listar status: `railway deployment list --json`. **Não** há cancelamento de fila na CLI; fila/manutenção/backpressure resolve no dashboard ou esperando.
+- **CLI (um único deploy + acompanhamento):** `npm run railway:release` → `railway up --detach` e em seguida `scripts/railway-wait-deployment.mjs` (timeout via `RAILWAY_WAIT_TIMEOUT_SEC`, padrão 900). Só listar status: `railway deployment list --json`.
+- **Cancelar fila duplicada (vários `QUEUED`):** crie um token em [railway.com/account/tokens](https://railway.com/account/tokens), exporte `RAILWAY_TOKEN`, confira com `npm run railway:prune-queued -- --dry-run`, depois `npm run railway:prune-queued` — usa a API `deploymentCancel` e mantém só o deploy **QUEUED** mais recente. O painel também permite “Abort” por deploy; `railway down` **não** cancela `QUEUED`.
 
 ### Por que o deploy “demora”
 
@@ -39,10 +40,11 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 ### Deploy não termina / fica em fila
 
 1. Rode **`npm run railway:diagnose`** (ou `railway deployment list --json`) e confira status.
-2. **Vários `DEPLOYING` / `INITIALIZING` ao mesmo tempo** (por exemplo, builds **Docker** antigos ainda rodando depois de remover `Dockerfile` do Git): abra o projeto com **`railway open`** → serviço → **Deployments** → **cancele** os deploys presos ou obsoletos. A CLI **não** cancela fila; `railway down` remove o **último deploy com sucesso**, não serve para abortar um build preso.
-3. **`QUEUED` + “maintenance”**: fila da Railway — só esperar ou acompanhar [status](https://status.railway.com/).
-4. Para ver onde parou: **`railway logs --build -n 120 <id>`** e **`railway logs --deployment -n 120 <id>`** (o `<id>` vem da lista JSON).
-5. **ACTIVE via CLI** e **QUEUED via GitHub** ao mesmo tempo: o serviço pode estar **online** com o último `railway up`, enquanto builds disparados pelo **Git** esperam manutenção/fila — não indica que o app caiu; alinhar qual commit está em produção pelo card do deploy **ACTIVE**.
+2. **Vários `QUEUED` por excesso de pushes:** `RAILWAY_TOKEN=… npm run railway:prune-queued -- --dry-run` e, se a lista fizer sentido, sem `--dry-run` (mantém 1 deploy na fila; opcional `--keep 2`).
+3. **Vários `DEPLOYING` / `INITIALIZING` ao mesmo tempo** (por exemplo, builds **Docker** antigos ainda rodando depois de remover `Dockerfile` do Git): abra o projeto com **`railway open`** → serviço → **Deployments** → **cancele** os deploys presos ou obsoletos. A CLI **não** cancela fila; `railway down` remove o **último deploy com sucesso**, não serve para abortar um build preso.
+4. **`QUEUED` + “maintenance”**: fila da Railway — só esperar ou acompanhar [status](https://status.railway.com/). Reduzir `QUEUED` duplicados ajuda (`railway:prune-queued`), mas **manutenção** só some quando a plataforma normalizar.
+5. Para ver onde parou: **`railway logs --build -n 120 <id>`** e **`railway logs --deployment -n 120 <id>`** (o `<id>` vem da lista JSON).
+6. **ACTIVE via CLI** e **QUEUED via GitHub** ao mesmo tempo: o serviço pode estar **online** com o último `railway up`, enquanto builds disparados pelo **Git** esperam manutenção/fila — não indica que o app caiu; alinhar qual commit está em produção pelo card do deploy **ACTIVE**.
 
 ## 4. Banco Supabase (sempre que o schema mudar)
 

@@ -108,6 +108,7 @@ function main() {
   console.log("");
   console.log("Comandos úteis:");
   console.log("  railway open");
+  console.log("  RAILWAY_TOKEN=… npm run railway:prune-queued -- --dry-run   # depois sem --dry-run");
   console.log("  railway logs --build -n 120 <DEPLOYMENT_ID>");
   console.log("  railway logs --deployment -n 120 <DEPLOYMENT_ID>");
 }
