@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Deploy: push `main` (Railway via Git)
+- **Git:** commit `7d91307` em `main` — separação manual por estoque, QR sob demanda, docs.
+- **Push:** `origin/main` atualizado; CI GitHub Actions e deploy Railway seguem o que estiver ligado ao repositório.
+- **Validação:** conferir dashboard Railway e run do workflow em GitHub.
+
 ### Sessão - 2026-04-06 - QR: leitor só sob demanda
 - **`QRScanner`:** padrão sem `autoOpen`; label padrão **Ativar leitor de QR (câmera)**. Removido `autoOpen` em baixa diária, recebimento, separar por loja, `/qrcode` e rastreio por QR.
 - **Doc:** `CONTEXTO_ATUAL.md` (UX de câmera).
