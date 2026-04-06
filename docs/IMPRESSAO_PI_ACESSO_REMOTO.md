@@ -15,7 +15,8 @@ O túnel **quick** (`cloudflared tunnel --url …`) gera hostname **novo** sempr
 ### Ordem no app
 
 1. Variável `NEXT_PUBLIC_PI_PRINT_WS_URL` (se existir) — prioridade, útil no **dev local** (uma única URL; ignora `papel` no Supabase).
-2. Senão, linha em **`config_impressao_pi`** com **`papel = 'estoque'`** (Separar por Loja, teste de impressão padrão) ou **`'industria'`** (segundo Raspberry / uso futuro em Produção).
+2. Senão **`NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE`** ou **`NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA`** conforme o papel — recomendado no **Railway** com **túnel nomeado** (`wss://` fixo): o app usa essa URL para WebSocket e para **Verificar agora**, e **não** depende de `ws_public_url` no banco para o host (token/fila podem continuar na tabela ou em `NEXT_PUBLIC_PI_PRINT_WS_TOKEN` / `NEXT_PUBLIC_PI_PRINT_QUEUE`).
+3. Senão, linha em **`config_impressao_pi`** com **`papel = 'estoque'`** (Separar por Loja, teste de impressão padrão) ou **`'industria'`** (segundo Raspberry / uso futuro em Produção).
 
 ### Duas pontes (estoque e indústria)
 

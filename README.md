@@ -115,11 +115,13 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 **Impressão Pi / Zebra (60×30)** — o app fala com o serviço `pi-print-ws` no Raspberry (`scripts/pi-print-ws` + CUPS).
 
-- **Produção / “de qualquer lugar”:** não precisa de `.env` por máquina. Aplique as migrações de `config_impressao_pi` (incl. `papel` estoque/industria) e preencha **`wss://…`** no Supabase. Guias: **`docs/IMPRESSAO_PI_ACESSO_REMOTO.md`**, segundo Raspberry na indústria: **`docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`**.
+- **Produção / “de qualquer lugar”:** não precisa de `.env` por máquina. Aplique as migrações de `config_impressao_pi` (incl. `papel` estoque/industria) e preencha **`wss://…`** no Supabase, **ou** defina no **Railway** (recomendado com túnel nomeado) **`NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE`** e/ou **`NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA`** — o app usa essa URL em vez do host gravado no banco e evita **ENOTFOUND** quando o quick tunnel rotaciona. Guias: **`docs/IMPRESSAO_PI_ACESSO_REMOTO.md`**, segundo Raspberry: **`docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`**.
 - **Só desenvolvimento na mesma LAN** (opcional), pode forçar via env (tem prioridade sobre o Supabase):
 
 ```env
 NEXT_PUBLIC_PI_PRINT_WS_URL=ws://192.168.1.159:8765
+NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE=
+NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA=
 NEXT_PUBLIC_PI_PRINT_WS_TOKEN=
 NEXT_PUBLIC_PI_PRINT_QUEUE=ZebraZD220
 ```

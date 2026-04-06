@@ -31,6 +31,12 @@ import {
   type PiPrintConnection,
 } from '@/lib/printing/pi-print-ws-client';
 import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
+import {
+  limparUltimaRemessaPersistida,
+  persistirUltimaRemessa,
+  lerUltimaRemessaPersistida,
+  type UltimaRemessaImpressao,
+} from '@/lib/separacao/ultima-remessa-storage';
 import { supabase } from '@/lib/supabase';
 import { Local } from '@/types/database';
 
@@ -119,6 +125,8 @@ export default function SepararPorLojaPage() {
   const [erro, setErro] = useState('');
   /** HTTPS + ws:// bloqueado pelo navegador (conteúdo misto). */
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
+  const [ultimaRemessa, setUltimaRemessa] = useState<UltimaRemessaImpressao | null>(null);
+  const focarUltimaRemessaAposCriar = useRef(false);
   const reposicaoSyncEpoch = useRef(0);
   const [estoqueOrigemManual, setEstoqueOrigemManual] = useState<ResumoEstoqueRow[]>([]);
   const [carregandoEstoqueOrigem, setCarregandoEstoqueOrigem] = useState(false);
@@ -317,6 +325,20 @@ export default function SepararPorLojaPage() {
     setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
   }, [piConnection]);
 
+  useEffect(() => {
+    const carregada = lerUltimaRemessaPersistida();
+    if (carregada) setUltimaRemessa(carregada);
+  }, []);
+
+  useEffect(() => {
+    if (!ultimaRemessa || !focarUltimaRemessaAposCriar.current) return;
+    focarUltimaRemessaAposCriar.current = false;
+    const id = window.setTimeout(() => {
+      document.getElementById('painel-ultima-remessa')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => window.clearTimeout(id);
+  }, [ultimaRemessa]);
+
   const adicionarUnidadesPorProduto = async (produtoId: string, produtoNome: string) => {
     if (!origemId) {
       setErro('Selecione a origem (indústria).');
@@ -510,6 +532,57 @@ export default function SepararPorLojaPage() {
     }
   };
 
+  const descartarUltimaRemessa = () => {
+    setUltimaRemessa(null);
+    limparUltimaRemessaPersistida();
+  };
+
+  const imprimirUltimaRemessaInteiraNoPi = async () => {
+    if (!ultimaRemessa || ultimaRemessa.itens.length === 0) return;
+    if (!piPrintAvailable || !piConnection) {
+      alert(
+        'Impressão na estação indisponível. Preencha config_impressao_pi no Supabase ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+      );
+      return;
+    }
+    if (!confirmarImpressao(ultimaRemessa.itens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
+
+    setImprimindoEtiquetas(true);
+    try {
+      await executarUpsertEImprimirPi(
+        ultimaRemessa.itens,
+        ultimaRemessa.lote,
+        ultimaRemessa.nomeLoja,
+        piConnection
+      );
+      alert(
+        `${ultimaRemessa.itens.length} etiqueta(s) da remessa ${ultimaRemessa.lote} enviadas para a Zebra (Pi).`
+      );
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao imprimir a remessa na estação Pi');
+    } finally {
+      setImprimindoEtiquetas(false);
+    }
+  };
+
+  const imprimirUltimaRemessaInteiraNavegador = async () => {
+    if (!ultimaRemessa || ultimaRemessa.itens.length === 0) return;
+    if (!confirmarImpressao(ultimaRemessa.itens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
+
+    setImprimindoEtiquetas(true);
+    try {
+      await executarUpsertEAbrirJanelaEtiquetas(
+        ultimaRemessa.itens,
+        ultimaRemessa.lote,
+        ultimaRemessa.nomeLoja
+      );
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao abrir impressão da remessa');
+    } finally {
+      setImprimindoEtiquetas(false);
+    }
+  };
+
   const guiaPdfEImprimirEtiquetas = async () => {
     if (itensEscaneados.length === 0) return;
     if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
@@ -582,6 +655,15 @@ export default function SepararPorLojaPage() {
         snapshotItens.map((i) => i.id)
       );
 
+      const payloadRemessa: UltimaRemessaImpressao = {
+        lote: loteEtiqueta,
+        nomeLoja: nomeLojaDestino,
+        itens: snapshotItens,
+      };
+      focarUltimaRemessaAposCriar.current = true;
+      setUltimaRemessa(payloadRemessa);
+      persistirUltimaRemessa(payloadRemessa);
+
       setSucesso(true);
       setItensEscaneados([]);
       setDestinoId('');
@@ -634,20 +716,94 @@ export default function SepararPorLojaPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Separar por Loja</h1>
           <p className="text-sm text-gray-500">Warehouse → Store</p>
+          {!ultimaRemessa && (
+            <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-md">
+              Depois de tocar em <strong>Criar Separação</strong>, aparece aqui em cima o painel{' '}
+              <strong>Imprimir pedido completo</strong> (todas as etiquetas da remessa na Zebra ou no navegador). Se não
+              aparecer, confira se o deploy tem a versão nova ou crie uma separação de teste.
+            </p>
+          )}
         </div>
       </div>
 
+      {ultimaRemessa && (
+        <div
+          id="painel-ultima-remessa"
+          className="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 mb-6 space-y-3 shadow-md ring-2 ring-emerald-100"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-lg font-bold text-emerald-950">Imprimir pedido completo</p>
+              <p className="text-xs font-medium text-emerald-800 uppercase tracking-wide">Última remessa registrada</p>
+              <p className="text-sm text-emerald-900 mt-2">
+                Lote <code className="text-[11px] bg-white px-1.5 py-0.5 rounded border border-emerald-200">{ultimaRemessa.lote}</code>{' '}
+                → <strong>{ultimaRemessa.nomeLoja}</strong> — <strong>{ultimaRemessa.itens.length}</strong> unidade(s). Um clique
+                manda <strong>toda a sequência</strong> (60×30).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={descartarUltimaRemessa}
+              className="text-xs text-emerald-800 underline underline-offset-2 shrink-0"
+            >
+              Esquecer esta remessa
+            </button>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="primary"
+              className="flex-1 border-emerald-600 bg-emerald-700 hover:bg-emerald-800"
+              disabled={imprimindoEtiquetas || piCfgLoading || !piPrintAvailable}
+              onClick={() => void imprimirUltimaRemessaInteiraNoPi()}
+              title={
+                !piPrintAvailable
+                  ? 'Configure a ponte Pi / Zebra'
+                  : 'Envia todas as etiquetas desta remessa em um único job para o Raspberry'
+              }
+            >
+              {imprimindoEtiquetas ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <Server className="w-4 h-4 mr-2" />
+              )}
+              Imprimir remessa inteira na Zebra (Pi)
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 border-emerald-300 bg-white"
+              disabled={imprimindoEtiquetas}
+              onClick={() => void imprimirUltimaRemessaInteiraNavegador()}
+            >
+              {imprimindoEtiquetas ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <Printer className="w-4 h-4 mr-2" />
+              )}
+              Remessa inteira no navegador
+            </Button>
+          </div>
+          {!piCfgLoading && !piPrintAvailable && (
+            <p className="text-xs text-amber-900">
+              Pi indisponível: use <strong>Remessa inteira no navegador</strong> ou configure a estação em Configurações →
+              Impressoras.
+            </p>
+          )}
+        </div>
+      )}
+
       {sucesso && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
-          <CheckCircle className="w-6 h-6 text-green-500" />
+          <CheckCircle className="w-6 h-6 text-green-500 shrink-0" />
           <div>
             <p className="font-semibold text-green-800">Separação criada!</p>
             <p className="text-sm text-green-600">
-              Aguardando aceite do motorista. As etiquetas impressas agora batem com esta remessa; se cancelou a impressão,
-              evite usar folhas antigas na loja.
+              Aguardando aceite do motorista. Se cancelou a impressão no aviso anterior, use o painel{' '}
+              <strong>Imprimir pedido completo</strong> acima. Evite usar folhas antigas na loja.
             </p>
           </div>
-          <button onClick={() => setSucesso(false)} className="ml-auto"><X className="w-4 h-4 text-green-400" /></button>
+          <button type="button" onClick={() => setSucesso(false)} className="ml-auto shrink-0" aria-label="Fechar aviso">
+            <X className="w-4 h-4 text-green-400" />
+          </button>
         </div>
       )}
 

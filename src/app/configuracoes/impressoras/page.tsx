@@ -17,6 +17,13 @@ function mensagemIndicaTunnelMorto(msg: string): boolean {
   return /ENOTFOUND|getaddrinfo ENOTFOUND/i.test(msg);
 }
 
+type PiBridgeUrlHint = {
+  papel: ImpressaoPiPapel;
+  envOverridesDatabase: boolean;
+  envKind: 'global' | 'papel' | null;
+  databaseUrlIsQuickTunnel: boolean;
+};
+
 const ROTULO: Record<ImpressaoPiPapel, { titulo: string; descricao: string }> = {
   estoque: {
     titulo: 'Ponte estoque (Separar por Loja)',
@@ -33,9 +40,11 @@ const ROTULO: Record<ImpressaoPiPapel, { titulo: string; descricao: string }> = 
 function ImpressoraCard({
   row,
   onSaved,
+  bridgeHint,
 }: {
   row: ConfigImpressaoPiRow;
   onSaved: () => void;
+  bridgeHint?: PiBridgeUrlHint;
 }) {
   const meta = ROTULO[row.papel];
   const [wsPublicUrl, setWsPublicUrl] = useState(row.ws_public_url);
@@ -76,14 +85,23 @@ function ImpressoraCard({
       const res = await fetch(`/api/impressoras/status?papel=${encodeURIComponent(row.papel)}`, {
         cache: 'no-store',
       });
-      const body = (await res.json()) as { online?: boolean; message?: string; error?: string };
+      const body = (await res.json()) as {
+        online?: boolean;
+        message?: string;
+        error?: string;
+        urlSource?: 'global' | 'papel' | 'database' | 'none';
+      };
       if (!res.ok) {
         setStatusOk(false);
         setStatusMsg(body.error || `HTTP ${res.status}`);
         return;
       }
       setStatusOk(Boolean(body.online));
-      setStatusMsg(body.message || (body.online ? 'Online' : 'Offline'));
+      let msg = body.message || (body.online ? 'Online' : 'Offline');
+      if (body.urlSource === 'global' || body.urlSource === 'papel') {
+        msg += ' (URL ativa: variável de ambiente no servidor.)';
+      }
+      setStatusMsg(msg);
     } catch (e: unknown) {
       setStatusOk(false);
       setStatusMsg(errMessage(e, 'Falha na verificação'));
@@ -104,6 +122,31 @@ function ImpressoraCard({
           <p className="text-xs text-gray-400 mt-2">
             Atualizado: {new Date(row.updated_at).toLocaleString('pt-BR')}
           </p>
+          {bridgeHint?.envOverridesDatabase && (
+            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5 mt-2 max-w-xl">
+              <strong>URL ativa:</strong> variável{' '}
+              <code className="text-[11px]">
+                {bridgeHint.envKind === 'global'
+                  ? 'NEXT_PUBLIC_PI_PRINT_WS_URL'
+                  : row.papel === 'estoque'
+                    ? 'NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE'
+                    : 'NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA'}
+              </code>{' '}
+              no servidor (Railway). O campo abaixo <strong>não</strong> é usado para impressão nem para
+              &quot;Verificar agora&quot; enquanto isso estiver definido.
+            </p>
+          )}
+          {bridgeHint && !bridgeHint.envOverridesDatabase && bridgeHint.databaseUrlIsQuickTunnel && (
+            <p className="text-xs text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 max-w-xl leading-relaxed">
+              <strong>Risco de ENOTFOUND:</strong> a URL no Supabase é túnel <strong>quick</strong> (
+              <code className="text-[11px]">*.trycloudflare.com</code>). Esse hostname muda ao reiniciar o{' '}
+              <code className="text-[11px]">cloudflared</code>. Para estabilizar: sync automático no Pi, ou defina no
+              Railway{' '}
+              <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE</code> /{' '}
+              <code className="text-[11px]">INDUSTRIA</code> com <strong>túnel nomeado</strong> —{' '}
+              <code className="text-[11px]">docs/TUNEL_PERMANENTE_PRINT_PI.md</code>.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -145,11 +188,13 @@ function ImpressoraCard({
               No Raspberry: <code className="text-[11px]">journalctl -u cloudflared-pi-print-ws -n 30 --no-pager</code>{' '}
               (ou o serviço do túnel) e copie a URL <code className="text-[11px]">https://…trycloudflare.com</code>{' '}
               atual; converta para <code className="text-[11px]">wss://…</code> e <strong>Salve</strong> aqui, ou deixe o
-              script de sync (<code className="text-[11px]">PI_TUNNEL_SYNC_SECRET</code>) atualizar o banco.
+              script de sync (<code className="text-[11px]">PI_TUNNEL_SYNC_SECRET</code>) atualizar o banco, ou defina{' '}
+              <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL_*</code> no Railway com URL estável.
             </li>
             <li>
               Em <strong>localhost</strong> a verificação usa o <strong>mesmo</strong> registro no Supabase que produção
-              — não é a impressora USB; é só o túnel público que está desatualizado.
+              (salvo override por variável de ambiente no servidor) — não é a impressora USB; é o túnel público ou a env
+              que está desatualizada.
             </li>
           </ul>
           <p className="text-xs text-blue-800/90">
@@ -210,6 +255,9 @@ export default function ImpressorasConfigPage() {
   const [rows, setRows] = useState<ConfigImpressaoPiRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [bridgeHints, setBridgeHints] = useState<
+    Partial<Record<ImpressaoPiPapel, PiBridgeUrlHint>>
+  >({});
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -228,6 +276,20 @@ export default function ImpressorasConfigPage() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    void fetch('/api/impressoras/url-source', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((json: { bridges?: PiBridgeUrlHint[]; error?: string }) => {
+        if (json.error || !json.bridges) return;
+        const next: Partial<Record<ImpressaoPiPapel, PiBridgeUrlHint>> = {};
+        for (const b of json.bridges) {
+          next[b.papel] = b;
+        }
+        setBridgeHints(next);
+      })
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -256,8 +318,10 @@ export default function ImpressorasConfigPage() {
         <p className="mt-1 text-indigo-900/90 leading-relaxed">
           O túnel <strong>quick</strong> Cloudflare muda o endereço a cada reinício; o Pi pode{' '}
           <strong>atualizar o Supabase sozinho</strong> com o script <code className="text-[11px]">cloudflared-quick-tunnel-sync.sh</code>{' '}
-          (sem copiar URL no app). Para um <strong>mesmo</strong> <code className="text-[11px]">wss://</code> sempre, use{' '}
-          <strong>túnel nomeado</strong> no Cloudflare Zero Trust — guia no repositório:{' '}
+          (sem copiar URL no app). No <strong>Railway</strong>, você pode fixar{' '}
+          <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE</code> /{' '}
+          <code className="text-[11px]">INDUSTRIA</code> com o <code className="text-[11px]">wss://</code> do túnel{' '}
+          <strong>nomeado</strong> (o app ignora o Supabase para o host enquanto a variável existir). Guia:{' '}
           <a
             href="https://github.com/mdappsconsult/estoque-app/blob/main/docs/TUNEL_PERMANENTE_PRINT_PI.md"
             target="_blank"
@@ -291,7 +355,12 @@ export default function ImpressorasConfigPage() {
       {!loading && rows.length > 0 && (
         <div className="space-y-8">
           {rows.map((r) => (
-            <ImpressoraCard key={r.papel} row={r} onSaved={() => void carregar()} />
+            <ImpressoraCard
+              key={r.papel}
+              row={r}
+              onSaved={() => void carregar()}
+              bridgeHint={bridgeHints[r.papel]}
+            />
           ))}
         </div>
       )}

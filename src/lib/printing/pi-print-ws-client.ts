@@ -3,13 +3,19 @@
  *
  * Ordem de resolução da URL:
  * 1. `NEXT_PUBLIC_PI_PRINT_WS_URL` (+ token/fila opcionais) — útil em dev/local.
- * 2. Tabela Supabase `config_impressao_pi` por `papel` (estoque | industria) — URL pública `wss://`.
+ * 2. `NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE` ou `NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA` — URL estável no
+ *    deploy (ex. Railway + túnel nomeado); token/fila podem vir do `.env` ou da linha no Supabase.
+ * 3. Coluna `ws_public_url` em `config_impressao_pi` (sync do Pi ou edição manual).
  */
 
 import {
   type ImpressaoPiPapel,
   getConfigImpressaoPiByPapel,
 } from '@/lib/services/config-impressao-pi';
+import {
+  normalizeWebSocketUrl,
+  resolveEnvPiPrintWssUrl,
+} from '@/lib/printing/pi-print-wss-env';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -23,14 +29,7 @@ export type PiPrintConnection = {
   queue?: string;
 };
 
-/** Converte https://host → wss://host (ao colar URL do painel do túnel). */
-export function normalizeWebSocketUrl(url: string): string {
-  const t = trim(url);
-  if (!t) return t;
-  if (t.startsWith('https://')) return `wss://${t.slice(8)}`;
-  if (t.startsWith('http://')) return `ws://${t.slice(7)}`;
-  return t;
-}
+export { normalizeWebSocketUrl } from '@/lib/printing/pi-print-wss-env';
 
 function connectionFromEnv(): PiPrintConnection | null {
   const raw = trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_URL);
@@ -43,7 +42,7 @@ function connectionFromEnv(): PiPrintConnection | null {
 }
 
 /**
- * URL efetiva do bridge: .env tem prioridade; senão lê `config_impressao_pi` no Supabase.
+ * URL efetiva do bridge: env global → env por papel → `config_impressao_pi` no Supabase.
  * @param papel — `estoque` (separação/loja) ou `industria` (segundo Pi). Ignorado quando há env global.
  */
 export async function resolvePiPrintConnection(
@@ -53,14 +52,21 @@ export async function resolvePiPrintConnection(
   if (fromEnv) return fromEnv;
 
   try {
-    const row = await getConfigImpressaoPiByPapel(papel);
-    if (!row) return null;
-    const url = trim(row.ws_public_url);
-    if (!url) return null;
+    const row = await getConfigImpressaoPiByPapel(papel).catch(() => null);
+    const envWss = resolveEnvPiPrintWssUrl(papel);
+    const fromRow = row && trim(row.ws_public_url);
+    const wssBase = envWss ?? (fromRow ? normalizeWebSocketUrl(fromRow) : '');
+    if (!wssBase) return null;
     return {
-      wsUrl: normalizeWebSocketUrl(url),
-      token: trim(row.ws_token) || undefined,
-      queue: trim(row.cups_queue) || undefined,
+      wsUrl: wssBase,
+      token:
+        trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_TOKEN) ||
+        trim(row?.ws_token) ||
+        undefined,
+      queue:
+        trim(process.env.NEXT_PUBLIC_PI_PRINT_QUEUE) ||
+        trim(row?.cups_queue) ||
+        undefined,
     };
   } catch {
     return null;
@@ -76,9 +82,13 @@ function buildWebSocketUrlFromConnection(conn: PiPrintConnection): string {
   return `${base}${join}token=${encodeURIComponent(token)}`;
 }
 
-/** Apenas variável de ambiente no build (não inclui Supabase). */
+/** True se alguma URL Pi vem só de variável de ambiente (sem depender do Supabase para o host). */
 export function isPiPrintEnvConfigured(): boolean {
-  return Boolean(trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_URL));
+  return Boolean(
+    trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_URL) ||
+      trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE) ||
+      trim(process.env.NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA)
+  );
 }
 
 /**
@@ -113,7 +123,7 @@ export async function enviarHtmlParaPiPrintBridge(
     options?.connection ?? (await resolvePiPrintConnection(papel));
   if (!conn) {
     throw new Error(
-      'Impressão na estação não configurada. Use NEXT_PUBLIC_PI_PRINT_WS_URL no ambiente ou preencha config_impressao_pi no Supabase (papel estoque/industria). Veja Configurações → Impressoras e docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+      'Impressão na estação não configurada. Use NEXT_PUBLIC_PI_PRINT_WS_URL ou NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE/INDUSTRIA no ambiente, ou preencha config_impressao_pi no Supabase. Veja Configurações → Impressoras e docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
     );
   }
   const wsUrl = buildWebSocketUrlFromConnection(conn);

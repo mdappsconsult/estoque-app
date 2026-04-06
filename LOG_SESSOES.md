@@ -1,5 +1,60 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Etiquetas: select remessa sem nome de produto
+- **Código:** `rotuloOpcaoSelectRemessa` — só data/hora · origem → destino · N etiqueta(s) (evita truncar nome de produto no dropdown).
+
+### Sessão - 2026-04-06 - Etiquetas: remessa SEP legível (data, origem, destino, produtos)
+- **Código:** busca `transferencias` por `viagem_id` extraído de `SEP-…`; painel e `<select>` com data/hora, indústria → loja, status da viagem, resumo de produtos; grupos por produto com mesma contextualização; `remessa-separacao-ui.ts`.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+
+### Sessão - 2026-04-06 - Etiquetas: Zebra remessa inteira (lote SEP-)
+- **Código:** `ultima-remessa-storage.ts` (persistência compartilhada); `/etiquetas` agrega lotes `SEP-…`, painel com **Zebra / Pi — remessa inteira** + navegador 60×30; seletor se houver várias remessas na janela de 5000 etiquetas; `separar-por-loja` importa o mesmo módulo.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+
+### Sessão - 2026-04-06 - Separar por Loja: painel «Imprimir pedido completo» mais visível
+- **Problema:** operador não encontrava o card «Última remessa».
+- **Código:** persistência em **localStorage** (`v2`) + migração de `sessionStorage` legado; título **Imprimir pedido completo** (borda/ring), painel **acima** do aviso verde; texto de ajuda quando não há remessa; `scrollIntoView` após criar separação; validação de payload ao reler.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-06 - Separar por Loja: imprimir remessa inteira (Zebra / navegador)
+- **Código:** após **Criar separação**, persistir última remessa (`lote` `SEP-…`, loja, snapshot de itens) em `sessionStorage`; card **Última remessa** com **Imprimir remessa inteira na Zebra (Pi)** e **Remessa inteira no navegador**; **Esquecer esta remessa** limpa estado.
+- **Impacto:** um clique reenvia toda a sequência de etiquetas do pedido, sem remontar a lista na tela.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+
+### Sessão - 2026-04-06 - Etiquetas: impressão direta Zebra / Pi
+- **Código:** `/etiquetas` — `usePiPrintBridgeConfig({ papel: 'estoque' })`, `rowsParaEtiquetasImpressao`, `imprimirListaNoPi` (HTML 60×30 + `enviarHtmlParaPiPrintBridge` + `marcarImpressa`); botões Zebra/Pi no topo, por grupo e ícone por linha; aviso HTTPS + `ws://` como nas outras telas; botão por linha **não** bloqueia etiqueta já impressa (reimpressão).
+- **Impacto:** operador envia etiquetas listadas direto para CUPS/Zebra sem depender só da impressão do navegador.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+
+### Sessão - 2026-04-06 - Impressoras status: DoH + SNI (localhost ENOTFOUND)
+- **Problema:** Node/`fetch` com `ENOTFOUND` para `print.acaidokim.com.br` no Mac/sandbox mesmo com zona DNS OK.
+- **Código:** após `dns.setServers` + 2º `fetch`, terceiro caminho: **DoH** `https://1.1.1.1/dns-query` (JSON) + `https.request` ao IPv4 com `servername`/`Host` do hostname.
+- **Validação:** `npm run dev` → `GET /api/impressoras/status?papel=estoque` → `online:true`; `npm run lint`, `npm run build`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+
+### Sessão - 2026-04-06 - Impressoras status: fallback DNS (Railway ENOTFOUND)
+- **Problema:** `getaddrinfo ENOTFOUND print.acaidokim.com.br` no servidor apesar de DNS público OK (1.1.1.1 / 8.8.8.8).
+- **Código:** `/api/impressoras/status` — em falha DNS provável, `dns.setServers` (1.1.1.1, 8.8.8.8 ou `PI_PRINT_STATUS_DNS_SERVERS`) e novo `fetch`.
+- **Doc:** `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-06 - Pi: túnel nomeado Cloudflare + SSH (`print.acaidokim.com.br`)
+- **API:** túnel **`pi-print-acaidokim`** (`3406c32f-fd37-4dff-9da8-41e88cef2976`), ingress **`print.acaidokim.com.br`** → `http://127.0.0.1:8765`.
+- **Pi (SSH `kim@192.168.1.159`):** `cloudflared service install` + **`cloudflared.service`** ativo; **`cloudflared-pi-print-ws.service`** stop + disable (quick/sync).
+- **Pendente:** CNAME **`print`** na zona **`acaidokim.com.br`** se DNS não propagar; atualizar **`ws_public_url`** / env Railway para **`wss://print.acaidokim.com.br`**. Token do conector no `ExecStart` do systemd — considerar rotação no painel se necessário.
+- **Doc:** `CONTEXTO_ATUAL.md` atualizado.
+
+### Sessão - 2026-04-06 - Pi impressão: URL estável por env (evitar ENOTFOUND quick tunnel)
+- **Problema:** `ws_public_url` no Supabase com `*.trycloudflare.com` obsoleto → `ENOTFOUND` em Verificar agora / impressão.
+- **Código:** módulo `pi-print-wss-env.ts`; ordem: `NEXT_PUBLIC_PI_PRINT_WS_URL` → `NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE` / `INDUSTRIA` → Supabase; `resolvePiPrintConnection` e `GET /api/impressoras/status` alinhados; resposta com `urlSource`; novo `GET /api/impressoras/url-source` para avisos na UI (quick no banco vs override por env).
+- **UI:** Configurações → Impressoras — faixas verde (env ativa) e âmbar (risco quick só no Supabase).
+- **Doc:** `IMPRESSAO_PI_ACESSO_REMOTO.md`, `README.md`, `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-06 - Railway: remoção manual + novo `railway up`
 - **Contexto:** utilizador removeu deploys no dashboard; repo em `8157d7e` (`main` = `origin/main`).
 - **Ação:** `railway up --detach` → deployment **`5bb93288-797d-4de8-84c0-b542929c529c`** (estado inicial **BUILDING** após upload).
