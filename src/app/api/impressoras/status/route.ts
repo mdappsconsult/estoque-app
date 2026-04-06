@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 
 const PAPEIS = ['estoque', 'industria'] as const;
 
+const noStoreJson = (body: object, init?: { status?: number }) =>
+  NextResponse.json(body, {
+    ...init,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+
 function wssToHealthUrl(wss: string): string | null {
   const t = wss.trim();
   if (!t.startsWith('wss://')) return null;
@@ -17,13 +23,13 @@ function wssToHealthUrl(wss: string): string | null {
 export async function GET(req: NextRequest) {
   const papel = req.nextUrl.searchParams.get('papel') ?? 'estoque';
   if (!PAPEIS.includes(papel as (typeof PAPEIS)[number])) {
-    return NextResponse.json({ error: 'papel inválido' }, { status: 400 });
+    return noStoreJson({ error: 'papel inválido' }, { status: 400 });
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
-    return NextResponse.json({ error: 'Supabase não configurado no servidor' }, { status: 500 });
+    return noStoreJson({ error: 'Supabase não configurado no servidor' }, { status: 500 });
   }
 
   const supabase = createClient(url, key);
@@ -34,12 +40,12 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return noStoreJson({ error: error.message }, { status: 500 });
   }
 
   const healthUrl = data?.ws_public_url ? wssToHealthUrl(String(data.ws_public_url)) : null;
   if (!healthUrl) {
-    return NextResponse.json({
+    return noStoreJson({
       online: false,
       message: 'URL pública (wss://) não configurada para esta ponte.',
     });
@@ -56,7 +62,7 @@ export async function GET(req: NextRequest) {
     clearTimeout(timer);
     const text = await res.text();
     const online = res.ok && text.includes('pi-print-ws');
-    return NextResponse.json({
+    return noStoreJson({
       online,
       statusCode: res.status,
       message: online
@@ -75,6 +81,6 @@ export async function GET(req: NextRequest) {
         message += ' Confira ws_public_url (wss://) no Supabase.';
       }
     }
-    return NextResponse.json({ online: false, message });
+    return noStoreJson({ online: false, message });
   }
 }

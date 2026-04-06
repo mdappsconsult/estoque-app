@@ -1,7 +1,7 @@
 # Log de Sessões
 
 ### Sessão - 2026-04-06 - Deploy + teste API impressoras + fallback mensagem
-- **Git:** push `389db02` (`main`); depois `railway up --detach` (build no dashboard). Domínios: `estoque-app-production.up.railway.app`, `controle.acaidokim.com.br`.
+- **Git:** push `389db02` + `183ab98` (`main`); `railway up --detach` após cada bloco relevante. Domínios: `estoque-app-production.up.railway.app`, `controle.acaidokim.com.br`.
 - **Teste:** `GET /api/impressoras/status?papel=estoque` em produção → `online:false` (túnel no banco com host que não resolve). Dev local com código novo → mensagem com `ENOTFOUND` + hostname.
 - **Código:** fallback em `route.ts` quando a mensagem é só `fetch failed` (runtime sem `cause`), incluindo host do health URL.
 - **Validação:** `npm run lint` e `npm run build`.
