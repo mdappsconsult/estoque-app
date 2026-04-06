@@ -1,5 +1,12 @@
 # Log de Sessões
 
+### Sessão - 2026-04-04 - Railway: voltar ao Railpack + `railway:release`
+- **Motivo:** deploys **Docker** ficaram em **INITIALIZING** / fila **QUEUED** (manutenção/backpressure); a CLI não cancela fila — caminho estável é **Railpack** (último `SUCCESS` histórico).
+- **Repo:** removidos `Dockerfile`, `.dockerignore`, `railway.json`; `next.config.ts` sem `output: standalone`.
+- **Automação:** `npm run railway:deploy`, `railway:wait`, `railway:release` + `scripts/railway-wait-deployment.mjs` (timeout `RAILWAY_WAIT_TIMEOUT_SEC`).
+- **Doc:** `docs/FLUXO_ENTREGA.md`, `README.md`, `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-06 - Railway: `railway.json` + deploy MCP
 - **Motivo:** deployments na fila ainda apareciam com **RAILPACK** no manifest; `railway.toml` trocado por **`railway.json`** (`$schema` railway.com) para forçar **DOCKERFILE**.
 - **MCP Railway:** `check-railway-status` OK; `list-deployments` (fila/manutenção/backpressure); `deploy` com upload do workspace.

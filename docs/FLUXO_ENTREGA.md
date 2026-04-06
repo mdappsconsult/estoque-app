@@ -24,16 +24,17 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 ## 3. Deploy do app (Railway)
 
 - Hospedagem do Next.js: **Railway** (ver `README.md`).
-- **Build:** `Dockerfile` na raiz + **`railway.json`** (schema Railway, `builder = DOCKERFILE`, `startCommand = node server.js`) — Next em modo **`output: 'standalone'`** para imagem menor e **cache de layers** (dependências só reinstalam quando `package-lock.json` muda).
-- **Variáveis:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` devem existir no serviço Railway (**Build** e **Runtime**), pois entram no bundle no `docker build`.
-- **Gatilho:** push em `main` com repo ligado ao serviço. Evite `railway up` logo após o push (dois builds em fila).
-- **CLI:** `railway up` só se precisar forçar fora do Git; mesmo fluxo Docker.
+- **Build:** **Railpack** (detecção automática de Node/Next pelo Railway). **Sem** `Dockerfile` / `railway.json` na raiz — builds Docker ficaram **presos em INITIALIZING** e competiam com fila/manutenção no plano hobby; Railpack é o caminho **estável** comprovado (`npm run build` + `npm run start` no serviço).
+- **Variáveis:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no serviço (**Build** e **Runtime**).
+- **Gatilho:** push em `main` com repo ligado ao serviço. **Evite** `railway up` logo após o push (dois builds em fila).
+- **CLI (um único deploy + acompanhamento):** `npm run railway:release` → `railway up --detach` e em seguida `scripts/railway-wait-deployment.mjs` (timeout via `RAILWAY_WAIT_TIMEOUT_SEC`, padrão 900). Só listar status: `railway deployment list --json`. **Não** há cancelamento de fila na CLI; fila/manutenção/backpressure resolve no dashboard ou esperando.
 
 ### Por que o deploy “demora”
 
 - Cada deploy roda de novo **instalação de dependências** + **`next build`** no servidor (costumo ver **~3–10 min**, conforme fila do Railway e cache).
 - O **GitHub Actions** (CI) também faz `npm ci` + build em paralelo no GitHub — isso **não** substitui o build do Railway; são dois processos independentes após o `push`.
 - **Evite disparar dois deploys seguidos** no mesmo serviço: não faça `git push` e logo em seguida `railway up` sem necessidade — são **dois builds** em fila e a sensação é de atraso dobrado.
+- Mensagens **“queued due to maintenance”** ou **“system backpressure”** vêm da **plataforma** Railway; não dá para limpar só pelo repositório — espere ou ajuste no painel.
 
 ## 4. Banco Supabase (sempre que o schema mudar)
 
