@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: remoção manual + novo `railway up`
+- **Contexto:** utilizador removeu deploys no dashboard; repo em `8157d7e` (`main` = `origin/main`).
+- **Ação:** `railway up --detach` → deployment **`5bb93288-797d-4de8-84c0-b542929c529c`** (estado inicial **BUILDING** após upload).
+- **Nota:** evitar `git push` logo a seguir para não criar segundo deploy (Git + CLI) na mesma fila.
+
 ### Sessão - 2026-04-06 - Railway: “não sobe” em 5 min — `DEPLOYING` + incidente
 - **CLI:** deployment **`4e9aa2df`** em **`DEPLOYING`**; build Railpack **já OK** (~110 s); **Deploy logs** ainda vazios — típico com lentidão de plataforma (banner *builds slow to progress*).
 - **Git:** `git push origin main` — `70edf0b` (só `LOG_SESSOES`) alinhado com `origin`; pode surgir novo deploy por Git — **cancelar duplicados** no painel se competirem com o `4e9aa2df`.
