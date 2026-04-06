@@ -33,7 +33,7 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 
 ## Deploy (produção)
 
-- App Next.js: **Railway** — **`Dockerfile`** + **`railway.toml`** (Next `standalone`, `node server.js`). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** devem estar disponíveis no **build** e no runtime.
+- App Next.js: **Railway** — **`Dockerfile`** + **`railway.json`** (Next `standalone`, `node server.js`). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** devem estar disponíveis no **build** e no runtime.
 - Dados: **Supabase** (aplicar migrations em `supabase/migrations/` no projeto de produção quando o schema mudar).
 
 ## Fluxo contínuo (resumo)

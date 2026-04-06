@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: `railway.json` + deploy MCP
+- **Motivo:** deployments na fila ainda apareciam com **RAILPACK** no manifest; `railway.toml` trocado por **`railway.json`** (`$schema` railway.com) para forçar **DOCKERFILE**.
+- **MCP Railway:** `check-railway-status` OK; `list-deployments` (fila/manutenção/backpressure); `deploy` com upload do workspace.
+- **Doc:** `FLUXO_ENTREGA`, `README`, `CONTEXTO_ATUAL`.
+
 ### Sessão - 2026-04-06 - Railway: Dockerfile + standalone + railway.toml
 - **Build:** `Dockerfile` multi-stage (Node 20), Next `output: 'standalone'` em `next.config.ts`, `.dockerignore`.
 - **Railway:** `railway.toml` — `builder = DOCKERFILE`, `startCommand = node server.js`, healthcheck `/`, `restartPolicyType = ON_FAILURE`.

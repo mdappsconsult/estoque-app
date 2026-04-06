@@ -24,7 +24,7 @@ Se o lint ou o build falhar, **não** faça merge/push para `main`.
 ## 3. Deploy do app (Railway)
 
 - Hospedagem do Next.js: **Railway** (ver `README.md`).
-- **Build:** `Dockerfile` na raiz + `railway.toml` (`builder = DOCKERFILE`, `startCommand = node server.js`) — Next em modo **`output: 'standalone'`** para imagem menor e **cache de layers** (dependências só reinstalam quando `package-lock.json` muda).
+- **Build:** `Dockerfile` na raiz + **`railway.json`** (schema Railway, `builder = DOCKERFILE`, `startCommand = node server.js`) — Next em modo **`output: 'standalone'`** para imagem menor e **cache de layers** (dependências só reinstalam quando `package-lock.json` muda).
 - **Variáveis:** `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` devem existir no serviço Railway (**Build** e **Runtime**), pois entram no bundle no `docker build`.
 - **Gatilho:** push em `main` com repo ligado ao serviço. Evite `railway up` logo após o push (dois builds em fila).
 - **CLI:** `railway up` só se precisar forçar fora do Git; mesmo fluxo Docker.
