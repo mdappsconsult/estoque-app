@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Imagem Docker no Railway: artefato menor e cache de layers (node_modules + build).
+  output: "standalone",
 };
 
 export default nextConfig;

@@ -1,0 +1,15 @@
+# Railway: config-as-code — força Dockerfile (build com cache de layers, mais estável que Nixpacks genérico).
+# Variáveis NEXT_PUBLIC_* devem existir no serviço (Build + Deploy) para o bundle carregar o Supabase.
+# https://docs.railway.com/guides/config-as-code
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Sobrescreve painel antigo "npm run start" — no standalone o processo correto é o server.js gerado pelo Next.
+startCommand = "node server.js"
+healthcheckPath = "/"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

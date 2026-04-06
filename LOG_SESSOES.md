@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: Dockerfile + standalone + railway.toml
+- **Build:** `Dockerfile` multi-stage (Node 20), Next `output: 'standalone'` em `next.config.ts`, `.dockerignore`.
+- **Railway:** `railway.toml` — `builder = DOCKERFILE`, `startCommand = node server.js`, healthcheck `/`, `restartPolicyType = ON_FAILURE`.
+- **Doc:** `docs/FLUXO_ENTREGA.md`, `README.md`, `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build` (com env fictícia). Imagem Docker não testada neste ambiente (Docker indisponível).
+
 ### Sessão - 2026-04-06 - Pi: túnel permanente (doc) + sync quick com retentativas
 - **Doc:** `docs/TUNEL_PERMANENTE_PRINT_PI.md` — túnel nomeado Cloudflare para `wss://` fixo; quick + RPC já atualiza o banco sozinho (sem colar URL), com limitação de hostname rotativo.
 - **Script:** `cloudflared-quick-tunnel-sync.sh` — retentativas na RPC (`PI_TUNNEL_SYNC_RETRIES`, padrão 5), `grep` para URL trycloudflare, log se faltar `.env`; exemplos `cloudflared-config-named-tunnel.example.yml` e `cloudflared-named-tunnel.service.example`.
