@@ -1,0 +1,79 @@
+[
+  {
+    "login": "leonardo",
+    "senha": "PREENCHER",
+    "nome": "Leonardo",
+    "telefone": "550000000001",
+    "perfil": "OPERATOR_WAREHOUSE"
+  },
+  {
+    "login": "marco",
+    "senha": "PREENCHER",
+    "nome": "Marco",
+    "telefone": "550000000002",
+    "perfil": "ADMIN_MASTER"
+  },
+  {
+    "login": "ludmilla",
+    "senha": "PREENCHER",
+    "nome": "Ludmilla",
+    "telefone": "550000000003",
+    "perfil": "MANAGER"
+  },
+  {
+    "login": "joana",
+    "senha": "PREENCHER",
+    "nome": "Joana",
+    "telefone": "550000000004",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja Paraiso"
+  },
+  {
+    "login": "simone",
+    "senha": "PREENCHER",
+    "nome": "Simone",
+    "telefone": "550000000005",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja Teste"
+  },
+  {
+    "login": "luciene",
+    "senha": "PREENCHER",
+    "nome": "Luciene",
+    "telefone": "550000000011",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja JK"
+  },
+  {
+    "login": "francisca",
+    "senha": "PREENCHER",
+    "nome": "Francisca",
+    "telefone": "550000000012",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Delivery"
+  },
+  {
+    "login": "julia",
+    "senha": "PREENCHER",
+    "nome": "Júlia",
+    "telefone": "550000000013",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja Santa Cruz"
+  },
+  {
+    "login": "lara",
+    "senha": "PREENCHER",
+    "nome": "Lara",
+    "telefone": "550000000014",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja Imperador"
+  },
+  {
+    "login": "silvania",
+    "senha": "PREENCHER",
+    "nome": "Silvania",
+    "telefone": "550000000015",
+    "perfil": "OPERATOR_STORE",
+    "lojaPadraoNome": "Loja Jardim Paraíso"
+  }
+]

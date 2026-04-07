@@ -1,5 +1,27 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Credencial Marco (Supabase MCP)
+- **Banco:** `usuarios.login_operacional` = `full` e linha em `credenciais_login_operacional` (bcrypt) para Marco (`telefone` 550000000002), via SQL no projeto MCP.
+- **Validação:** conferência pós-SQL (`tem_hash` true).
+
+### Sessão - 2026-04-06 - Login só Supabase (sem legado no código)
+- **Código:** removidos `credenciais-legado.ts` e `operacional-usuario-server.ts`. `POST /api/auth/operacional` valida apenas `usuarios.login_operacional` + `credenciais_login_operacional` (bcrypt); sem hash → 401 com orientação ao admin.
+- **Ferramenta:** `npm run seed:operacional` + `scripts/seed-credenciais-operacionais.mjs`; `scripts/operacional-seed.example.json` (sem senhas reais); `scripts/operacional-seed.local.json` no `.gitignore`.
+- **Doc:** `README.md`, `CONTEXTO_ATUAL.md` — sem tabela de senhas no repositório.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-06 - Login: senhas no banco (bcrypt) + Cadastro usuários
+- **Banco:** `usuarios.login_operacional`, tabela `credenciais_login_operacional` (hash), RLS sem policy pública; migration `20260406203000_login_operacional_credenciais.sql` (aplicada no projeto MCP).
+- **API:** `POST /api/auth/operacional` (login), `POST /api/admin/credencial-operacional` (só `ADMIN_MASTER`); `createSupabaseAdmin` + `bcryptjs`. (Fallback legado removido na sessão seguinte.)
+- **Código:** cadastro **Usuários** com usuário/senha e opção remover credencial.
+- **Deploy:** `SUPABASE_SERVICE_ROLE_KEY` obrigatória no Railway. **Validação:** `npm run lint`, `npm run build`.
+- **Doc:** `README.md`, `CONTEXTO_ATUAL.md`, `schema_public.sql`.
+
+### Sessão - 2026-04-06 - Supabase: usuarios operadoras loja + loja Jardim Paraíso
+- **Banco (MCP):** criado `locais` **Loja Jardim Paraíso**; upsert **5× `usuarios`** (`OPERATOR_STORE`, telefones `550000000011`–`015`) com `local_padrao_id` por nome de loja.
+- **Código:** `acesso.ts` — `lojaPadraoNome` **Delivery** e **Loja Imperador** alinhados ao cadastro real de `locais`.
+- **Repo:** migration `20260406190000_loja_jardim_paraiso.sql`, `docs/consultas-sql/upsert-operadoras-loja.sql`, README e `CONTEXTO_ATUAL.md`.
+
 ### Sessão - 2026-04-06 - Etiquetas: select remessa sem nome de produto
 - **Código:** `rotuloOpcaoSelectRemessa` — só data/hora · origem → destino · N etiqueta(s) (evita truncar nome de produto no dropdown).
 

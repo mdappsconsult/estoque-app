@@ -18,13 +18,8 @@
 - `DRIVER` / `OPERATOR_WAREHOUSE_DRIVER`: transporte e viagem.
 
 ## Usuários operacionais
-- Tela `/login` **não** exibe lista de usuários/senhas (credenciais em `acesso.ts` + `README` para uso interno).
-- Leonardo: operador indústria.
-- Ludmilla: gerente.
-- Joana: operadora de loja (Loja Paraiso).
-- Simone: operadora de loja (Loja Teste); login `simone` / senha `123456` (credencial em `acesso.ts`).
-- Operadoras de loja (senhas numéricas 6 dígitos **distintas**, ver README): Luciene / `382941` / `Loja JK`; Francisca / `574028` / `Loja Delivery`; Júlia / `619357` / `Loja Santa Cruz`; Lara / `805426` / `Loja Imperador Lara`; Silvania / `973518` / `Loja Jardim Paraíso` (logins `luciene`, `francisca`, `julia`, `lara`, `silvania`). **Locais** com nome idêntico ao cadastro ou o login falha ao resolver loja.
-- Marco: administrador.
+- Tela `/login` **não** exibe lista de usuários/senhas. **Autenticação:** só `POST /api/auth/operacional` com **bcrypt** em `credenciais_login_operacional` + `login_operacional` em `usuarios` (ativo). Sem hash no banco → mensagem pedindo configuração em **Cadastros → Usuários**. **Railway / `.env.local`:** `SUPABASE_SERVICE_ROLE_KEY` obrigatória. **Cadastros → Usuários** (`ADMIN_MASTER`): define/remove credencial (hash). **Carga inicial opcional:** `npm run seed:operacional` + `scripts/operacional-seed.local.json` (gitignored; modelo `scripts/operacional-seed.example.json`).
+- Equipe típica: Leonardo (indústria), Ludmilla (gerente), Joana / Simone / Luciene / Francisca / Júlia / Lara / Silvania (lojas conforme `local_padrao_id`), Marco (admin). Telefones e lojas devem bater com **Locais** e `usuarios` no Supabase; operador de loja sem loja resolvida não consegue fluxo completo.
 
 ## Fluxo oficial de transferência
 - `AWAITING_ACCEPT` -> `ACCEPTED` -> `IN_TRANSIT` -> `DELIVERED` (ou `DIVERGENCE`).

@@ -41,3 +41,4 @@ next-env.d.ts
 .env.local
 .env.railway.local
 supabase/run-schema*.mjs
+scripts/operacional-seed.local.json

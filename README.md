@@ -35,6 +35,7 @@ O foco e operacao rapida no dia a dia, com telas simples para uso em celular.
 
 - App Next.js: **Railway** — build **Railpack** (Node/Next automático). Push na `main` com repositório ligado ao serviço. Variáveis **`NEXT_PUBLIC_SUPABASE_URL`** e **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** no **build** e no runtime. Deploy manual com espera: **`npm run railway:release`** (CLI `railway` no PATH e projeto linkado). Fila com vários **`QUEUED`**: **Project token** do projeto (Railway → Settings → Tokens) como **`RAILWAY_PROJECT_TOKEN`**, ou token de conta em [railway.com/account/tokens](https://railway.com/account/tokens) como **`RAILWAY_TOKEN`** — **`npm run railway:prune-queued -- --dry-run`** (depois sem `--dry-run`). Não partilhes o token; se vazar, revoga e gera outro. Diagnóstico: **`npm run railway:diagnose`**; detalhes em **`docs/FLUXO_ENTREGA.md`**.
 - Dados: **Supabase** (aplicar migrations em `supabase/migrations/` no projeto de produção quando o schema mudar).
+- **Login operacional:** o app usa só a rota `POST /api/auth/operacional` com **`SUPABASE_SERVICE_ROLE_KEY`** no servidor (Railway e `.env.local`). Sem essa variável, o login falha. Credenciais ficam **apenas** no Supabase: `usuarios.login_operacional` + hash **bcrypt** em `credenciais_login_operacional` (definidas em **Cadastros → Usuários** por `ADMIN_MASTER`, ou carga inicial com `npm run seed:operacional` e `scripts/operacional-seed.local.json` — arquivo local, fora do Git; modelo em `scripts/operacional-seed.example.json`).
 
 ## Fluxo contínuo (resumo)
 
@@ -139,27 +140,12 @@ npm run dev
 
 App local: [http://localhost:3000](http://localhost:3000)
 
-## Acessos de desenvolvimento (login operacional)
+## Login operacional (sem senhas no repositório)
 
-Lista operacional (a tela `/login` **não** exibe senhas; uso interno / treinamento). Fonte: `src/lib/services/acesso.ts`:
-
-- **Leonardo** / `123456` (indústria) — usuário `leonardo`
-- **Joana** / `123456` (loja) — `joana`
-- **Ludmilla** / `123456` (gerente) — `ludmilla`
-- **Marco** / `654321` (administrador) — `marco`
-- **Simone** / `123456` (loja, Loja Teste) — `simone`
-
-Operadoras de loja (senha 6 dígitos **por pessoa**; login = primeira coluna em minúsculas: `luciene`, `francisca`, `julia`, `lara`, `silvania`):
-
-| Nome      | Senha   | Loja (`locais.nome`)   |
-|-----------|---------|-------------------------|
-| Luciene   | `382941` | Loja JK                 |
-| Francisca | `574028` | Loja Delivery           |
-| Júlia     | `619357` | Loja Santa Cruz         |
-| Lara      | `805426` | Loja Imperador Lara     |
-| Silvania  | `973518` | Loja Jardim Paraíso     |
-
-Cada loja precisa existir em **Cadastros → Locais** com tipo **Loja** e nome **exatamente** como na tabela.
+- A tela `/login` não lista credenciais. Quem pode entrar depende do que está no Supabase (`login_operacional` + hash em `credenciais_login_operacional`).
+- **Cadastro:** **Cadastros → Usuários** (`ADMIN_MASTER`) define ou altera usuário e senha.
+- **Carga em lote (uma vez):** copie `scripts/operacional-seed.example.json` para `scripts/operacional-seed.local.json` (este último está no `.gitignore`), preencha os campos `"senha"`, garanta **Locais** e telefones alinhados ao JSON, depois `npm run seed:operacional` com `.env.local` contendo a service role.
+- Operadores de loja precisam de `local_padrao_id` resolvido pelo nome da loja no seed (campo `lojaPadraoNome`) ou pelo cadastro manual. SQL de apoio: `docs/consultas-sql/upsert-operadoras-loja.sql`.
 
 ## Observacoes importantes do estado atual
 

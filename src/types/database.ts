@@ -470,6 +470,8 @@ export type Database = {
             | 'OPERATOR_STORE'
             | 'DRIVER';
           local_padrao_id: string | null;
+          /** Login na tela de entrada (único quando preenchido). Senha fica só em `credenciais_login_operacional`. */
+          login_operacional: string | null;
           status: 'ativo' | 'inativo';
           created_at: string;
         };
@@ -485,6 +487,7 @@ export type Database = {
             | 'OPERATOR_STORE'
             | 'DRIVER';
           local_padrao_id?: string | null;
+          login_operacional?: string | null;
           status?: 'ativo' | 'inativo';
           created_at?: string;
         };
@@ -500,7 +503,25 @@ export type Database = {
             | 'OPERATOR_STORE'
             | 'DRIVER';
           local_padrao_id?: string | null;
+          login_operacional?: string | null;
           status?: 'ativo' | 'inativo';
+        };
+      };
+      credenciais_login_operacional: {
+        Row: {
+          usuario_id: string;
+          senha_hash: string;
+          updated_at: string;
+        };
+        Insert: {
+          usuario_id: string;
+          senha_hash: string;
+          updated_at?: string;
+        };
+        Update: {
+          usuario_id?: string;
+          senha_hash?: string;
+          updated_at?: string;
         };
       };
       lotes_compra: {

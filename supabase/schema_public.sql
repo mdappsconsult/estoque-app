@@ -173,9 +173,22 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
   telefone TEXT NOT NULL UNIQUE,
   perfil TEXT NOT NULL CHECK (perfil IN ('ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER')),
   local_padrao_id UUID REFERENCES public.locais(id),
+  login_operacional TEXT,
   status TEXT NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS usuarios_login_operacional_unique
+  ON public.usuarios (login_operacional)
+  WHERE login_operacional IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.credenciais_login_operacional (
+  usuario_id UUID PRIMARY KEY REFERENCES public.usuarios(id) ON DELETE CASCADE,
+  senha_hash TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.credenciais_login_operacional ENABLE ROW LEVEL SECURITY;
 
 -- LOTES_COMPRA
 CREATE TABLE IF NOT EXISTS public.lotes_compra (

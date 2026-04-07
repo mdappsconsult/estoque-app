@@ -11,6 +11,7 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { createUsuario, updateUsuario, deleteUsuario } from '@/lib/services/usuarios';
 import { Local, Usuario, UsuarioInsert } from '@/types/database';
 import { errMessage } from '@/lib/errMessage';
+import { useAuth } from '@/hooks/useAuth';
 
 const PERFIS = [
   { value: 'ADMIN_MASTER', label: 'Admin Master' },
@@ -53,6 +54,7 @@ type UsuarioListaRow = Usuario & {
 };
 
 export default function UsuariosPage() {
+  const { usuario: usuarioLogado } = useAuth();
   const { data: usuarios, loading } = useRealtimeQuery<UsuarioListaRow>({
     table: 'usuarios',
     select: '*, local_padrao:locais!local_padrao_id(id, nome)',
@@ -67,19 +69,85 @@ export default function UsuariosPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<Usuario | null>(null);
   const [form, setForm] = useState({
-    nome: '', telefone: '', perfil: 'OPERATOR_STORE' as Usuario['perfil'], local_padrao_id: '',
+    nome: '',
+    telefone: '',
+    perfil: 'OPERATOR_STORE' as Usuario['perfil'],
+    local_padrao_id: '',
+    login_operacional: '',
+    senha_operacional: '',
+    removerCredencialLogin: false,
   });
 
   const openCreate = () => {
     setEditando(null);
-    setForm({ nome: '', telefone: '', perfil: 'OPERATOR_STORE', local_padrao_id: '' });
+    setForm({
+      nome: '',
+      telefone: '',
+      perfil: 'OPERATOR_STORE',
+      local_padrao_id: '',
+      login_operacional: '',
+      senha_operacional: '',
+      removerCredencialLogin: false,
+    });
     setModalOpen(true);
   };
 
   const openEdit = (u: UsuarioListaRow) => {
     setEditando(u);
-    setForm({ nome: u.nome, telefone: u.telefone, perfil: u.perfil, local_padrao_id: u.local_padrao_id || '' });
+    setForm({
+      nome: u.nome,
+      telefone: u.telefone,
+      perfil: u.perfil,
+      local_padrao_id: u.local_padrao_id || '',
+      login_operacional: u.login_operacional || '',
+      senha_operacional: '',
+      removerCredencialLogin: false,
+    });
     setModalOpen(true);
+  };
+
+  const sincronizarCredencialApi = async (usuarioId: string) => {
+    if (!usuarioLogado?.id) {
+      throw new Error('Sessão inválida. Entre novamente como administrador.');
+    }
+    if (form.removerCredencialLogin) {
+      if (!confirm('Remover login e senha deste usuário no banco? Ele só poderá entrar se ainda existir credencial legada no sistema.')) {
+        throw new Error('Cancelado');
+      }
+      const r = await fetch('/api/admin/credencial-operacional', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usuarioId,
+          actorId: usuarioLogado.id,
+          removerCredencial: true,
+        }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) throw new Error(j.error || 'Falha ao remover login');
+      return;
+    }
+
+    const loginT = form.login_operacional.trim();
+    const senhaT = form.senha_operacional.trim();
+    if (!loginT && !senhaT) return;
+
+    if (loginT && !senhaT && !editando) {
+      throw new Error('Para novo usuário, informe também a senha (mín. 6 caracteres).');
+    }
+
+    const r = await fetch('/api/admin/credencial-operacional', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        usuarioId,
+        actorId: usuarioLogado.id,
+        loginOperacional: loginT || undefined,
+        senhaNova: senhaT || undefined,
+      }),
+    });
+    const j = (await r.json().catch(() => ({}))) as { error?: string };
+    if (!r.ok) throw new Error(j.error || 'Falha ao gravar login/senha');
   };
 
   const handleSave = async () => {
@@ -94,8 +162,10 @@ export default function UsuariosPage() {
         perfil: form.perfil,
         local_padrao_id: form.local_padrao_id || null,
       };
+      let usuarioId: string;
       if (editando) {
         await updateUsuario(editando.id, payload);
+        usuarioId = editando.id;
       } else {
         const insert: UsuarioInsert = {
           nome: payload.nome,
@@ -104,11 +174,22 @@ export default function UsuariosPage() {
           local_padrao_id: payload.local_padrao_id,
           status: 'ativo',
         };
-        await createUsuario(insert);
+        const criado = await createUsuario(insert);
+        usuarioId = criado.id;
       }
+
+      const precisaCred =
+        form.removerCredencialLogin ||
+        form.login_operacional.trim().length > 0 ||
+        form.senha_operacional.trim().length > 0;
+      if (precisaCred) {
+        await sincronizarCredencialApi(usuarioId);
+      }
+
       setModalOpen(false);
     } catch (err: unknown) {
-      alert(errMessage(err, 'Erro ao salvar'));
+      const msg = errMessage(err, 'Erro ao salvar');
+      if (msg !== 'Cancelado') alert(msg);
     }
   };
 
@@ -166,6 +247,9 @@ export default function UsuariosPage() {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant={perfilBadge(u.perfil)} size="sm">{perfilLabel(u.perfil)}</Badge>
                 <span className="text-xs text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" />{u.telefone}</span>
+                {u.login_operacional && (
+                  <span className="text-xs text-emerald-700 font-mono">• login: {u.login_operacional}</span>
+                )}
                 {u.local_padrao && <span className="text-xs text-gray-400">• {u.local_padrao.nome}</span>}
               </div>
             </div>
@@ -219,6 +303,38 @@ export default function UsuariosPage() {
               Recomendado para baixa, perdas e operações na indústria correta.
             </p>
           )}
+          <div className="border-t border-gray-100 pt-4 space-y-3">
+            <p className="text-sm font-medium text-gray-800">Acesso ao app (login / senha)</p>
+            <p className="text-xs text-gray-500">
+              A senha é guardada com hash no banco (nunca em texto puro). Sem login cadastrado aqui, o usuário só
+              entra se ainda existir credencial legada no deploy.
+            </p>
+            <Input
+              label="Usuário (login)"
+              value={form.login_operacional}
+              onChange={(e) => setForm({ ...form, login_operacional: e.target.value.toLowerCase() })}
+              placeholder="ex: luciene"
+              autoComplete="off"
+            />
+            <Input
+              label={editando ? 'Nova senha (opcional)' : 'Senha'}
+              type="password"
+              value={form.senha_operacional}
+              onChange={(e) => setForm({ ...form, senha_operacional: e.target.value })}
+              placeholder={editando ? 'Deixe vazio para manter a senha atual' : 'Mínimo 6 caracteres'}
+              autoComplete="new-password"
+            />
+            {editando && (
+              <label className="flex items-center gap-2 text-sm text-red-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.removerCredencialLogin}
+                  onChange={(e) => setForm({ ...form, removerCredencialLogin: e.target.checked })}
+                />
+                Remover login e senha deste usuário no banco
+              </label>
+            )}
+          </div>
           <Button
             variant="primary"
             className="w-full"
