@@ -44,7 +44,8 @@
   - lista de itens esperados;
   - marcação pendente/escaneado;
   - bloqueio de QR fora da transferência;
-  - proteção contra scan duplicado.
+  - proteção contra scan duplicado;
+  - confirmação da transferência grava `transferencia_itens` e `itens` em **lote** (poucas idas ao Supabase) e sincroniza `estoque` por produto em paralelo.
 - Confirmação (`window.confirm`) nos principais botões operacionais.
 - Sincronização de estoque agregado (`estoque`) via recálculo por produto nos fluxos de despacho, recebimento, entrada de compra, produção, baixa diária e descarte.
 - Reconciliação SQL do agregado `estoque` com base em `itens` (`estado = EM_ESTOQUE`) executada para eliminar divergências históricas de quantidade.

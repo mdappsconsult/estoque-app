@@ -18,23 +18,28 @@ async function sincronizarEstoquePorProdutos(produtoIds: string[]): Promise<void
   const idsUnicos = Array.from(new Set(produtoIds.filter(Boolean)));
   if (idsUnicos.length === 0) return;
 
-  for (const produtoId of idsUnicos) {
-    const { count, error: countError } = await supabase
-      .from('itens')
-      .select('id', { count: 'exact', head: true })
-      .eq('produto_id', produtoId)
-      .eq('estado', 'EM_ESTOQUE');
-    if (countError) throw countError;
+  await Promise.all(
+    idsUnicos.map(async (produtoId) => {
+      const { count, error: countError } = await supabase
+        .from('itens')
+        .select('id', { count: 'exact', head: true })
+        .eq('produto_id', produtoId)
+        .eq('estado', 'EM_ESTOQUE');
+      if (countError) throw countError;
 
-    const { error: upsertError } = await supabase
-      .from('estoque')
-      .upsert({
-        produto_id: produtoId,
-        quantidade: count ?? 0,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'produto_id' });
-    if (upsertError) throw upsertError;
-  }
+      const { error: upsertError } = await supabase
+        .from('estoque')
+        .upsert(
+          {
+            produto_id: produtoId,
+            quantidade: count ?? 0,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'produto_id' }
+        );
+      if (upsertError) throw upsertError;
+    })
+  );
 }
 
 async function getTransferenciaComItensMinimo(id: string): Promise<TransferenciaComItensMinimo> {
@@ -260,20 +265,22 @@ export async function receberTransferencia(
     }
   });
 
-  // Marcar itens recebidos
-  for (const itemId of itensRecebidosIds) {
-    await supabase
+  // Marcar recebidos e mover itens válidos — em lote (evita 2×N round-trips ao Supabase).
+  if (itensRecebidosIds.length > 0) {
+    const { error: errTi } = await supabase
       .from('transferencia_itens')
       .update({ recebido: true })
       .eq('transferencia_id', transferenciaId)
-      .eq('item_id', itemId);
+      .in('item_id', itensRecebidosIds);
+    if (errTi) throw errTi;
 
-    // Mover item para o destino
-    if (esperados.has(itemId)) {
-      await supabase
+    const idsParaMover = itensRecebidosIds.filter((id) => esperados.has(id));
+    if (idsParaMover.length > 0) {
+      const { error: errItens } = await supabase
         .from('itens')
         .update({ local_atual_id: localDestinoId, estado: 'EM_ESTOQUE' })
-        .eq('id', itemId);
+        .in('id', idsParaMover);
+      if (errItens) throw errItens;
     }
   }
 

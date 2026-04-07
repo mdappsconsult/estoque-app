@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Recebimento: confirmar muitos itens mais rápido
+- **Problema:** `receberTransferencia` fazia 2 atualizações Supabase por item escaneado (sequencial).
+- **Código:** uma `update` em `transferencia_itens` com `.in('item_id', …)` e uma em `itens` para os IDs esperados; `sincronizarEstoquePorProdutos` passa a usar `Promise.all` por produto (também usado no despacho).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-06 - Railway: SUPABASE_SERVICE_ROLE_KEY em produção
 - **Causa:** login em `controle.acaidokim.com.br` sem `SUPABASE_SERVICE_ROLE_KEY` no serviço Railway.
 - **Correção:** variável definida no projeto Railway (produção); Railway tende a redeployar automaticamente.
