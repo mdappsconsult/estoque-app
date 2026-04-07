@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-07 - Limpeza: viagens de teste (Supabase MCP)
+- **Removidas** viagens `7fbb3c48…` e `8f09e7a2…` (teste); `transferencias`/`transferencia_itens` em cascata; **3 itens** voltaram a `EM_ESTOQUE` na origem.
+- **Motivo:** não exibir mais em **Viagem / Aceite** para operadores (ex.: Leonardo).
+
 ### Sessão - 2026-04-07 - Viagem / Aceite: resumo e expansão por remessa
 - **Tela** `/viagem-aceite`: bloco com origem, totais e lojas; botão **Ver produtos por remessa**; cada remessa expande **resumo por produto** e, ao clicar de novo, lista unitária (nome + token curto/QR). Labels de status da viagem e da transferência em português. Carga das transferências em `Promise.all` por viagem.
 - **Validação:** `npm run lint`, `npm run build`.
