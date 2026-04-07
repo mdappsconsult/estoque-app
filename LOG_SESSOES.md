@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-07 - Reposição por loja: ativo na loja + filtro
+- **Cadastros → Reposição de estoque por loja:** coluna **Na loja** (`ativo_na_loja`), badges ativos vs catálogo, filtro “Ocultar inativos”, **Salvar** grava mínimo e ativo em paralelo (`Promise.all`). Texto de ajuda alinhado a **Separar por Loja** e **contagem na loja** (já filtravam por `ativo_na_loja` no serviço).
+- **Doc:** `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-06 - Recebimento: confirmar muitos itens mais rápido
 - **Problema:** `receberTransferencia` fazia 2 atualizações Supabase por item escaneado (sequencial).
 - **Código:** uma `update` em `transferencia_itens` com `.in('item_id', …)` e uma em `itens` para os IDs esperados; `sincronizarEstoquePorProdutos` passa a usar `Promise.all` por produto (também usado no despacho).
