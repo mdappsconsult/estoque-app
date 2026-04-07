@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-06 - Railway: SUPABASE_SERVICE_ROLE_KEY em produção
+- **Causa:** login em `controle.acaidokim.com.br` sem `SUPABASE_SERVICE_ROLE_KEY` no serviço Railway.
+- **Correção:** variável definida no projeto Railway (produção); Railway tende a redeployar automaticamente.
+- **Doc:** `docs/FLUXO_ENTREGA.md` e `README.md` — checklist de variáveis explicitando service role.
+
 ### Sessão - 2026-04-06 - Credencial Marco (Supabase MCP)
 - **Banco:** `usuarios.login_operacional` = `full` e linha em `credenciais_login_operacional` (bcrypt) para Marco (`telefone` 550000000002), via SQL no projeto MCP.
 - **Validação:** conferência pós-SQL (`tem_hash` true).
