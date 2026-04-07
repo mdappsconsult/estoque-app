@@ -15,7 +15,7 @@
 - `OPERATOR_WAREHOUSE`: operação de indústria.
 - `MANAGER`: visão operacional/gerencial.
 - `OPERATOR_STORE`: operação da loja vinculada em `local_padrao_id`.
-- `DRIVER` / `OPERATOR_WAREHOUSE_DRIVER`: transporte e viagem.
+- `DRIVER` / `OPERATOR_WAREHOUSE_DRIVER`: transporte e viagem. Tela **Viagem / Aceite** (`/viagem-aceite`): mostra origem, totais, lojas de destino; **Ver produtos por remessa** com resumo por produto e expansão para lista unitária (QR/token curto) por transferência.
 
 ## Usuários operacionais
 - Tela `/login` **não** exibe lista de usuários/senhas. **Autenticação:** só `POST /api/auth/operacional` com **bcrypt** em `credenciais_login_operacional` + `login_operacional` em `usuarios` (ativo). Sem hash no banco → mensagem pedindo configuração em **Cadastros → Usuários**. **Railway / `.env.local`:** `SUPABASE_SERVICE_ROLE_KEY` obrigatória. **Cadastros → Usuários** (`ADMIN_MASTER`): define/remove credencial (hash). **Carga inicial opcional:** `npm run seed:operacional` + `scripts/operacional-seed.local.json` (gitignored; modelo `scripts/operacional-seed.example.json`).

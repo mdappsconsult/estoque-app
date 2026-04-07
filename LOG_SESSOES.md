@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-07 - Viagem / Aceite: resumo e expansão por remessa
+- **Tela** `/viagem-aceite`: bloco com origem, totais e lojas; botão **Ver produtos por remessa**; cada remessa expande **resumo por produto** e, ao clicar de novo, lista unitária (nome + token curto/QR). Labels de status da viagem e da transferência em português. Carga das transferências em `Promise.all` por viagem.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-07 - Reposição por loja: ativo na loja + filtro
 - **Cadastros → Reposição de estoque por loja:** coluna **Na loja** (`ativo_na_loja`), badges ativos vs catálogo, filtro “Ocultar inativos”, **Salvar** grava mínimo e ativo em paralelo (`Promise.all`). Texto de ajuda alinhado a **Separar por Loja** e **contagem na loja** (já filtravam por `ativo_na_loja` no serviço).
 - **Doc:** `CONTEXTO_ATUAL.md`.
