@@ -30,6 +30,21 @@ export function gerarTokenShort(): string {
   return result;
 }
 
+/** Contagem de unidades EM_ESTOQUE no local (para conferência antes de produção / separação). */
+export async function contarItensDisponiveisLocal(
+  produtoId: string,
+  localId: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('produto_id', produtoId)
+    .eq('local_atual_id', localId)
+    .eq('estado', 'EM_ESTOQUE');
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function getItens(filtros?: {
   local_id?: string;
   estado?: Item['estado'];

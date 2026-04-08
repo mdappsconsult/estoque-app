@@ -57,7 +57,10 @@ export async function getProducoes(): Promise<(Producao & { produto: { nome: str
 export async function createProducao(producao: ProducaoInsert): Promise<Producao> {
   const { data, error } = await supabase
     .from('producoes')
-    .insert(producao)
+    .insert({
+      ...producao,
+      num_baldes: producao.num_baldes ?? producao.quantidade,
+    })
     .select()
     .single();
 

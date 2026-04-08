@@ -37,7 +37,8 @@
 - Padrão de UX de QR: **sem** abrir câmera automaticamente; botão para ativar o leitor + digitação manual sob demanda em recebimento, separar por loja, `/qrcode` e rastreio por QR.
 - Textos de UX/erro de QR padronizados nas telas operacionais (mensagens de não encontrado, falha de busca e placeholders de digitação manual).
 - Ajustes mobile-first aplicados em telas administrativas com formulários/tabelas (quebra responsiva de grids, cabeçalhos e scroll horizontal controlado em tabelas largas).
-- Registrar Compra suporta lançamento por `Unidade`, `Caixa` e `Fardo`, com conversão automática para itens unitários (QR) e custo unitário.
+- Registrar Compra suporta lançamento por `Unidade`, `Caixa` e `Fardo`, com conversão para **quantidade no lote** (sem gerar QR na entrada). Validade gravada em `lotes_compra.data_validade`. QR emitidos na **separação** ou na **produção** (FIFO de lotes). Migração `20260408100000_compra_sem_qr_resumo_estoque.sql` (RPC `resumo_estoque_agrupado` / `resumo_estoque_minimo` + coluna `data_validade`).
+- **Corrigir entrada de compra** (`/entrada-compra`): bloco **Corrigir lançamentos recentes** (últimos lotes) com **Editar** — ajusta quantidade (unidades no lote), custo unitário, fornecedor, NF / sem NF e validade. Regra: `quantidade` do lote **não pode ser menor** que o número de linhas em `itens` com `lote_compra_id` (QR já emitidos). Serviço `atualizarLoteCompra` + auditoria `ALTERAR_LOTE_COMPRA`; recalcula `estoque` agregado do produto.
 - Registrar Compra permite edição rápida do produto selecionado sem sair da tela (nome, unidade, fornecedor, estoque mínimo e custo de referência).
 - Validade em compra é opcional para produto sem regra de vencimento no cadastro (validade zerada), e obrigatória apenas para produto perecível.
 - Em recebimento:
@@ -48,6 +49,7 @@
   - confirmação da transferência grava `transferencia_itens` e `itens` em **lote** (poucas idas ao Supabase) e sincroniza `estoque` por produto em paralelo.
 - Confirmação (`window.confirm`) nos principais botões operacionais.
 - Sincronização de estoque agregado (`estoque`) via recálculo por produto nos fluxos de despacho, recebimento, entrada de compra, produção, baixa diária e descarte.
+- **Produção** (`/producao`): operador informa **produto acabado**, **baldes** (cada balde = 1 QR do acabado no local), **local** warehouse, **validade** e **insumos gastos** (produto de compra/AMBOS + quantidade de unidades QR). Sistema baixa insumos por FEFO (`created_at` ASC), grava `producoes` com `local_id`/`num_baldes`, `baixas.producao_id` e `producao_consumo_itens`, depois gera itens/etiquetas do acabado. Migração: `20260407183000_producao_consumo_insumos.sql`.
 - Reconciliação SQL do agregado `estoque` com base em `itens` (`estado = EM_ESTOQUE`) executada para eliminar divergências históricas de quantidade.
 - Hook de consulta em tempo real (`useRealtimeQuery`) passou a paginar automaticamente para não truncar tabelas grandes (evita sumiço de produtos na tela de estoque quando há muitos itens).
 - Tela de estoque otimizada para performance: filtros de `estado` e `local` são aplicados na consulta Supabase (server-side), com payload reduzido e paginação maior por lote.

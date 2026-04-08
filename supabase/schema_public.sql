@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS public.producoes (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   produto_id UUID NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
   quantidade INTEGER NOT NULL,
+  num_baldes INTEGER NOT NULL DEFAULT 1,
+  local_id UUID,
   data_producao TIMESTAMPTZ NOT NULL DEFAULT now(),
   responsavel TEXT NOT NULL,
   observacoes TEXT,
@@ -166,6 +168,10 @@ CREATE TABLE IF NOT EXISTS public.locais (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.producoes DROP CONSTRAINT IF EXISTS producoes_local_id_fkey;
+ALTER TABLE public.producoes
+  ADD CONSTRAINT producoes_local_id_fkey FOREIGN KEY (local_id) REFERENCES public.locais(id);
+
 -- USUARIOS
 CREATE TABLE IF NOT EXISTS public.usuarios (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -202,6 +208,7 @@ CREATE TABLE IF NOT EXISTS public.lotes_compra (
   sem_nota_fiscal BOOLEAN NOT NULL DEFAULT false,
   motivo_sem_nota TEXT,
   local_id UUID NOT NULL REFERENCES public.locais(id),
+  data_validade DATE,
   CONSTRAINT lotes_compra_nota_fiscal_check CHECK (
     (sem_nota_fiscal = false AND nota_fiscal IS NOT NULL AND btrim(nota_fiscal) <> '')
     OR
@@ -270,7 +277,17 @@ CREATE TABLE IF NOT EXISTS public.baixas (
   item_id UUID NOT NULL REFERENCES public.itens(id),
   local_id UUID NOT NULL REFERENCES public.locais(id),
   usuario_id UUID NOT NULL REFERENCES public.usuarios(id),
+  producao_id UUID REFERENCES public.producoes(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- PRODUCAO_CONSUMO_ITENS (unidades QR consumidas em uma produção)
+CREATE TABLE IF NOT EXISTS public.producao_consumo_itens (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  producao_id UUID NOT NULL REFERENCES public.producoes(id) ON DELETE CASCADE,
+  item_id UUID NOT NULL REFERENCES public.itens(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (producao_id, item_id)
 );
 
 -- PERDAS
@@ -344,6 +361,7 @@ ALTER TABLE public.transferencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transferencia_itens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.divergencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.baixas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.producao_consumo_itens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.perdas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.auditoria ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.loja_produtos_config ENABLE ROW LEVEL SECURITY;
@@ -364,7 +382,7 @@ BEGIN
     'etiquetas','estoque','movimentacoes',
     'locais','usuarios','lotes_compra','itens',
     'viagens','transferencias','transferencia_itens',
-    'divergencias','baixas','perdas','auditoria',
+    'divergencias','baixas','producao_consumo_itens','perdas','auditoria',
     'loja_produtos_config','loja_contagens','familias'
   ])
   LOOP
@@ -398,6 +416,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.transferencias;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.transferencia_itens;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.divergencias;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.baixas;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.producao_consumo_itens;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.perdas;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.auditoria;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.loja_produtos_config;
@@ -418,6 +437,9 @@ CREATE INDEX IF NOT EXISTS idx_auditoria_item_id ON public.auditoria(item_id);
 CREATE INDEX IF NOT EXISTS idx_auditoria_usuario_id ON public.auditoria(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_lotes_compra_produto_id ON public.lotes_compra(produto_id);
 CREATE INDEX IF NOT EXISTS idx_baixas_item_id ON public.baixas(item_id);
+CREATE INDEX IF NOT EXISTS idx_baixas_producao_id ON public.baixas(producao_id);
+CREATE INDEX IF NOT EXISTS idx_producao_consumo_itens_producao ON public.producao_consumo_itens(producao_id);
+CREATE INDEX IF NOT EXISTS idx_producao_consumo_itens_item ON public.producao_consumo_itens(item_id);
 CREATE INDEX IF NOT EXISTS idx_perdas_item_id ON public.perdas(item_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_telefone ON public.usuarios(telefone);
 CREATE INDEX IF NOT EXISTS idx_loja_produtos_config_loja_ativo ON public.loja_produtos_config(loja_id, ativo_na_loja);

@@ -37,14 +37,16 @@ Entrada de produtos (sempre por lote)
 Entrada por compra (distribuidora)
 - Campos obrigatorios: produto, quantidade, custo unitario, validade (se aplicavel), local de entrada (WAREHOUSE).
 - Lote do fornecedor e opcional.
-- Cada compra gera um lote de compra.
-- Cada unidade gera 1 QR unico.
+- Cada compra gera um lote de compra com a quantidade informada; **nao** gera linhas em `itens` nem QR na hora.
+- A validade (quando aplicavel) fica em `lotes_compra.data_validade` para uso na emissao posterior.
+- Os QR sao emitidos sob demanda: **Separar por Loja** (manual ou sugestao de reposicao) e **Producao** (consumo de insumos), via FIFO dos lotes no local (`emitirUnidadesCompraFifo`).
 - QR nao contem preco.
 - Custo fica salvo no lote.
 - Loja nao tem acesso ao custo.
 
 Entrada por producao
-- Campos: produto, quantidade, validade/lote (se aplicavel), local de entrada (WAREHOUSE).
+- Campos: produto acabado, numero de baldes (1 balde = 1 unidade com QR no acabado, nesta versao), local WAREHOUSE, validade do acabado, lista de insumos gastos (produto + quantidade em unidades com QR).
+- No registro: insumos sao baixados (FIFO por `created_at` no local), gravados em `baixas` com `producao_id` e em `producao_consumo_itens`; em seguida nascem as unidades do acabado com QR no mesmo local.
 
 Estados do item (simplificado)
 - EM_ESTOQUE

@@ -1,5 +1,6 @@
 -- Cruzar com a tela Estoque (filtro "Em estoque") para OPERATOR_STORE:
 -- RPC `resumo_estoque_agrupado` usa estado EM_ESTOQUE e p_local_id = loja.
+-- Inclui também saldo de compra ainda sem QR: soma (lotes_compra.quantidade − count(itens com aquele lote)) por produto/local (migração 20260408100000).
 -- Rode no projeto Supabase de NEXT_PUBLIC_SUPABASE_URL (.env.local) — ver docs/SUPABASE_AMBIENTE_E_MCP.md
 
 -- Listar lojas STORE (para copiar id)

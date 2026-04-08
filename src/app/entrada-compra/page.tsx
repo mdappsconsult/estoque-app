@@ -1,14 +1,19 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { PackageCheck, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { PackageCheck, Loader2, CheckCircle, AlertTriangle, Pencil } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Modal from '@/components/ui/Modal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import { criarLoteCompra } from '@/lib/services/lotes-compra';
+import {
+  criarLoteCompra,
+  atualizarLoteCompra,
+  contarItensDoLoteCompra,
+  type LoteCompraCompleto,
+} from '@/lib/services/lotes-compra';
 import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
 import { errMessage } from '@/lib/errMessage';
@@ -47,6 +52,14 @@ export default function EntradaCompraPage() {
     select: 'id, nome',
     orderBy: { column: 'nome', ascending: true },
   });
+  const { data: lotesRecentes, loading: loadLotesRecentes, refetch: refetchLotesRecentes } =
+    useRealtimeQuery<LoteCompraCompleto>({
+      table: 'lotes_compra',
+      select:
+        '*, produto:produtos(id, nome, validade_dias, validade_horas, validade_minutos), local:locais(id, nome)',
+      orderBy: { column: 'created_at', ascending: false },
+      maxRows: 50,
+    });
 
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
 
@@ -64,7 +77,7 @@ export default function EntradaCompraPage() {
     itens_por_embalagem: '1',
   });
   const [saving, setSaving] = useState(false);
-  const [resultado, setResultado] = useState<{ itens: number } | null>(null);
+  const [resultado, setResultado] = useState<{ quantidadeUnidades: number } | null>(null);
   const [hintCompra, setHintCompra] = useState<{
     estoqueMinimo: number;
     qtdEmEstoque: number;
@@ -80,6 +93,19 @@ export default function EntradaCompraPage() {
   const [embalagemNome, setEmbalagemNome] = useState('');
   const [savingEmbalagem, setSavingEmbalagem] = useState(false);
   const [produtoRapidoEditandoId, setProdutoRapidoEditandoId] = useState<string | null>(null);
+  const [loteEmEdicao, setLoteEmEdicao] = useState<LoteCompraCompleto | null>(null);
+  const [emitidosLoteEdicao, setEmitidosLoteEdicao] = useState(0);
+  const [carregandoEmitidosLote, setCarregandoEmitidosLote] = useState(false);
+  const [formLoteEdicao, setFormLoteEdicao] = useState({
+    quantidade: '',
+    custo_unitario: '',
+    fornecedor: '',
+    nota_fiscal: '',
+    sem_nota_fiscal: false,
+    motivo_sem_nota: '',
+    data_validade: '',
+  });
+  const [salvandoLoteEdicao, setSalvandoLoteEdicao] = useState(false);
   const [novoProduto, setNovoProduto] = useState({
     nome: '',
     unidade_medida: 'un',
@@ -102,6 +128,16 @@ export default function EntradaCompraPage() {
       (produtoSelecionado.validade_minutos || 0) > 0
     );
   }, [produtoSelecionado]);
+
+  const produtoLoteEdicaoExigeValidade = useMemo(() => {
+    const p = loteEmEdicao?.produto;
+    if (!p) return false;
+    return (
+      (p.validade_dias || 0) > 0 ||
+      (p.validade_horas || 0) > 0 ||
+      (p.validade_minutos || 0) > 0
+    );
+  }, [loteEmEdicao]);
 
   const quantidadeCompra = useMemo(
     () => Number.parseInt(form.quantidade, 10) || 0,
@@ -342,7 +378,8 @@ export default function EntradaCompraPage() {
           : 'fardo(s)';
     const confirmou = window.confirm(
       `Confirmar compra de ${quantidadeCompra} ${labelUnidadeCompra}?\n` +
-      `Conversão: ${quantidadeUnitaria} item(ns) unitários com QR.\n` +
+      `Entrada no estoque: ${quantidadeUnitaria} unidade(s) no lote (sem QR por enquanto).\n` +
+      `Os códigos QR serão gerados na separação para a loja ou ao consumir na produção.\n` +
       `Custo unitário calculado: R$ ${custoUnitarioCalculado.toFixed(2)}`
     );
     if (!confirmou) return;
@@ -364,7 +401,7 @@ export default function EntradaCompraPage() {
         form.data_validade || null,
         usuario.id
       );
-      setResultado({ itens: res.itensGerados });
+      setResultado({ quantidadeUnidades: res.quantidadeRegistrada });
       setForm({
         produto_id: '',
         quantidade: '',
@@ -487,6 +524,101 @@ export default function EntradaCompraPage() {
     }
   };
 
+  const abrirEdicaoLote = async (lote: LoteCompraCompleto) => {
+    setLoteEmEdicao(lote);
+    setFormLoteEdicao({
+      quantidade: String(lote.quantidade),
+      custo_unitario: String(lote.custo_unitario),
+      fornecedor: lote.fornecedor,
+      nota_fiscal: lote.nota_fiscal || '',
+      sem_nota_fiscal: lote.sem_nota_fiscal,
+      motivo_sem_nota: lote.motivo_sem_nota || '',
+      data_validade: lote.data_validade ? String(lote.data_validade).slice(0, 10) : '',
+    });
+    setCarregandoEmitidosLote(true);
+    try {
+      const n = await contarItensDoLoteCompra(lote.id);
+      setEmitidosLoteEdicao(n);
+    } catch {
+      setEmitidosLoteEdicao(0);
+    } finally {
+      setCarregandoEmitidosLote(false);
+    }
+  };
+
+  const fecharEdicaoLote = () => {
+    setLoteEmEdicao(null);
+    setEmitidosLoteEdicao(0);
+    setCarregandoEmitidosLote(false);
+  };
+
+  const salvarEdicaoLote = async () => {
+    if (!usuario || !loteEmEdicao) return;
+    const q = Number.parseInt(formLoteEdicao.quantidade.trim(), 10);
+    const custo = Number.parseFloat(String(formLoteEdicao.custo_unitario).replace(',', '.'));
+    if (!Number.isFinite(q) || q < 1) {
+      alert('Informe a quantidade em unidades (inteiro ≥ 1).');
+      return;
+    }
+    if (!Number.isFinite(custo) || custo < 0) {
+      alert('Custo unitário inválido.');
+      return;
+    }
+    if (q < emitidosLoteEdicao) {
+      alert(
+        `Este lote já tem ${emitidosLoteEdicao} QR emitido(s). A quantidade não pode ser menor que isso.`
+      );
+      return;
+    }
+    if (produtoLoteEdicaoExigeValidade && !formLoteEdicao.data_validade.trim()) {
+      alert('Data de validade é obrigatória para este produto.');
+      return;
+    }
+    if (formLoteEdicao.sem_nota_fiscal) {
+      if (!formLoteEdicao.motivo_sem_nota.trim()) {
+        alert('Informe o motivo de estar sem nota fiscal.');
+        return;
+      }
+    } else if (!formLoteEdicao.nota_fiscal.trim()) {
+      alert('Nota fiscal é obrigatória ou marque «Sem nota fiscal».');
+      return;
+    }
+    if (!formLoteEdicao.fornecedor.trim()) {
+      alert('Fornecedor é obrigatório.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Salvar correção deste lançamento?\nProduto: ${loteEmEdicao.produto?.nome || '—'}\nQuantidade no lote: ${q} un. (mínimo por QR já emitidos: ${emitidosLoteEdicao})`
+      )
+    ) {
+      return;
+    }
+    setSalvandoLoteEdicao(true);
+    try {
+      await atualizarLoteCompra(
+        loteEmEdicao.id,
+        {
+          quantidade: q,
+          custo_unitario: custo,
+          fornecedor: formLoteEdicao.fornecedor.trim(),
+          nota_fiscal: formLoteEdicao.sem_nota_fiscal ? null : formLoteEdicao.nota_fiscal.trim(),
+          sem_nota_fiscal: formLoteEdicao.sem_nota_fiscal,
+          motivo_sem_nota: formLoteEdicao.sem_nota_fiscal ? formLoteEdicao.motivo_sem_nota.trim() : null,
+          data_validade: formLoteEdicao.data_validade.trim() || null,
+        },
+        usuario.id
+      );
+      await refetchLotesRecentes();
+      fecharEdicaoLote();
+      alert('Lançamento de compra atualizado.');
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Não foi possível atualizar o lote'));
+    } finally {
+      setSalvandoLoteEdicao(false);
+    }
+  };
+
   if (loadProd) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
 
   return (
@@ -497,7 +629,9 @@ export default function EntradaCompraPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Registrar Compra</h1>
-          <p className="text-sm text-gray-500">Registre a compra do dia: cada lançamento gera um novo lote com sua validade</p>
+          <p className="text-sm text-gray-500">
+            Cada lançamento gera um lote com validade; os QR são emitidos na saída (separação) ou no consumo (produção)
+          </p>
         </div>
       </div>
 
@@ -506,7 +640,9 @@ export default function EntradaCompraPage() {
           <CheckCircle className="w-6 h-6 text-green-500" />
           <div>
             <p className="font-semibold text-green-800">Lote registrado!</p>
-            <p className="text-sm text-green-600">{resultado.itens} itens gerados com QR</p>
+            <p className="text-sm text-green-600">
+              {resultado.quantidadeUnidades} unidade(s) registradas no lote. QR ao separar para a loja ou ao usar na produção.
+            </p>
           </div>
         </div>
       )}
@@ -751,6 +887,208 @@ export default function EntradaCompraPage() {
           Registrar Compra
         </Button>
       </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900">Corrigir lançamentos recentes</h2>
+        <p className="text-xs text-gray-600 leading-relaxed">
+          Ajuste quantidade, custo, nota, fornecedor ou validade de uma <strong>entrada já salva</strong>. O sistema não
+          permite deixar a quantidade do lote menor que o número de <strong>QR já emitidos</strong> a partir dele
+          (separação/produção).
+        </p>
+        {loadLotesRecentes ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+          </div>
+        ) : lotesRecentes.length === 0 ? (
+          <p className="text-sm text-gray-500">Nenhum lote de compra encontrado.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead>
+                <tr className="border-b border-gray-200 text-gray-600">
+                  <th className="py-2 pr-2 font-medium">Data</th>
+                  <th className="py-2 pr-2 font-medium">Produto</th>
+                  <th className="py-2 pr-2 font-medium">Local</th>
+                  <th className="py-2 pr-2 font-medium tabular-nums">Qtd</th>
+                  <th className="py-2 pr-2 font-medium">Lote</th>
+                  <th className="py-2 pr-2 font-medium">NF</th>
+                  <th className="py-2 pl-2 font-medium w-24" />
+                </tr>
+              </thead>
+              <tbody>
+                {lotesRecentes.map((l) => {
+                  const dt = l.created_at ? new Date(l.created_at) : null;
+                  const dataStr = dt && !Number.isNaN(dt.getTime()) ? dt.toLocaleString('pt-BR') : '—';
+                  const nomeProd = l.produto && typeof l.produto === 'object' && 'nome' in l.produto
+                    ? (l.produto as { nome: string }).nome
+                    : '—';
+                  const nomeLoc = l.local && typeof l.local === 'object' && 'nome' in l.local
+                    ? (l.local as { nome: string }).nome
+                    : '—';
+                  const nf = l.sem_nota_fiscal ? 'S/NF' : (l.nota_fiscal || '—');
+                  return (
+                    <tr key={l.id} className="border-b border-gray-100">
+                      <td className="py-2 pr-2 whitespace-nowrap text-gray-700">{dataStr}</td>
+                      <td className="py-2 pr-2 max-w-[140px] truncate" title={nomeProd}>
+                        {nomeProd}
+                      </td>
+                      <td className="py-2 pr-2 max-w-[100px] truncate" title={nomeLoc}>
+                        {nomeLoc}
+                      </td>
+                      <td className="py-2 pr-2 tabular-nums font-medium">{l.quantidade}</td>
+                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[100px]" title={l.lote_fornecedor}>
+                        {l.lote_fornecedor}
+                      </td>
+                      <td className="py-2 pr-2 truncate max-w-[80px]" title={nf}>
+                        {nf}
+                      </td>
+                      <td className="py-2 pl-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="!px-2 !py-1 text-xs"
+                          onClick={() => void abrirEdicaoLote(l)}
+                        >
+                          <Pencil className="w-3.5 h-3.5 mr-1" />
+                          Editar
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        isOpen={loteEmEdicao !== null}
+        onClose={() => {
+          if (!salvandoLoteEdicao) fecharEdicaoLote();
+        }}
+        title="Corrigir lançamento de compra"
+        subtitle={loteEmEdicao?.produto && typeof loteEmEdicao.produto === 'object' && 'nome' in loteEmEdicao.produto
+          ? (loteEmEdicao.produto as { nome: string }).nome
+          : undefined}
+        size="md"
+      >
+        <div className="p-6 space-y-4">
+          {loteEmEdicao && (
+            <>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 space-y-1">
+                <p>
+                  <span className="text-gray-500">Lote interno:</span>{' '}
+                  <code className="text-[11px]">{loteEmEdicao.lote_fornecedor}</code>
+                </p>
+                <p>
+                  <span className="text-gray-500">Local:</span>{' '}
+                  {loteEmEdicao.local && typeof loteEmEdicao.local === 'object' && 'nome' in loteEmEdicao.local
+                    ? (loteEmEdicao.local as { nome: string }).nome
+                    : '—'}
+                </p>
+                {carregandoEmitidosLote ? (
+                  <p className="flex items-center gap-2 text-blue-700">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Verificando QR já emitidos…
+                  </p>
+                ) : (
+                  <p>
+                    <span className="text-gray-500">QR já emitidos deste lote:</span>{' '}
+                    <strong className="tabular-nums">{emitidosLoteEdicao}</strong> — a quantidade não pode ser menor que
+                    isso.
+                  </p>
+                )}
+              </div>
+              <Input
+                label="Quantidade no lote (unidades)"
+                type="number"
+                min={Math.max(1, emitidosLoteEdicao)}
+                value={formLoteEdicao.quantidade}
+                onChange={(e) => setFormLoteEdicao((f) => ({ ...f, quantidade: e.target.value }))}
+                required
+              />
+              <Input
+                label="Custo unitário (R$)"
+                type="text"
+                inputMode="decimal"
+                value={formLoteEdicao.custo_unitario}
+                onChange={(e) => setFormLoteEdicao((f) => ({ ...f, custo_unitario: e.target.value }))}
+                required
+              />
+              <Input
+                label="Fornecedor"
+                value={formLoteEdicao.fornecedor}
+                onChange={(e) => setFormLoteEdicao((f) => ({ ...f, fornecedor: e.target.value }))}
+                required
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={formLoteEdicao.sem_nota_fiscal}
+                  onChange={(e) =>
+                    setFormLoteEdicao((prev) => ({
+                      ...prev,
+                      sem_nota_fiscal: e.target.checked,
+                      nota_fiscal: e.target.checked ? '' : prev.nota_fiscal,
+                    }))
+                  }
+                  className="rounded border-gray-300"
+                />
+                Sem nota fiscal
+              </label>
+              {formLoteEdicao.sem_nota_fiscal ? (
+                <Input
+                  label="Motivo sem nota fiscal"
+                  value={formLoteEdicao.motivo_sem_nota}
+                  onChange={(e) => setFormLoteEdicao((f) => ({ ...f, motivo_sem_nota: e.target.value }))}
+                  required
+                />
+              ) : (
+                <Input
+                  label="Nota fiscal"
+                  value={formLoteEdicao.nota_fiscal}
+                  onChange={(e) => setFormLoteEdicao((f) => ({ ...f, nota_fiscal: e.target.value }))}
+                  required
+                />
+              )}
+              <Input
+                label={produtoLoteEdicaoExigeValidade ? 'Data de validade' : 'Data de validade (opcional)'}
+                type="date"
+                value={formLoteEdicao.data_validade}
+                onChange={(e) => setFormLoteEdicao((f) => ({ ...f, data_validade: e.target.value }))}
+                required={produtoLoteEdicaoExigeValidade}
+              />
+              {!produtoLoteEdicaoExigeValidade && (
+                <p className="text-xs text-gray-500 -mt-2">
+                  Produto sem regra de validade no cadastro — pode deixar em branco.
+                </p>
+              )}
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  type="button"
+                  disabled={salvandoLoteEdicao}
+                  onClick={fecharEdicaoLote}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="primary"
+                  className="flex-1"
+                  type="button"
+                  disabled={salvandoLoteEdicao || carregandoEmitidosLote}
+                  onClick={() => void salvarEdicaoLote()}
+                >
+                  {salvandoLoteEdicao ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Salvar correção
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         isOpen={modalProdutoAberto}

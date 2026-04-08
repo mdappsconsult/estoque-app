@@ -223,6 +223,8 @@ export type Database = {
           id: string;
           produto_id: string;
           quantidade: number;
+          num_baldes: number;
+          local_id: string | null;
           data_producao: string;
           responsavel: string;
           observacoes: string | null;
@@ -232,6 +234,8 @@ export type Database = {
           id?: string;
           produto_id: string;
           quantidade: number;
+          num_baldes?: number;
+          local_id?: string | null;
           data_producao?: string;
           responsavel: string;
           observacoes?: string | null;
@@ -241,9 +245,30 @@ export type Database = {
           id?: string;
           produto_id?: string;
           quantidade?: number;
+          num_baldes?: number;
+          local_id?: string | null;
           data_producao?: string;
           responsavel?: string;
           observacoes?: string | null;
+        };
+      };
+      producao_consumo_itens: {
+        Row: {
+          id: string;
+          producao_id: string;
+          item_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          producao_id: string;
+          item_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          producao_id?: string;
+          item_id?: string;
         };
       };
       contagens: {
@@ -536,6 +561,7 @@ export type Database = {
           sem_nota_fiscal: boolean;
           motivo_sem_nota: string | null;
           local_id: string;
+          data_validade: string | null;
           created_at: string;
         };
         Insert: {
@@ -549,6 +575,7 @@ export type Database = {
           sem_nota_fiscal?: boolean;
           motivo_sem_nota?: string | null;
           local_id: string;
+          data_validade?: string | null;
           created_at?: string;
         };
         Update: {
@@ -562,6 +589,7 @@ export type Database = {
           sem_nota_fiscal?: boolean;
           motivo_sem_nota?: string | null;
           local_id?: string;
+          data_validade?: string | null;
         };
       };
       itens: {
@@ -708,6 +736,7 @@ export type Database = {
           item_id: string;
           local_id: string;
           usuario_id: string;
+          producao_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -715,6 +744,7 @@ export type Database = {
           item_id: string;
           local_id: string;
           usuario_id: string;
+          producao_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -722,6 +752,7 @@ export type Database = {
           item_id?: string;
           local_id?: string;
           usuario_id?: string;
+          producao_id?: string | null;
         };
       };
       perdas: {
@@ -811,6 +842,8 @@ export type RecebimentoInsert = Database['public']['Tables']['recebimentos']['In
 
 export type Producao = Database['public']['Tables']['producoes']['Row'];
 export type ProducaoInsert = Database['public']['Tables']['producoes']['Insert'];
+export type ProducaoConsumoItem = Database['public']['Tables']['producao_consumo_itens']['Row'];
+export type ProducaoConsumoItemInsert = Database['public']['Tables']['producao_consumo_itens']['Insert'];
 
 export type Contagem = Database['public']['Tables']['contagens']['Row'];
 export type ContagemItem = Database['public']['Tables']['contagem_itens']['Row'];

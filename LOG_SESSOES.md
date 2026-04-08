@@ -1,5 +1,29 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Registrar compra: corrigir lançamento (lote) + revert Separar por Loja
+- **Escopo:** o pedido era editar **entrada de compra** (quantidade/NF errados), não separação. **Separar por loja** restaurado ao último commit (`git checkout HEAD -- src/app/separar-por-loja/page.tsx`).
+- **Serviço** `lotes-compra.ts`: `contarItensDoLoteCompra`, `atualizarLoteCompra` (validações NF/fornecedor/validade; quantidade ≥ QR já emitidos; `recalcularEstoqueProduto`; auditoria `ALTERAR_LOTE_COMPRA`).
+- **UI** `/entrada-compra`: seção **Corrigir lançamentos recentes** (até 50 lotes) + modal **Editar** (qtd, custo, fornecedor, NF, validade).
+- **Doc:** `CONTEXTO_ATUAL.md` (removido bullet equivocado de «editar lançamentos» em Separar por Loja).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-07 - Compra sem QR na entrada; emissão na saída
+- **Regra:** `criarLoteCompra` só grava `lotes_compra` (com `data_validade`); não insere `itens`/`etiquetas`. Estoque agregado = itens `EM_ESTOQUE` + saldo “a etiquetar” por lote (`quantidade` − já emitidos).
+- **Serviços:** `emitirUnidadesCompraFifo`, `garantirItensDisponiveisNoLocal` em `lotes-compra.ts`; `recalcularEstoqueProduto` em `estoque-sync.ts`; produção e **Separar por Loja** (manual, reposição e sugestão) chamam `garantir…` antes de usar unidades.
+- **SQL:** migração `20260408100000_compra_sem_qr_resumo_estoque.sql` — coluna `lotes_compra.data_validade`; recria `resumo_estoque_agrupado` e `resumo_estoque_minimo` incluindo saldo de lote sem QR.
+- **UI:** mensagens em **Registrar Compra**; realtime em **Estoque** também em `lotes_compra`.
+- **Doc:** `APP_LOGICA.md`, `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Deploy:** aplicar migração no Supabase; se `DROP FUNCTION resumo_estoque_minimo` falhar por assinatura diferente, ajustar no SQL Editor.
+
+### Sessão - 2026-04-07 - Produção: insumos gastos + baldes
+- **Banco:** migração `20260407183000_producao_consumo_insumos.sql` — `producoes.local_id`, `producoes.num_baldes`, `baixas.producao_id`, tabela `producao_consumo_itens`; `schema_public.sql` e tipos em `database.ts`.
+- **Serviço:** `registrarProducaoComItens` consome unidades por FEFO, insere baixas vinculadas, gera acabado; `contarItensDisponiveisLocal` em `itens.ts`.
+- **UI:** `/producao` — linhas de insumo, baldes, disponível no local, modal com resumo.
+- **Doc:** `APP_LOGICA.md`, `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+- **Deploy:** aplicar a migração no Supabase de produção.
+
 ### Sessão - 2026-04-07 - Limpeza: viagens de teste (Supabase MCP)
 - **Removidas** viagens `7fbb3c48…` e `8f09e7a2…` (teste); `transferencias`/`transferencia_itens` em cascata; **3 itens** voltaram a `EM_ESTOQUE` na origem.
 - **Motivo:** não exibir mais em **Viagem / Aceite** para operadores (ex.: Leonardo).

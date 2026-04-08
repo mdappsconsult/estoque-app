@@ -66,7 +66,7 @@ Estados do item:
 
 Regras principais:
 
-- cada item fisico possui QR unico
+- cada item fisico possui QR unico (na compra, o lote entra sem QR; os QR sao emitidos na separacao para a loja ou no consumo na producao)
 - transferencia exige aceite antes do despacho
 - recebimento compara enviado x recebido e gera divergencias
 - baixa diaria so pode ocorrer no local do usuario

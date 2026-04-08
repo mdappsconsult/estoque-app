@@ -140,6 +140,7 @@ export default function EstoquePage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'itens' }, agendarAtualizacao)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, agendarAtualizacao)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'locais' }, agendarAtualizacao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lotes_compra' }, agendarAtualizacao)
       .subscribe();
 
     return () => {
