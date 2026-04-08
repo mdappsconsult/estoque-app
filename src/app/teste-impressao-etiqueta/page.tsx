@@ -33,8 +33,12 @@ function TesteImpressaoEtiquetaInner() {
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
 
   useEffect(() => {
-    setFormato(obterFormatoImpressaoPadrao());
-  }, []);
+    if (papel === 'industria') {
+      setFormato('60x60');
+    } else {
+      setFormato(obterFormatoImpressaoPadrao());
+    }
+  }, [papel]);
 
   useEffect(() => {
     if (!piConnection?.wsUrl) {
@@ -109,9 +113,9 @@ function TesteImpressaoEtiquetaInner() {
         </p>
 
         <p className="text-sm text-gray-600">
-          Gera a mesma página de impressão usada em <strong>Separar por Loja</strong> e <strong>Etiquetas</strong>, com
-          textos e QRs de exemplo. A janela abre e o navegador chama a impressão automaticamente — escolha sua impressora
-          térmica e confira margens e tamanho do QR.
+          Mesma geração de HTML que <strong>Separar por Loja</strong> (60×30), <strong>Etiquetas</strong> (formato
+          escolhido) e <strong>Produção</strong> (60×60 na indústria). Com ponte <strong>indústria</strong>, o formato
+          inicial é <strong>60×60</strong>. A janela do navegador chama a impressão automaticamente.
         </p>
 
         <label className="block text-sm font-medium text-gray-700">Formato</label>
@@ -175,8 +179,8 @@ function TesteImpressaoEtiquetaInner() {
         )}
 
         <p className="text-xs text-gray-500">
-          60×30: uma folha com <strong>dois</strong> QRs (linha pontilhada no meio). Formatos legados: uma etiqueta por
-          página.
+          60×30: uma folha com <strong>dois</strong> QRs. 60×60: uma etiqueta por página (produção / indústria). Demais
+          formatos: uma etiqueta por página.
         </p>
         <p className="text-xs text-amber-900/90 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
           <strong>Térmica (Zebra etc.):</strong> na impressão, desative <strong>cabeçalhos e rodapés</strong>, margens

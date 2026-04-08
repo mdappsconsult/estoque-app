@@ -107,6 +107,7 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ ok: false, error: 'Esperado JSON: { type: "print", html: string, widthMm?, heightMm?, jobName?, queue? }' }));
       return;
     }
+    /* Fallback só se preferCssPageSize=false; com true o PDF segue @page do HTML (60×30, 60×60, etc.) */
     const widthMm = Number(msg.widthMm) > 0 ? Number(msg.widthMm) : 60;
     const heightMm = Number(msg.heightMm) > 0 ? Number(msg.heightMm) : 30;
     const preferCssPageSize = Boolean(msg.preferCssPageSize);

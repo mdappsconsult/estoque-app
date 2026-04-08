@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, Edit2, Trash2, Snowflake, Thermometer, Loader2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -90,6 +90,22 @@ export default function ProdutosPage() {
   const [filtroOrigem, setFiltroOrigem] = useState<string>('todos');
   const [modalOpen, setModalOpen] = useState(false);
   const [produtoEditando, setProdutoEditando] = useState<ProdutoComGrupos | null>(null);
+  const [editarUrlAplicado, setEditarUrlAplicado] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !produtos.length || editarUrlAplicado) return;
+    const id = new URLSearchParams(window.location.search).get('editar');
+    if (!id) return;
+    const p = produtos.find((x) => x.id === id);
+    if (!p) return;
+    const t = window.setTimeout(() => {
+      setProdutoEditando(p);
+      setModalOpen(true);
+      setEditarUrlAplicado(true);
+      window.history.replaceState({}, '', '/cadastros/produtos');
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [produtos, editarUrlAplicado]);
 
   const produtosFiltrados = produtos.filter((produto) => {
     if (!produto.nome.toLowerCase().includes(searchTerm.toLowerCase())) return false;

@@ -66,6 +66,19 @@ export default function CadastroReposicaoLojaPage() {
   const [ativoEditados, setAtivoEditados] = useState<Record<string, boolean>>({});
   const [ocultarInativos, setOcultarInativos] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lojaUrlAplicada, setLojaUrlAplicada] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !lojasAtivas.length || lojaUrlAplicada) return;
+    const q = new URLSearchParams(window.location.search).get('loja');
+    if (!q || !lojasAtivas.some((l) => l.id === q)) return;
+    const t = window.setTimeout(() => {
+      setLojaSelecionada(q);
+      setLojaUrlAplicada(true);
+      window.history.replaceState({}, '', '/cadastros/reposicao-loja');
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [lojasAtivas, lojaUrlAplicada]);
 
   const recarregarConfigs = useCallback(async (lojaId: string) => {
     if (!lojaId) {

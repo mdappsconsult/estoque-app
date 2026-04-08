@@ -131,8 +131,11 @@ CREATE TABLE IF NOT EXISTS public.etiquetas (
   lote TEXT,
   impressa BOOLEAN NOT NULL DEFAULT false,
   excluida BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  numero_sequencia_loja INTEGER NULL
 );
+
+-- Contador por loja: ver migration 20260408133000_sequencia_balde_loja_destino.sql (tabela + RPC).
 
 -- ESTOQUE
 CREATE TABLE IF NOT EXISTS public.estoque (
@@ -230,6 +233,10 @@ CREATE TABLE IF NOT EXISTS public.itens (
   data_producao TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.etiquetas DROP CONSTRAINT IF EXISTS etiquetas_id_refs_itens_id_fkey;
+ALTER TABLE public.etiquetas
+  ADD CONSTRAINT etiquetas_id_refs_itens_id_fkey FOREIGN KEY (id) REFERENCES public.itens(id) ON DELETE CASCADE;
 
 -- VIAGENS (agrupamento de transferências para entrega)
 CREATE TABLE IF NOT EXISTS public.viagens (

@@ -78,6 +78,17 @@ curl -sS http://127.0.0.1:8765/health
 
 (só depois de subir o `pi-print-ws`; ver próximo bloco)
 
+### Mídia 60×60 mm na Zebra (produção / indústria)
+
+O app manda PDF/HTML com **página 60×60 mm**. No **CUPS**:
+
+1. Abra `http://127.0.0.1:631` no Pi → impressora → **Set Default Options**.
+2. Ajuste **Media Size** / rótulo para **60×60 mm** (stock custom, se o PPD permitir). Se o driver só listar 60×30, crie **outra fila** `lpadmin` apontando para a mesma impressora com opções diferentes, ou use o utilitário Zebra para gravar um perfil 60×60 e escolha-o no CUPS.
+3. Confira com `lpoptions -p NOME_DA_FILA -l` (lista opções; procure `PageSize`, `Media` ou `zePrintLabelLength` / nomes do PPD).
+4. No `.env` do Pi da indústria, **`CUPS_QUEUE=`** deve ser o nome **exato** da fila calibrada para **60×60** (ex.: `ZebraIndustria6060`).
+
+Teste: **`/teste-impressao-etiqueta?papel=industria`** → formato **60×60** → **Imprimir na estação**.
+
 ---
 
 ## 5. Instalar `pi-print-ws` e túnel (igual ao Pi de estoque, `.env` diferente)
@@ -137,9 +148,9 @@ journalctl -u cloudflared-pi-print-ws -f
 
 ## 6. Validar do celular / PC (app em produção)
 
-- Abrir **`/teste-impressao-etiqueta?papel=industria`** (perfil com acesso).
+- Abrir **`/teste-impressao-etiqueta?papel=industria`** (perfil com acesso) — formato padrão **60×60**.
 - **Imprimir na estação (Pi / Zebra)** — deve sair na impressora da indústria.
-- Quando **Produção** passar a usar o Pi no código, usará esta mesma ponte (`industria`); até lá, o teste com query acima basta.
+- Na tela **Produção**, após registrar baldes, use **Zebra / Pi (indústria)** com a mesma ponte.
 
 ---
 

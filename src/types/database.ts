@@ -326,6 +326,7 @@ export type Database = {
           impressa: boolean;
           excluida: boolean;
           created_at: string;
+          numero_sequencia_loja: number | null;
         };
         Insert: {
           id?: string;
@@ -336,6 +337,7 @@ export type Database = {
           impressa?: boolean;
           excluida?: boolean;
           created_at?: string;
+          numero_sequencia_loja?: number | null;
         };
         Update: {
           id?: string;
@@ -345,6 +347,7 @@ export type Database = {
           lote?: string | null;
           impressa?: boolean;
           excluida?: boolean;
+          numero_sequencia_loja?: number | null;
         };
       };
       estoque: {
@@ -816,7 +819,12 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      reservar_sequencia_balde_loja: {
+        Args: { p_local_destino_id: string; p_quantidade: number };
+        Returns: number;
+      };
+    };
     Enums: Record<string, never>;
   };
 };

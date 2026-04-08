@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChefHat, Loader2, CheckCircle, Plus, Trash2 } from 'lucide-react';
+import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -9,14 +9,18 @@ import Modal from '@/components/ui/Modal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { registrarProducaoComItens } from '@/lib/services/producao';
+import { errMessage } from '@/lib/errMessage';
 import { contarItensDisponiveisLocal } from '@/lib/services/itens';
 import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
+import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import {
   confirmarImpressao,
-  FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
+  FORMATO_ETIQUETA_INDUSTRIA,
+  gerarDocumentoHtmlEtiquetas,
   imprimirEtiquetasEmJobUnico,
 } from '@/lib/printing/label-print';
+import { enviarHtmlParaPiPrintBridge } from '@/lib/printing/pi-print-ws-client';
 
 function novaLinhaInsumo() {
   return {
@@ -28,6 +32,11 @@ function novaLinhaInsumo() {
 
 export default function ProducaoPage() {
   const { usuario } = useAuth();
+  const {
+    loading: piCfgLoading,
+    available: piPrintAvailable,
+    connection: piConnection,
+  } = usePiPrintBridgeConfig({ papel: 'industria' });
   const { data: produtos, loading } = useRealtimeQuery<Produto>({
     table: 'produtos',
     orderBy: { column: 'nome', ascending: true },
@@ -61,8 +70,12 @@ export default function ProducaoPage() {
     tokenShort: string | null;
   }>>([]);
   const [produtoParaImpressao, setProdutoParaImpressao] = useState('Produto');
+  const [localParaImpressao, setLocalParaImpressao] = useState('Indústria');
   const [imprimindo, setImprimindo] = useState(false);
+  const [imprimindoPi, setImprimindoPi] = useState(false);
+  const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const [confirmacaoAberta, setConfirmacaoAberta] = useState(false);
+  const [erroConfirmacao, setErroConfirmacao] = useState('');
   const diasValidadeNumero = Number(form.dias_validade);
   const dataValidadePrevista = Number.isInteger(diasValidadeNumero) && diasValidadeNumero > 0
     ? (() => {
@@ -103,6 +116,15 @@ export default function ProducaoPage() {
     };
   }, [form.local_id, produtosInsumoIdsChave]);
 
+  useEffect(() => {
+    if (!piConnection?.wsUrl) {
+      setAvisoHttpsPi(false);
+      return;
+    }
+    const u = piConnection.wsUrl.toLowerCase();
+    setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
+  }, [piConnection]);
+
   const consumosParaServico = useMemo(() => {
     return linhasInsumo
       .map((l) => ({
@@ -122,8 +144,16 @@ export default function ProducaoPage() {
     diasValidadeNumero > 0 &&
     consumosParaServico.length > 0;
 
-  const handleSubmit = async () => {
-    if (!usuario) return alert('Faça login');
+  const handleSubmit = async (): Promise<boolean> => {
+    if (!usuario) {
+      alert('Faça login');
+      return false;
+    }
+    if (!formularioValido) {
+      setErroConfirmacao('Preencha todos os campos obrigatórios (acabado, baldes, local, validade em dias e insumo com quantidade).');
+      return false;
+    }
+    setErroConfirmacao('');
     setSaving(true);
     setResultado(null);
     try {
@@ -132,13 +162,16 @@ export default function ProducaoPage() {
         numBaldes: numBaldesInt,
         localId: form.local_id,
         consumos: consumosParaServico,
-        diasValidade: Number(form.dias_validade),
+        diasValidade: diasValidadeNumero,
         observacoes: form.observacoes || null,
         usuarioId: usuario.id,
         responsavelNome: usuario.nome,
       });
       const produtoNome = produtos.find((produto) => produto.id === form.produto_id)?.nome || 'Produto';
+      const nomeLocalGravado =
+        warehouses.find((local) => local.id === form.local_id)?.nome || 'Indústria';
       setProdutoParaImpressao(produtoNome);
+      setLocalParaImpressao(nomeLocalGravado);
       setEtiquetasPendentesImpressao(
         etiquetasGeradas.map((etiqueta) => ({
           id: etiqueta.id,
@@ -160,36 +193,42 @@ export default function ProducaoPage() {
       });
       setLinhasInsumo([novaLinhaInsumo()]);
       setDisponivelPorProduto({});
+      return true;
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Erro');
+      const msg = errMessage(err, 'Erro ao registrar produção');
+      setErroConfirmacao(msg);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
+  const montarPayloadImpressao = () => {
+    const agora = new Date().toISOString();
+    const nomeLocal = localParaImpressao.trim() || 'Indústria';
+    return etiquetasPendentesImpressao.map((etiqueta) => ({
+      id: etiqueta.id,
+      produtoNome: produtoParaImpressao,
+      dataManipulacao: etiqueta.dataProducao,
+      dataValidade: etiqueta.dataValidade,
+      lote: etiqueta.lote,
+      tokenQr: etiqueta.tokenQr,
+      tokenShort: etiqueta.tokenShort || etiqueta.id.slice(0, 8).toUpperCase(),
+      responsavel: usuario?.nome || 'OPERADOR',
+      nomeLoja: nomeLocal,
+      dataGeracaoIso: agora,
+    }));
+  };
+
   const imprimirEtiquetasGeradas = async () => {
     if (etiquetasPendentesImpressao.length === 0) return;
-    if (!confirmarImpressao(etiquetasPendentesImpressao.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
+    if (!confirmarImpressao(etiquetasPendentesImpressao.length, FORMATO_ETIQUETA_INDUSTRIA)) return;
 
     setImprimindo(true);
     try {
-      const agora = new Date().toISOString();
-      const nomeLocal =
-        localSelecionadoNome !== '-' ? localSelecionadoNome : 'Indústria';
       const abriuImpressao = await imprimirEtiquetasEmJobUnico(
-        etiquetasPendentesImpressao.map((etiqueta) => ({
-          id: etiqueta.id,
-          produtoNome: produtoParaImpressao,
-          dataManipulacao: etiqueta.dataProducao,
-          dataValidade: etiqueta.dataValidade,
-          lote: etiqueta.lote,
-          tokenQr: etiqueta.tokenQr,
-          tokenShort: etiqueta.tokenShort || etiqueta.id.slice(0, 8).toUpperCase(),
-          responsavel: usuario?.nome || 'OPERADOR',
-          nomeLoja: nomeLocal,
-          dataGeracaoIso: agora,
-        })),
-        FORMATO_ETIQUETA_FLUXO_OPERACIONAL
+        montarPayloadImpressao(),
+        FORMATO_ETIQUETA_INDUSTRIA
       );
       if (!abriuImpressao) {
         throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
@@ -208,6 +247,44 @@ export default function ProducaoPage() {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
     } finally {
       setImprimindo(false);
+    }
+  };
+
+  const imprimirEtiquetasNoPi = async () => {
+    if (etiquetasPendentesImpressao.length === 0) return;
+    if (!piPrintAvailable || !piConnection) {
+      alert(
+        'Impressão na estação indisponível. Configure a ponte **indústria** em Configurações → Impressoras ou NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA. Veja docs/RASPBERRY_INDUSTRIA_NOVO_PI.md.'
+      );
+      return;
+    }
+    if (!confirmarImpressao(etiquetasPendentesImpressao.length, FORMATO_ETIQUETA_INDUSTRIA)) return;
+
+    setImprimindoPi(true);
+    try {
+      const html = await gerarDocumentoHtmlEtiquetas(
+        montarPayloadImpressao(),
+        FORMATO_ETIQUETA_INDUSTRIA
+      );
+      await enviarHtmlParaPiPrintBridge(html, {
+        jobName: `producao-${etiquetasPendentesImpressao[0]?.lote || 'lote'}`.slice(0, 120),
+        connection: piConnection,
+        papel: 'industria',
+      });
+
+      const idsEtiquetas = etiquetasPendentesImpressao.map((etiqueta) => etiqueta.id);
+      const { error: erroImpressa } = await supabase
+        .from('etiquetas')
+        .update({ impressa: true })
+        .in('id', idsEtiquetas);
+      if (erroImpressa) throw erroImpressa;
+
+      setEtiquetasPendentesImpressao([]);
+      alert('Etiquetas 60×60 enviadas para a Zebra (Raspberry / indústria).');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
+    } finally {
+      setImprimindoPi(false);
     }
   };
 
@@ -245,13 +322,39 @@ export default function ProducaoPage() {
 
       {resultado && etiquetasPendentesImpressao.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <p className="text-sm text-blue-800 mb-3">
-            Confirmação concluída. Clique no botão abaixo para imprimir as etiquetas desta produção.
+          <p className="text-sm text-blue-800 mb-2">
+            Confirmação concluída. Etiquetas no formato <strong>60×60 mm</strong> (indústria). Use o navegador ou a
+            Zebra ligada ao Raspberry da <strong>ponte indústria</strong>.
           </p>
-          <Button variant="primary" onClick={imprimirEtiquetasGeradas} disabled={imprimindo}>
-            {imprimindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Imprimir {etiquetasPendentesImpressao.length} etiquetas
-          </Button>
+          {avisoHttpsPi && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-3">
+              Página em HTTPS com WebSocket <code className="text-[11px]">ws://</code> — o navegador pode bloquear.
+              Use <code className="text-[11px]">wss://</code> (túnel) na configuração da ponte indústria.
+            </p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <Button variant="primary" onClick={imprimirEtiquetasGeradas} disabled={imprimindo || imprimindoPi}>
+              {imprimindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Navegador — {etiquetasPendentesImpressao.length} etiqueta(s) 60×60
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void imprimirEtiquetasNoPi()}
+              disabled={imprimindo || imprimindoPi || piCfgLoading || !piPrintAvailable}
+              title={
+                piPrintAvailable
+                  ? 'Envia HTML 60×60 para o Raspberry (WebSocket → CUPS → Zebra)'
+                  : 'Configure a ponte indústria em Configurações → Impressoras'
+              }
+            >
+              {imprimindoPi ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <Server className="w-4 h-4 mr-2" />
+              )}
+              Zebra / Pi (indústria)
+            </Button>
+          </div>
 
           <div className="mt-4 bg-white rounded-lg border border-blue-100 p-3">
             <p className="text-sm font-semibold text-gray-800 mb-2">
@@ -409,10 +512,29 @@ export default function ProducaoPage() {
           </p>
         )}
         <Input label="Observações" value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
+        {!formularioValido && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 space-y-1">
+            <p className="font-medium text-amber-900">Complete o formulário para habilitar o registro:</p>
+            <ul className="list-disc list-inside text-amber-900/90">
+              {!form.produto_id && <li>Escolha o produto acabado</li>}
+              {(!Number.isInteger(numBaldesInt) || numBaldesInt < 1) && <li>Informe a quantidade de baldes (número inteiro ≥ 1)</li>}
+              {!form.local_id && <li>Selecione o local (indústria)</li>}
+              {(!Number.isInteger(diasValidadeNumero) || diasValidadeNumero < 1) && (
+                <li>Informe validade em dias (número inteiro ≥ 1)</li>
+              )}
+              {consumosParaServico.length === 0 && (
+                <li>Adicione pelo menos um insumo com quantidade a baixar</li>
+              )}
+            </ul>
+          </div>
+        )}
         <Button
           variant="primary"
           className="w-full"
-          onClick={() => setConfirmacaoAberta(true)}
+          onClick={() => {
+            setErroConfirmacao('');
+            setConfirmacaoAberta(true);
+          }}
           disabled={saving || !formularioValido}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -428,6 +550,11 @@ export default function ProducaoPage() {
         size="md"
       >
         <div className="p-6 space-y-4">
+          {erroConfirmacao && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 whitespace-pre-wrap">
+              {erroConfirmacao}
+            </div>
+          )}
           <div className="space-y-2 text-sm text-gray-700">
             <p>
               <span className="font-semibold">Produto acabado:</span> {produtoSelecionadoNome}
@@ -468,13 +595,13 @@ export default function ProducaoPage() {
             <Button
               variant="primary"
               onClick={async () => {
-                setConfirmacaoAberta(false);
-                await handleSubmit();
+                const ok = await handleSubmit();
+                if (ok) setConfirmacaoAberta(false);
               }}
               disabled={saving}
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Confirmar registro
+              {saving ? 'Registrando…' : 'Confirmar registro'}
             </Button>
           </div>
         </div>

@@ -170,8 +170,12 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     item_id: itemId,
     detalhes: { producao_id: producaoId, motivo: 'consumo_producao' } as Record<string, unknown>,
   }));
-  const { error: audErr } = await supabase.from('auditoria').insert(auditoriaBaixas);
-  if (audErr) console.error('Erro ao registrar auditoria de baixas da produção:', audErr);
+  const chunkAud = 80;
+  for (let i = 0; i < auditoriaBaixas.length; i += chunkAud) {
+    const slice = auditoriaBaixas.slice(i, i + chunkAud);
+    const { error: audErr } = await supabase.from('auditoria').insert(slice);
+    if (audErr) console.error('Erro ao registrar auditoria de baixas da produção:', audErr);
+  }
 
   const itensAcabado = Array.from({ length: quantidadeAcabado }, () => ({
     token_qr: gerarTokenQR(),

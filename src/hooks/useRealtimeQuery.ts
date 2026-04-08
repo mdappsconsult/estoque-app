@@ -7,8 +7,8 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 interface UseRealtimeQueryOptions<T> {
   table: string;
   select?: string;
-  filter?: { column: string; value: string | number };
-  filters?: { column: string; value: string | number }[];
+  filter?: { column: string; value: string | number | boolean };
+  filters?: { column: string; value: string | number | boolean }[];
   orderBy?: { column: string; ascending?: boolean };
   enabled?: boolean;
   transform?: (data: Record<string, unknown>[]) => T[] | Promise<T[]>;
@@ -55,6 +55,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     }
 
     const task = (async () => {
+      setLoading(true);
       try {
         const filtrosAplicados = [...(filters || []), ...(filter ? [filter] : [])];
         /* Encadeamento dinâmico do client PostgREST (tipos internos não expostos de forma estável). */
@@ -144,6 +145,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
         setError(null);
       } catch (err) {
         console.error(`Erro ao buscar ${table}:`, err);
+        setData([]);
         setError(err as Error);
       } finally {
         setLoading(false);
@@ -172,7 +174,12 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
   ]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setLoading(false);
+      setData([]);
+      setError(null);
+      return;
+    }
 
     // Fetch inicial
     fetchData();

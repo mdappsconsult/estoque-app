@@ -1,5 +1,145 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - `/etiquetas`: gravar sequência de balde na hora da impressão
+- **Problema:** impressão pela tela **Etiquetas** só lia `numero_sequencia_loja` do banco; remessas antigas ou criadas sem upsert com destino ficavam **sem BALDE Nº** na etiqueta.
+- **Correção:** antes de gerar HTML (navegador e Pi), `upsertEtiquetasSeparacaoLoja` com `destino_id` da transferência (`meta` passa a carregar `destino_id`). `rowsParaEtiquetasImpressao` aceita `Map` devolvido pelo upsert.
+- **Regra balde:** participa quem tem **«balde»** no nome do produto (não depende mais de `origem` no cadastro).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiqueta 60×30/60×60: Balde nº visível + layout proporcional
+- **60×30:** `BALDE Nº` no **rodapé** (acima de Val./Op.); QR **11,8 mm**; paddings e fontes reduzidos para caber na meia-etiqueta; produto até 32 caracteres; operador truncado mais curto.
+- **60×60:** faixa **BALDE Nº** no **topo** (abaixo da loja); removido bloco duplicado ao lado do QR; topo/RESFRIADO um pouco mais compactos.
+- **Teste impressão:** amostras com número de balde de exemplo.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Sequência numérica de baldes por loja (indústria → filial)
+- **Objetivo:** na separação matriz → loja, numerar baldes de uso na filial de forma **contínua por loja** (ex.: 1–5 na primeira remessa, 6–10 na seguinte).
+- **Banco:** coluna `etiquetas.numero_sequencia_loja`; tabela `sequencia_balde_loja_destino`; RPC `reservar_sequencia_balde_loja` (transação com `FOR UPDATE`). Migração `20260408133000_sequencia_balde_loja_destino.sql` **aplicada no Supabase** (MCP `apply_migration`, nome `sequencia_balde_loja_destino`).
+- **Regra MVP «é balde»:** `produtos.origem` ≠ `COMPRA` e nome contém **«balde»** (case insensitive) — `produto-sequencia-balde-loja.ts`.
+- **`upsertEtiquetasSeparacaoLoja`:** recebe `local_destino_id`; preserva número já gravado; atribui bloco novo aos itens elegíveis sem número. `sincronizarEtiquetasRemessaPorLoteSep` passa `destino_id` da transferência.
+- **UI:** `label-print` 60×30 e 60×60 exibem **Balde nº**; lista em `/etiquetas`; **Separar por Loja** + `ultima-remessa-storage` com `destinoLocalId`.
+- **Validação:** `npm run lint`, `npm run build`. **Deploy:** aplicar a migração no Supabase (`docs/FLUXO_ENTREGA.md`).
+
+### Sessão - 2026-04-08 - Etiqueta 60×30: validade + operador no rodapé; validade da remessa em `/etiquetas`
+- **Problema:** impressão no formato **60×30** (loja / produto / data) só mostrava **data de impressão** (`08/04/2026`); **validade** e **operador** não apareciam — layout antigo da célula + `dataValidade` zerada na montagem quando o produto não tinha regra de validade no cadastro.
+- **`label-print`:** `.cel-footer` com **Val. dd/mm/aa** (ignora sentinela `2999-…`) ou **Imp.** + data; linha **Op.** com `responsavel`.
+- **`/etiquetas`:** `dataValidadeParaImpressaoEtiqueta` repassa `data_validade` do banco quando não é sentinela.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiqueta indústria 60×60: validade, loja e operador ao lado do QR
+- **Layout 60×60** (`label-print.ts`): removida linha MANIPULAÇÃO e bloco RESP no rodapé esquerdo; **Validade** em **dd/mm/aa** + rótulos **Loja** e **Gerou** (`responsavel`) na coluna à esquerda do QR; nome da loja mantido no topo (`nome-loja-local`) e repetido na faixa do QR.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: formato 60×60 na Pi + nome da loja na remessa
+- **Problema:** impressão com aparência repetida (produto/data/«—»): Pi e «remessa inteira» no navegador ignoravam o seletor e forçavam 60×30; `nomeLoja` não era preenchido nas linhas SEP.
+- **`/etiquetas`:** Zebra/Pi e remessa inteira no navegador usam **`formatoImpressao`**; **60×60** → `usePiPrintBridgeConfig({ papel: 'industria' })` e `enviarHtmlParaPiPrintBridge` com o mesmo papel; **60×30** (e demais) → estoque. `rowsParaEtiquetasImpressao` recebe **destino** da remessa (`metaPorViagemId`) para 60×30 e 60×60.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: formulário de sync + status AWAITING_ACCEPT
+- **UI** `/etiquetas`: bloco âmbar com **login** + **senha** (sem `prompt`/`confirm`); mensagem de sucesso verde; botão desabilitado sem credenciais.
+- **`useRealtimeQuery`:** em erro de fetch/transform, `setData([])` para não manter lista defasada.
+- **Transform etiquetas:** falha ao ler `itens` (tokens) não aborta a lista — aviso no console e QR com fallback.
+- **`remessa-separacao-ui`:** `AWAITING_ACCEPT` legível como **«Aguardando aceite»** (alinhado a Separar por Loja).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: leitura sem embed + sync com service role
+- **Problema:** remessa com 0 etiquetas na UI mesmo após «sincronizar» no cliente — possível **RLS** bloqueando `INSERT`/`UPDATE` com chave `anon` e/ou embed `itens!etiquetas_id_refs_itens_id_fkey` falhando no PostgREST.
+- **`/etiquetas`:** `select` só `produto`; tokens QR via `itens` em lote no `transform` assíncrono.
+- **API** `POST /api/operacional/sync-etiquetas-remessa`: valida login/senha (`operacional-auth-server.ts`), perfil indústria/gerente/admin, executa `sincronizarEtiquetasRemessaPorLoteSep` com `createSupabaseAdmin()`.
+- **`etiquetas.ts`:** `upsertEtiquetasSeparacaoLoja` e `sincronizarEtiquetasRemessaPorLoteSep` aceitam `SupabaseClient` opcional.
+- **`/api/auth/operacional`:** passa a usar `validarCredencialOperacional`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: sincronizar etiquetas a partir da transferência
+- **Motivo:** remessa no painel de envios com **0** linhas em `etiquetas` ativas (descompasso transferência × etiquetas).
+- **Serviço** `etiquetas.ts`: `sincronizarEtiquetasRemessaPorLoteSep` — resolve `viagem_id` do lote `SEP-…`, busca `transferencia_itens`, monta upsert alinhado a `itens` (chunks), modo `manter_impressa_se_existir`.
+- **UI** `/etiquetas`: bloco âmbar + botão **Gerar etiquetas a partir da transferência** quando o lote é `SEP-…` e a lista carregada está vazia.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: select espelha envios (sem exigir linha em etiquetas)
+- **Problema:** remessa listada em «Envios já registrados» (ex.: Santa Cruz) ainda sumia no `<select>` de **Etiquetas** — checagem extra em `etiquetas` podia excluir o lote; além disso operador indústria competia com transferências de outras origens no limite global.
+- **Serviço** `etiquetas-opcoes-remessa.ts`: opções vindas **só** de `transferencias` (até **200**) + merge com scan em `etiquetas`; parâmetro `origemId` para filtrar pela indústria do operador (`OPERATOR_WAREHOUSE` / `DRIVER`).
+- **UI** `/etiquetas`: `origemIdOpcoesRemessa` + refetch quando o usuário hidrata; texto de ajuda.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: select de remessa alinhado a Separar por Loja
+- **Problema:** remessa visível em Separar por Loja (ex.: `SEP-…` Santa Cruz) não aparecia no `<select>` de **Etiquetas** — lista vinha só de scan em `etiquetas` com teto de **80** lotes distintos entre milhares de linhas.
+- **Serviço** `etiquetas-opcoes-remessa.ts`: `buscarOpcoesRemessaSepParaEtiquetas` — até **150** transferências `WAREHOUSE_STORE` com `viagem_id`, filtra lotes com etiqueta `excluida = false`, ordena por data; merge com scan em `etiquetas` (até **10k** linhas) e teto **200** opções.
+- **UI** `/etiquetas`: texto de ajuda atualizado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Separar por Loja: editar destino e excluir remessa
+- **UI** `/separar-por-loja`: em cada envio **Aguardando aceite** / **Aceita**, botões **Editar destino** (modal + `Select` de lojas) e **Excluir remessa** (`confirm`).
+- **Serviço** `transferencias.ts`: `alterarDestinoRemessaMatrizParaLoja`, `cancelarRemessaMatrizParaLoja` — valida tipo `WAREHOUSE_STORE`, estado, unidades ainda `EM_ESTOQUE` na origem; cancelamento remove `transferencias` (cascade em `transferencia_itens`), marca `etiquetas` do lote `SEP-…` como `excluida`, remove `viagens` órfã; auditoria `ALTERAR_DESTINO_REMESSA_MATRIZ_LOJA` / `CANCELAR_REMESSA_MATRIZ_LOJA`.
+- **`envios-matriz-lojas`:** resumo passa a incluir `origem_id` e `destino_id`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Cadastros Indústria vs envios em Separar por Loja
+- **Motivo:** confundir «cadastro do dia» com «o que já foi mandado para a loja»; usuário queria cadastro do dia em **Cadastros (indústria)** e em **Separar por Loja** só o histórico de **envios** (produtos/unidades por remessa).
+- **Nova rota** `/cadastros/industria` + componente `CadastrosIndustriaDiaPainel` (painel violeta movido para cá; **Editar** condicionado a permissão).
+- **Serviço** `envios-matriz-lojas.ts` — `buscarEnviosRecentesMatrizParaLojas` (transferências `WAREHOUSE_STORE` + agregação por produto).
+- **UI** `/separar-por-loja`: removido painel de cadastro do dia; adicionado painel **Envios já registrados** (filtra por origem; destino opcional).
+- **Home + permissões:** card e `ROUTE_PERMISSIONS` / `ROUTE_UI_META` para `/cadastros/industria`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Separar por Loja: resumo do dia (Supabase) + editar cadastros
+- **Objetivo:** ver na própria tela o que foi cadastrado/alterado **hoje** (fuso do navegador) no Supabase para alimentar separação, com link para editar.
+- **Serviço:** `cadastros-hoje-separacao.ts` — `loja_produtos_config` (criado/updated hoje), `produtos` criados hoje (elegíveis reposição loja), `locais` STORE criados hoje.
+- **UI** `/separar-por-loja`: card roxo com lista, **Atualizar**, **Editar** → Reposição (`?loja=`), Produtos (`?editar=`), Locais (`?editar=`).
+- **Cadastros:** `reposicao-loja`, `produtos`, `locais` passam a honrar query string e abrir modal/seleção (URL limpa após aplicar).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiqueta indústria (60×60): loja/local, QR e validade
+- **`label-print`:** template legado passa a exibir **`nomeLoja`** (na produção = nome do local do formulário), **QR** em bloco dedicado (bitmap 512 px) e **validade** reforçada na linha central + legenda **Val.** sob o QR (só 60×60).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: fluxo por remessa + UI estável
+- **Problema:** página pesava ou «caía» ao tentar carregar muitas etiquetas de uma vez.
+- **UI** `/etiquetas`: sem remessa selecionada, estado vazio orientando a escolher o lote; com remessa, spinner local enquanto carrega; filtros e grupos só após o fetch; botões «Imprimir pendentes» só com remessa carregada; botão **Atualizar lista** com ícone + texto também em loading; `useEffect` de meta de transferências com deps `[opcoesRemessa]` (lint).
+- **Hook:** `useRealtimeQuery` com `enabled` false quando não há lote (sem loading infinito).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiquetas: performance (join itens + limite DOM por grupo)
+- **Problema:** até 5000 linhas + transform assíncrono fazia **dezenas de round-trips** sequenciais a `itens` (chunks de 400).
+- **Banco:** migração `20260408120000_etiquetas_fkey_itens_embed.sql` — FK `etiquetas.id` → `itens.id` (remove órfãs antes); `schema_public.sql` alinhado.
+- **UI** `/etiquetas`: `select` embutido `item:itens!etiquetas_id_refs_itens_id_fkey(...)`; normalização leve de joins; **50** linhas visíveis por grupo com botão expandir; debounce realtime **800** ms; área de lista `max-h` um pouco maior.
+- **Validação:** `npm run lint`, `npm run build`. **Deploy:** aplicar migração no Supabase de produção (sem FK o select embutido falha).
+
+### Sessão - 2026-04-08 - Indústria: etiqueta produção 60×60 + Pi Zebra
+- **`label-print`:** `FORMATO_ETIQUETA_INDUSTRIA` = **60×60** (QR ~22 mm); `confirmarImpressao` específico; `FORMATO_ETIQUETA_FLUXO_OPERACIONAL` continua 60×30 só para separação loja.
+- **`/producao`:** impressão navegador e botão **Zebra / Pi (indústria)** (`usePiPrintBridgeConfig` `papel: industria`, `gerarDocumentoHtmlEtiquetas` + `enviarHtmlParaPiPrintBridge`); persistência **nome do local** para etiqueta após limpar formulário (`localParaImpressao`).
+- **`/teste-impressao-etiqueta`:** com `?papel=industria`, formato inicial **60×60**.
+- **Doc:** `docs/IMPRESSAO_TERMICA_ZEBRA.md` (§5 60×60), `docs/RASPBERRY_INDUSTRIA_NOVO_PI.md` (CUPS/mídia 60×60); `CONTEXTO_ATUAL.md` (bullet impressão).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Separar por loja (manual): ocultar insumos de compra por padrão
+- **Motivo:** na indústria, modo manual listava toda a origem (ex.: polpa COMPRA + balde PRODUCAO); operador quer enviar só acabados.
+- **UI** `/separar-por-loja`: após carregar `resumo_estoque_agrupado`, busca `origem` em `produtos`; **não** lista `origem === COMPRA` até marcar **«Mostrar também produtos só de compra»**; mensagem âmbar se só sobrar compra.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-08 - Supabase MCP: aplicar migração produção (`local_id`, insumos)
+- **Problema:** PostgREST retornava *Could not find the 'local_id' column of 'producoes' in the schema cache* — o banco ligado ao MCP ainda não tinha o DDL de `20260407183000_producao_consumo_insumos.sql`.
+- **Aplicado no MCP:** `producoes.local_id`, `producoes.num_baldes` (NOT NULL, default 1; backfill `num_baldes = quantidade`); `baixas.producao_id` + índice; tabela `producao_consumo_itens` + RLS/policy + `supabase_realtime`.
+
+### Sessão - 2026-04-08 - Supabase MCP: remover 2 baldes Açaí 11L (Indústria)
+- **Banco (MCP):** removidos **2** `itens` (`df7ced01-…`, `56b96acb-…`) — produto **Açaí Balde 11L**, local **Indústria**, validade **30/04/2026** (UTC), ligados ao `lotes_compra` `1b16044d-…` (qtd 2, NF `SEM_NF_HISTORICO`); excluído o **lote** (não havia outros itens). Sem `transferencia_itens` / `baixas` / `perdas` nesses IDs.
+- **Estoque agregado:** `estoque` do produto recalculado por contagem `EM_ESTOQUE` → **0**.
+
+### Sessão - 2026-04-10 - Supabase MCP: último balde de teste (1 unidade)
+- **Banco (MCP):** removidos `producoes` `ede8298e-…`, item acabado `efa6232e-…` e `etiquetas`; `estoque` recalculado para o produto do balde. Não havia linha em `producoes` com data 10/04 no MCP — era o único resto da limpeza anterior (validade na tela podia aparecer como 10/04).
+
+### Sessão - 2026-04-08 - Supabase MCP: limpar produções/baldes de teste (>7 dias)
+- **Banco (MCP):** removidas **16** linhas em `producoes` com `created_at` anterior a 7 dias; **524** itens acabado (sem `lote_compra`, casados por produto + janela de tempo); `etiquetas` correspondentes; **1** `transferencia_itens` + **1** `transferencias` de teste que referenciavam um desses itens.
+- **Estoque agregado:** `UPDATE estoque` para os dois `produto_id` envolvidos (contagem `EM_ESTOQUE`).
+- **Doc:** `docs/consultas-sql/limpar-producoes-teste-antigas.sql` (roteiro; execução foi via MCP).
+
+### Sessão - 2026-04-08 - Produção: modal não fechar antes do submit; erros visíveis
+- **Problema:** ao confirmar produção, o modal fechava antes de `handleSubmit` terminar; erros do Supabase nem sempre são `instanceof Error` (alert genérico «Erro»).
+- **UI** `/producao`: confirmação só fecha após sucesso; mensagem de falha em vermelho no modal; texto «Registrando…»; aviso âmbar quando o botão está desabilitado (checklist do que falta).
+- **Serviço:** auditoria de baixas da produção em lotes de 80 linhas (evita corpo HTTP grande com muitos insumos).
+- **`errMessage`:** usa `details`/`hint` de erros estilo PostgREST.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-08 - Registrar compra: corrigir lançamento (lote) + revert Separar por Loja
 - **Escopo:** o pedido era editar **entrada de compra** (quantidade/NF errados), não separação. **Separar por loja** restaurado ao último commit (`git checkout HEAD -- src/app/separar-por-loja/page.tsx`).
 - **Serviço** `lotes-compra.ts`: `contarItensDoLoteCompra`, `atualizarLoteCompra` (validações NF/fornecedor/validade; quantidade ≥ QR já emitidos; `recalcularEstoqueProduto`; auditoria `ALTERAR_LOTE_COMPRA`).

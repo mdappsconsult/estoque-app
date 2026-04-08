@@ -15,6 +15,8 @@ export type UltimaRemessaItem = {
 export type UltimaRemessaImpressao = {
   lote: string;
   nomeLoja: string;
+  /** UUID do local STORE de destino; mantém sequência de balde ao reimprimir. */
+  destinoLocalId?: string | null;
   itens: UltimaRemessaItem[];
 };
 
@@ -24,9 +26,14 @@ const SESSION_LEGACY = 'separarPorLoja_ultimaRemessaImpressao_v1';
 function validarPayload(parsed: unknown): UltimaRemessaImpressao | null {
   if (!parsed || typeof parsed !== 'object') return null;
   const p = parsed as UltimaRemessaImpressao;
+  const destOk =
+    p.destinoLocalId === undefined ||
+    p.destinoLocalId === null ||
+    (typeof p.destinoLocalId === 'string' && p.destinoLocalId.length > 0);
   if (
     typeof p.lote === 'string' &&
     typeof p.nomeLoja === 'string' &&
+    destOk &&
     Array.isArray(p.itens) &&
     p.itens.length > 0 &&
     p.itens.every(

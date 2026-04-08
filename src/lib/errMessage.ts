@@ -1,9 +1,12 @@
 /** Mensagem segura a partir de `unknown` (catch, APIs). */
 export function errMessage(err: unknown, fallback = 'Erro'): string {
   if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    const m = (err as { message: unknown }).message;
-    if (typeof m === 'string') return m;
+  if (typeof err === 'object' && err !== null) {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message.trim()) return o.message;
+    if (typeof o.details === 'string' && o.details.trim()) return o.details;
+    if (typeof o.hint === 'string' && o.hint.trim()) return o.hint;
+    if (typeof o.error_description === 'string') return o.error_description;
   }
   return fallback;
 }

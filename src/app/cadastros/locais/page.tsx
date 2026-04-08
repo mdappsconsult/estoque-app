@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MapPin, Plus, Edit2, Trash2, Loader2, Warehouse, Store } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -20,6 +20,23 @@ export default function LocaisPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<Local | null>(null);
   const [form, setForm] = useState({ nome: '', tipo: 'WAREHOUSE' as 'WAREHOUSE' | 'STORE', endereco: '' });
+  const [editarUrlAplicado, setEditarUrlAplicado] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !locais.length || editarUrlAplicado) return;
+    const id = new URLSearchParams(window.location.search).get('editar');
+    if (!id) return;
+    const loc = locais.find((l) => l.id === id);
+    if (!loc) return;
+    const t = window.setTimeout(() => {
+      setEditando(loc);
+      setForm({ nome: loc.nome, tipo: loc.tipo, endereco: loc.endereco || '' });
+      setModalOpen(true);
+      setEditarUrlAplicado(true);
+      window.history.replaceState({}, '', '/cadastros/locais');
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [locais, editarUrlAplicado]);
 
   const openCreate = () => {
     setEditando(null);

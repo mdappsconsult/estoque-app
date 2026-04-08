@@ -5,10 +5,15 @@ export type FormatoEtiqueta = '60x30' | '60x60' | '58x40' | '50x30';
 export const FORMATO_IMPRESSAO_STORAGE_KEY = 'etiqueta_formato_padrao';
 
 /**
- * Formato usado em **Separar por Loja** e **Produção** (não lê `localStorage`).
- * Evita impressão 60×60 legada quando alguém escolheu outro formato na tela Etiquetas nesse navegador.
+ * Formato usado em **Separar por Loja** (envio matriz → loja). Não lê `localStorage`.
  */
 export const FORMATO_ETIQUETA_FLUXO_OPERACIONAL: FormatoEtiqueta = '60x30';
+
+/**
+ * Formato usado na **Produção** (indústria / acabado): etiqueta quadrada 60×60 mm, layout legado completo (validade, lote, etc.).
+ * Não lê `localStorage`.
+ */
+export const FORMATO_ETIQUETA_INDUSTRIA: FormatoEtiqueta = '60x60';
 
 export const FORMATO_CONFIG: Record<
   FormatoEtiqueta,
@@ -27,16 +32,16 @@ export const FORMATO_CONFIG: Record<
     widthMm: 60,
     heightMm: 30,
     paddingMm: 0.5,
-    /** QR grande; vão até a data via flex (margin-top auto na .cel-data) */
-    qrSizeMm: 14.5,
+    /** QR limitado para caber loja+prod+rodapé (Balde nº, Val., Op.) nos ~15×30 mm da meia-etiqueta */
+    qrSizeMm: 11.8,
     dualPorFolha: true,
   },
   '60x60': {
-    label: '60×60 mm (legado)',
+    label: '60×60 mm — indústria / produção (uma etiqueta por folha)',
     widthMm: 60,
     heightMm: 60,
     paddingMm: 2.5,
-    qrSizeMm: 18,
+    qrSizeMm: 22,
     dualPorFolha: false,
   },
   '58x40': {
@@ -66,10 +71,12 @@ export interface EtiquetaParaImpressao {
   tokenQr: string;
   tokenShort: string;
   responsavel: string;
-  /** Ex.: nome da loja de destino na separação; na produção, nome do local/indústria. */
+  /** Separar por loja: loja de destino. Produção (60×60): nome do **local** escolhido no formulário (aparece na etiqueta). */
   nomeLoja?: string;
   /** Dia em que a etiqueta foi gerada (ex.: `created_at` ou momento da impressão). ISO. */
   dataGeracaoIso?: string;
+  /** Balde indústria → loja: sequência contínua por loja de destino (Separar por Loja). */
+  numeroSequenciaLoja?: number | null;
 }
 
 function normalizarFormatoImpressao(valor: string | null): FormatoEtiqueta {
@@ -92,6 +99,16 @@ function formatarDataPtBr(dataIso: string): string {
   const data = new Date(dataIso);
   if (Number.isNaN(data.getTime())) return '-';
   return data.toLocaleDateString('pt-BR');
+}
+
+/** Validade na etiqueta 60×60 indústria: dd/mm/aa */
+function formatarValidadeEtiquetaIndustria(dataIso: string): string {
+  const data = new Date(dataIso);
+  if (Number.isNaN(data.getTime())) return '-';
+  const d = String(data.getDate()).padStart(2, '0');
+  const m = String(data.getMonth() + 1).padStart(2, '0');
+  const y = String(data.getFullYear() % 100).padStart(2, '0');
+  return `${d}/${m}/${y}`;
 }
 
 function extrairVolumeProduto(nome: string): string {
@@ -119,7 +136,7 @@ async function qrTokenParaDataUrl(token: string, qrSizeMm: number): Promise<stri
   });
 }
 
-/** Uma metade da folha 60×30: loja, produto, QR (data URL), data de geração. */
+/** Uma metade da folha 60×30: loja, produto, QR, validade (ou data de impressão) e operador. */
 function gerarCelula60x30(
   item: EtiquetaParaImpressao,
   qrSizeMm: number,
@@ -127,9 +144,24 @@ function gerarCelula60x30(
   qrDataUrl: string
 ): string {
   const loja = escaparHtml((item.nomeLoja || '—').trim() || '—');
-  const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 36));
-  const dataGer = escaparHtml(formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao));
+  const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 32));
   const qrPx = pixelsQrParaImpressao(qrSizeMm);
+
+  const rawValYmd = (item.dataValidade || '').trim().slice(0, 10);
+  const valFmt = formatarValidadeEtiquetaIndustria(item.dataValidade || '');
+  const temValidade =
+    Boolean(rawValYmd) && !rawValYmd.startsWith('2999') && valFmt !== '-';
+  const linhaValOuImp = temValidade
+    ? `Val. ${valFmt}`
+    : `Imp. ${formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao)}`;
+  const opRaw = (item.responsavel || '').trim();
+  const opCurto = opRaw.length > 18 ? `${opRaw.slice(0, 16)}…` : opRaw;
+  const linhaOp = opCurto ? `Op. ${opCurto}` : '';
+  const nSeq = item.numeroSequenciaLoja;
+  const temBalde = nSeq != null && Number.isFinite(Number(nSeq));
+  const linhaBaldeRodape = temBalde
+    ? `<div class="cel-n-balde">BALDE Nº ${escaparHtml(String(nSeq))}</div>`
+    : '';
 
   return `
     <div class="celula-60x30${classeExtra}">
@@ -137,7 +169,11 @@ function gerarCelula60x30(
         <div class="cel-loja">${loja}</div>
         <div class="cel-prod">${produto}</div>
         <img class="cel-qr" src="${qrDataUrl}" alt="" width="${qrPx}" height="${qrPx}" />
-        <div class="cel-data">${dataGer}</div>
+        <div class="cel-footer">
+          ${linhaBaldeRodape}
+          <div class="cel-val">${escaparHtml(linhaValOuImp)}</div>
+          ${linhaOp ? `<div class="cel-op">${escaparHtml(linhaOp)}</div>` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -157,11 +193,81 @@ function gerarFolha60x30Par(
   return `<div class="folha-60x30">${celEsq}${celDir}</div>`;
 }
 
+/** 60×60 indústria: validade em destaque ao lado do QR; loja e operador na mesma faixa do QR (sem linha de manipulação). */
+function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: string): string {
+  const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
+  const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
+  const lote = escaparHtml(item.lote || '-');
+  const responsavel = escaparHtml((item.responsavel || '—').trim() || '—');
+  const tokenShort = escaparHtml(item.tokenShort || item.id.slice(0, 8).toUpperCase());
+  const tokenQr = escaparHtml(item.tokenQr);
+  const validade = escaparHtml(formatarValidadeEtiquetaIndustria(item.dataValidade));
+  const nomeLocalOuLoja = escaparHtml((item.nomeLoja || '—').trim() || '—');
+  const nBalde = item.numeroSequenciaLoja;
+  const faixaBaldeTopo6060 =
+    nBalde != null && Number.isFinite(Number(nBalde))
+      ? `<div class="topo-num-balde">BALDE Nº ${escaparHtml(String(nBalde))}</div>`
+      : '';
+
+  return `
+    <div class="etiqueta fmt-6060">
+      <div class="topo">
+        <div class="produto">${produtoNome}</div>
+        <div class="nome-loja-local">${nomeLocalOuLoja}</div>
+        ${faixaBaldeTopo6060}
+        <div class="sub-linha">
+          <span>RESFRIADO</span>
+          <span>${volume || '&nbsp;'}</span>
+        </div>
+        <div class="linha"></div>
+      </div>
+
+      <div class="baixo-6060">
+      <div class="rodape rodape-6060">
+        <div class="rodape-left rodape-left-6060">
+          <div class="empresa">ACAI DO KIM - CENTRAL DE PRODUCAO</div>
+          <div class="empresa">CNPJ: 24.880.097/0001-02</div>
+          <div class="empresa">CEP: 47804-000 AVENIDA JK</div>
+          <div class="empresa">821, LUIS EDUARDO MAGALHAES, BA</div>
+          <div class="token">${tokenShort}</div>
+          <div class="token-qr">${tokenQr}</div>
+          <div class="lote">LOTE: ${lote}</div>
+        </div>
+        <div class="qr-lateral-6060">
+          <div class="qr-meta-6060">
+            <div class="qm-block">
+              <span class="qm-label">Validade</span>
+              <span class="qm-valor-validade">${validade}</span>
+            </div>
+            <div class="qm-block">
+              <span class="qm-label">Loja</span>
+              <span class="qm-valor">${nomeLocalOuLoja}</span>
+            </div>
+            <div class="qm-block">
+              <span class="qm-label">Gerou</span>
+              <span class="qm-valor">${responsavel}</span>
+            </div>
+          </div>
+          <div class="bloco-qr bloco-qr-6060">
+            <img class="qr" src="${qrDataUrl}" alt="" width="512" height="512" />
+          </div>
+        </div>
+      </div>
+      </div>
+    </div>
+  `;
+}
+
 function gerarHtmlEtiquetaLegado(
   item: EtiquetaParaImpressao,
-  _formato: Exclude<FormatoEtiqueta, '60x30'>,
+  formato: Exclude<FormatoEtiqueta, '60x30'>,
   qrDataUrl: string
 ): string {
+  if (formato === '60x60') {
+    return gerarHtmlEtiquetaIndustria6060(item, qrDataUrl);
+  }
+
+  const fmtClass = `fmt-${formato.replace(/x/g, '')}`;
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
   const lote = escaparHtml(item.lote || '-');
@@ -170,11 +276,13 @@ function gerarHtmlEtiquetaLegado(
   const tokenQr = escaparHtml(item.tokenQr);
   const manipulacao = escaparHtml(formatarDataPtBr(item.dataManipulacao));
   const validade = escaparHtml(formatarDataPtBr(item.dataValidade));
+  const nomeLocalOuLoja = escaparHtml((item.nomeLoja || '—').trim() || '—');
 
   return `
-    <div class="etiqueta">
+    <div class="etiqueta ${fmtClass}">
       <div class="topo">
         <div class="produto">${produtoNome}</div>
+        <div class="nome-loja-local">${nomeLocalOuLoja}</div>
         <div class="sub-linha">
           <span>RESFRIADO</span>
           <span>${volume || '&nbsp;'}</span>
@@ -184,7 +292,9 @@ function gerarHtmlEtiquetaLegado(
 
       <div class="datas">
         <div class="data-row"><span class="label">MANIPULACAO:</span><span class="valor">${manipulacao}</span></div>
-        <div class="data-row"><span class="label">VALIDADE:</span><span class="valor">${validade}</span></div>
+        <div class="data-row data-row-validade">
+          <span class="label">VALIDADE:</span><span class="valor valor-validade">${validade}</span>
+        </div>
       </div>
 
       <div class="linha"></div>
@@ -200,7 +310,9 @@ function gerarHtmlEtiquetaLegado(
           <div class="token-qr">${tokenQr}</div>
           <div class="lote">LOTE: ${lote}</div>
         </div>
-        <img class="qr" src="${qrDataUrl}" alt="QR Code" />
+        <div class="bloco-qr">
+          <img class="qr" src="${qrDataUrl}" alt="" width="512" height="512" />
+        </div>
       </div>
     </div>
   `;
@@ -217,7 +329,12 @@ export function obterFormatoImpressaoPadrao(): FormatoEtiqueta {
  */
 export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): EtiquetaParaImpressao[] {
   const agora = new Date().toISOString();
-  const mk = (idSuffix: string, produtoNome: string, tokenShort: string): EtiquetaParaImpressao => ({
+  const mk = (
+    idSuffix: string,
+    produtoNome: string,
+    tokenShort: string,
+    numeroBalde?: number | null
+  ): EtiquetaParaImpressao => ({
     id: `00000000-0000-4000-8000-${idSuffix}`,
     produtoNome,
     dataManipulacao: agora,
@@ -228,15 +345,16 @@ export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): E
     responsavel: 'Teste impressora',
     nomeLoja: 'Loja exemplo (teste)',
     dataGeracaoIso: agora,
+    numeroSequenciaLoja: numeroBalde ?? null,
   });
 
   if (formato === '60x30') {
     return [
-      mk('000000000001', 'AÇAÍ 5L FRUTAS VERMELHAS', 'ACA5L-T1'),
-      mk('000000000002', 'LEITE PO 800G INTEGRAL', 'LT800-T2'),
+      mk('000000000001', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T1', 12),
+      mk('000000000002', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T2', 13),
     ];
   }
-  return [mk('000000000099', 'PRODUTO EXEMPLO — TESTE IMPRESSORA', 'TESTE-99')];
+  return [mk('000000000099', 'AÇAÍ BALDE 11L TESTE IMPRESSORA', 'TESTE-99', 7)];
 }
 
 export function confirmarImpressao(totalEtiquetas: number, formato?: FormatoEtiqueta): boolean {
@@ -245,6 +363,11 @@ export function confirmarImpressao(totalEtiquetas: number, formato?: FormatoEtiq
     const folhas = Math.ceil(totalEtiquetas / 2);
     return window.confirm(
       `Imprimir ${totalEtiquetas} etiqueta(s) em ${folhas} folha(s) física(s) 60×30 mm (2 QR por folha, recorte no pontilhado)?`
+    );
+  }
+  if (formato === '60x60') {
+    return window.confirm(
+      `Imprimir ${totalEtiquetas} etiqueta(s) em ${totalEtiquetas} folha(s) física(s) 60×60 mm (indústria / Zebra)?`
     );
   }
   return window.confirm(`Deseja realmente imprimir ${totalEtiquetas} etiqueta(s)?`);
@@ -273,7 +396,7 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       height: ${cfg.heightMm}mm;
       vertical-align: top;
       text-align: center;
-      padding: 2.35mm 0.65mm 0.85mm 0.65mm;
+      padding: 0.95mm 0.45mm 0.4mm 0.45mm;
     }
     .celula-60x30.celula-vazia {
       vertical-align: middle;
@@ -297,33 +420,35 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       color: #bbb;
     }
     .cel-loja {
-      font-size: 6.35pt;
-      font-weight: 700;
-      line-height: 1.05;
+      font-size: 5.65pt;
+      font-weight: 800;
+      line-height: 1.02;
       text-align: center;
       max-width: 100%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      margin: 0 0 0.5mm 0;
+      margin: 0 0 0.2mm 0;
+      flex-shrink: 0;
     }
     .cel-prod {
-      font-size: 5.25pt;
+      font-size: 4.85pt;
       font-weight: 800;
-      line-height: 1.08;
+      line-height: 1.05;
       text-align: center;
       width: 100%;
       max-width: 100%;
       box-sizing: border-box;
-      height: 4.15mm;
-      min-height: 4.15mm;
-      max-height: 4.15mm;
-      margin: 0.2mm auto 0;
+      height: 3.35mm;
+      min-height: 3.35mm;
+      max-height: 3.35mm;
+      margin: 0.1mm auto 0;
       overflow: hidden;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       -webkit-box-pack: start;
+      flex-shrink: 0;
     }
     .cel-qr {
       display: block;
@@ -331,21 +456,58 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       height: ${qr}mm;
       max-width: ${qr}mm;
       object-fit: contain;
-      margin: 0.5mm auto 0;
+      margin: 0.15mm auto 0;
       flex-shrink: 0;
     }
-    .cel-data {
-      font-size: 5.5pt;
-      font-weight: 900;
-      color: #000;
-      letter-spacing: 0.02em;
-      margin: auto 0 0.15mm 0;
-      line-height: 1;
-      padding: 0;
-      text-align: center;
+    .cel-footer {
+      margin: auto 0 0;
       flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.06mm;
+      width: 100%;
+      max-width: 100%;
+      padding: 0 0.1mm;
+      box-sizing: border-box;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+    }
+    .cel-n-balde {
+      font-size: 6.4pt;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      line-height: 1;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin: 0.08mm 0 0 0;
+    }
+    .cel-val {
+      font-size: 4.65pt;
+      font-weight: 800;
+      color: #000;
+      letter-spacing: 0.01em;
+      line-height: 1.02;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cel-op {
+      font-size: 4.35pt;
+      font-weight: 700;
+      color: #000;
+      line-height: 1.02;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   `;
 }
@@ -371,8 +533,48 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       letter-spacing: 0.3px;
       min-height: 4.5mm;
     }
+    .nome-loja-local {
+      margin-top: 0.45mm;
+      font-size: 7pt;
+      font-weight: 800;
+      line-height: 1.08;
+      text-align: center;
+      max-height: 4.8mm;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .fmt-6060 .nome-loja-local {
+      font-size: 7.6pt;
+      max-height: 5mm;
+      margin-top: 0.3mm;
+    }
+    .fmt-6060 .topo-num-balde {
+      margin-top: 0.25mm;
+      font-size: 9.5pt;
+      font-weight: 900;
+      letter-spacing: 0.07em;
+      text-align: center;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .fmt-6060 .topo .produto {
+      font-size: 10pt;
+      min-height: 3.8mm;
+    }
+    .fmt-6060 .sub-linha {
+      margin-top: 0.35mm;
+      font-size: 7.5pt;
+    }
+    .fmt-5840 .nome-loja-local,
+    .fmt-5030 .nome-loja-local {
+      font-size: 6pt;
+      max-height: 3.6mm;
+      -webkit-line-clamp: 1;
+    }
     .sub-linha {
-      margin-top: 1.1mm;
+      margin-top: 0.55mm;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -398,6 +600,63 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
     }
     .data-row .label { font-size: 9pt; font-weight: 800; }
     .data-row .valor { font-size: 9pt; font-weight: 700; }
+    .fmt-6060 .baixo-6060 {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      min-height: 0;
+    }
+    .fmt-6060 .rodape-6060 {
+      margin-top: 0.6mm;
+      align-items: flex-end;
+    }
+    .fmt-6060 .rodape-left-6060 .empresa { font-size: 4.8pt; }
+    .fmt-6060 .qr-lateral-6060 {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-end;
+      gap: 0.9mm;
+      flex-shrink: 0;
+      max-width: 52%;
+    }
+    .fmt-6060 .qr-meta-6060 {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: flex-end;
+      text-align: right;
+      gap: 0.45mm;
+      max-width: 22mm;
+      min-width: 0;
+    }
+    .fmt-6060 .qm-block {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.05mm;
+    }
+    .fmt-6060 .qm-label {
+      font-size: 4.8pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+    .fmt-6060 .qm-valor {
+      font-size: 6.2pt;
+      font-weight: 700;
+      line-height: 1.08;
+      word-break: break-word;
+      max-width: 22mm;
+    }
+    .fmt-6060 .qm-valor-validade {
+      font-size: 9.5pt;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      line-height: 1.05;
+    }
+    .fmt-6060 .bloco-qr-6060 { gap: 0; }
     .rodape {
       margin-top: 1mm;
       display: flex;
@@ -427,7 +686,14 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       word-break: break-all;
     }
     .lote { margin-top: 0.35mm; font-size: 5pt; font-weight: 700; color: #222; }
-    .qr { width: ${cfg.qrSizeMm}mm; height: ${cfg.qrSizeMm}mm; object-fit: contain; }
+    .bloco-qr {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      gap: 0.35mm;
+    }
+    .qr { width: ${cfg.qrSizeMm}mm; height: ${cfg.qrSizeMm}mm; object-fit: contain; display: block; }
   `;
 }
 

@@ -313,3 +313,143 @@ export async function receberTransferencia(
 
   return { divergencias };
 }
+
+const STATUS_REMESSA_EDITAVEL = new Set(['AWAITING_ACCEPT', 'ACCEPTED']);
+
+/**
+ * Cancela uma separação matriz → loja ainda **não despachada**: remove transferência, vínculos,
+ * marca etiquetas do lote `SEP-…` como excluídas e apaga a viagem se ficar órfã.
+ * Só permitido com todas as unidades ainda **EM_ESTOQUE** na origem.
+ */
+export async function cancelarRemessaMatrizParaLoja(
+  transferenciaId: string,
+  usuarioId: string
+): Promise<void> {
+  const { data: tr, error: e1 } = await supabase
+    .from('transferencias')
+    .select('id, tipo, status, origem_id, destino_id, viagem_id')
+    .eq('id', transferenciaId)
+    .single();
+  if (e1) throw e1;
+  if (!tr) throw new Error('Transferência não encontrada');
+  if (tr.tipo !== 'WAREHOUSE_STORE') {
+    throw new Error('Somente remessas indústria → loja podem ser canceladas por este fluxo');
+  }
+  if (!STATUS_REMESSA_EDITAVEL.has(tr.status)) {
+    throw new Error(
+      'Só é possível cancelar remessas em «Aguardando aceite» ou «Aceita» (antes do despacho / trânsito).'
+    );
+  }
+
+  const { data: titens, error: e2 } = await supabase
+    .from('transferencia_itens')
+    .select('item_id')
+    .eq('transferencia_id', transferenciaId);
+  if (e2) throw e2;
+  const itemIds = (titens || []).map((r) => r.item_id as string).filter(Boolean);
+  if (itemIds.length === 0) throw new Error('Remessa sem itens');
+
+  const { data: itensRows, error: e3 } = await supabase
+    .from('itens')
+    .select('id, estado, local_atual_id')
+    .in('id', itemIds);
+  if (e3) throw e3;
+  const invalido = (itensRows || []).find(
+    (row) => row.estado !== 'EM_ESTOQUE' || row.local_atual_id !== tr.origem_id
+  );
+  if (invalido) {
+    throw new Error(
+      'Não é possível cancelar: há unidade já despachada, recebida ou fora da indústria de origem.'
+    );
+  }
+
+  const viagemId = tr.viagem_id as string | null;
+  let loteSep: string | null = null;
+  if (viagemId) {
+    loteSep = `SEP-${viagemId}`;
+    const { count, error: cErr } = await supabase
+      .from('transferencias')
+      .select('id', { count: 'exact', head: true })
+      .eq('viagem_id', viagemId);
+    if (cErr) throw cErr;
+    const apenasEsta = (count ?? 0) <= 1;
+
+    const { error: eEt } = await supabase.from('etiquetas').update({ excluida: true }).eq('lote', loteSep);
+    if (eEt) throw eEt;
+
+    const { error: eDel } = await supabase.from('transferencias').delete().eq('id', transferenciaId);
+    if (eDel) throw eDel;
+
+    if (apenasEsta && viagemId) {
+      const { error: eV } = await supabase.from('viagens').delete().eq('id', viagemId);
+      if (eV) throw eV;
+    }
+  } else {
+    const { error: eDel } = await supabase.from('transferencias').delete().eq('id', transferenciaId);
+    if (eDel) throw eDel;
+  }
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: tr.origem_id as string,
+    acao: 'CANCELAR_REMESSA_MATRIZ_LOJA',
+    origem_id: tr.origem_id as string,
+    destino_id: tr.destino_id as string,
+    detalhes: {
+      transferencia_id: transferenciaId,
+      viagem_id: viagemId,
+      lote_sep: loteSep,
+      qtd_itens: itemIds.length,
+    },
+  });
+}
+
+/** Troca a loja de destino enquanto a remessa ainda não foi despachada. */
+export async function alterarDestinoRemessaMatrizParaLoja(
+  transferenciaId: string,
+  novoDestinoId: string,
+  usuarioId: string
+): Promise<void> {
+  const { data: tr, error: e1 } = await supabase
+    .from('transferencias')
+    .select('id, tipo, status, origem_id, destino_id')
+    .eq('id', transferenciaId)
+    .single();
+  if (e1) throw e1;
+  if (!tr) throw new Error('Transferência não encontrada');
+  if (tr.tipo !== 'WAREHOUSE_STORE') {
+    throw new Error('Somente remessas indústria → loja');
+  }
+  if (!STATUS_REMESSA_EDITAVEL.has(tr.status)) {
+    throw new Error('Só é possível alterar o destino antes do despacho (trânsito).');
+  }
+
+  const destinoIdTrim = novoDestinoId.trim();
+  if (!destinoIdTrim) throw new Error('Selecione a loja de destino');
+  if (destinoIdTrim === tr.destino_id) return;
+
+  const { data: loc, error: eL } = await supabase.from('locais').select('id, tipo').eq('id', destinoIdTrim).single();
+  if (eL) throw eL;
+  if (!loc || loc.tipo !== 'STORE') {
+    throw new Error('O destino deve ser uma loja (STORE)');
+  }
+
+  const { error: eU } = await supabase
+    .from('transferencias')
+    .update({ destino_id: destinoIdTrim })
+    .eq('id', transferenciaId);
+  if (eU) throw eU;
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: tr.origem_id as string,
+    acao: 'ALTERAR_DESTINO_REMESSA_MATRIZ_LOJA',
+    origem_id: tr.origem_id as string,
+    destino_id: destinoIdTrim,
+    detalhes: {
+      transferencia_id: transferenciaId,
+      destino_anterior_id: tr.destino_id,
+      destino_novo_id: destinoIdTrim,
+    },
+  });
+}

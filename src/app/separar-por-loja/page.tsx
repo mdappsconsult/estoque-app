@@ -2,17 +2,37 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Truck, Loader2, QrCode, CheckCircle, X, Wand2, Printer, FileDown, Server, Plus, RefreshCw } from 'lucide-react';
+import {
+  Truck,
+  Loader2,
+  QrCode,
+  CheckCircle,
+  X,
+  Wand2,
+  Printer,
+  FileDown,
+  Server,
+  Plus,
+  RefreshCw,
+  Package,
+  PencilLine,
+  Trash2,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
+import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { useAuth } from '@/hooks/useAuth';
 import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
-import { criarTransferencia } from '@/lib/services/transferencias';
+import {
+  alterarDestinoRemessaMatrizParaLoja,
+  cancelarRemessaMatrizParaLoja,
+  criarTransferencia,
+} from '@/lib/services/transferencias';
 import { criarViagem } from '@/lib/services/viagens';
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
 import { getResumoEstoqueAgrupado, type ResumoEstoqueRow } from '@/lib/services/estoque-resumo';
@@ -38,6 +58,10 @@ import {
   type UltimaRemessaImpressao,
 } from '@/lib/separacao/ultima-remessa-storage';
 import { supabase } from '@/lib/supabase';
+import {
+  buscarEnviosRecentesMatrizParaLojas,
+  type EnvioMatrizLojaResumo,
+} from '@/lib/services/envios-matriz-lojas';
 import { Local } from '@/types/database';
 
 interface ItemEscaneado {
@@ -58,6 +82,31 @@ interface ResumoReposicaoTela {
   disponivel_origem: number;
 }
 
+/** Estoque na origem (modo manual): inclui origem do cadastro para filtrar insumos de compra. */
+type LinhaEstoqueOrigemManual = ResumoEstoqueRow & { origemProduto: string | null };
+
+function chunkIds<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+const LABEL_STATUS_ENVIO: Record<string, string> = {
+  AWAITING_ACCEPT: 'Aguardando aceite',
+  ACCEPTED: 'Aceita',
+  IN_TRANSIT: 'Em trânsito',
+  DELIVERED: 'Entregue',
+  DIVERGENCE: 'Divergência',
+};
+
+function legivelStatusEnvio(s: string): string {
+  return LABEL_STATUS_ENVIO[s] ?? s;
+}
+
+function remessaPermiteEditarOuExcluir(status: string): boolean {
+  return status === 'AWAITING_ACCEPT' || status === 'ACCEPTED';
+}
+
 /** Impressão / guia antes de «Criar separação» pode gerar QR que não bate com `transferencia_itens`. */
 const AVISO_IMPRESSAO_ANTES_DA_SEPARACAO =
   'No recebimento da loja, o QR só é aceito se a unidade estiver na transferência. O fluxo recomendado é confirmar «Criar separação» e imprimir quando o sistema oferecer (mesma lista da remessa).\n\n' +
@@ -66,7 +115,8 @@ const AVISO_IMPRESSAO_ANTES_DA_SEPARACAO =
 
 function montarEtiquetasSeparacaoParaImpressao(
   itens: ItemEscaneado[],
-  ctx: { lote: string; nomeLoja: string; responsavel: string; agoraIso: string }
+  ctx: { lote: string; nomeLoja: string; responsavel: string; agoraIso: string },
+  numerosPorItemId?: Map<string, number | null> | null
 ): EtiquetaParaImpressao[] {
   return itens.map((item) => ({
     id: item.id,
@@ -79,6 +129,7 @@ function montarEtiquetasSeparacaoParaImpressao(
     responsavel: ctx.responsavel,
     nomeLoja: ctx.nomeLoja,
     dataGeracaoIso: ctx.agoraIso,
+    numeroSequenciaLoja: numerosPorItemId?.get(item.id) ?? null,
   }));
 }
 
@@ -128,13 +179,90 @@ export default function SepararPorLojaPage() {
   const [ultimaRemessa, setUltimaRemessa] = useState<UltimaRemessaImpressao | null>(null);
   const focarUltimaRemessaAposCriar = useRef(false);
   const reposicaoSyncEpoch = useRef(0);
-  const [estoqueOrigemManual, setEstoqueOrigemManual] = useState<ResumoEstoqueRow[]>([]);
+  const [linhasEstoqueOrigemManual, setLinhasEstoqueOrigemManual] = useState<LinhaEstoqueOrigemManual[]>([]);
+  /** Insumos de fornecedor (origem COMPRA) ficam ocultos no manual até marcar isto — foco em acabados (PRODUCAO/AMBOS). */
+  const [incluirCompraNoManual, setIncluirCompraNoManual] = useState(false);
   const [carregandoEstoqueOrigem, setCarregandoEstoqueOrigem] = useState(false);
   const [buscaEstoqueManual, setBuscaEstoqueManual] = useState('');
   const [qtdPorProdutoManual, setQtdPorProdutoManual] = useState<Record<string, string>>({});
   const [adicionandoProdutoId, setAdicionandoProdutoId] = useState<string | null>(null);
   const buscaEstoqueManualRef = useRef(buscaEstoqueManual);
   buscaEstoqueManualRef.current = buscaEstoqueManual;
+
+  const [enviosRegistrados, setEnviosRegistrados] = useState<EnvioMatrizLojaResumo[]>([]);
+  const [carregandoEnvios, setCarregandoEnvios] = useState(false);
+  const [erroEnvios, setErroEnvios] = useState('');
+  const [envioEditando, setEnvioEditando] = useState<EnvioMatrizLojaResumo | null>(null);
+  const [destinoModalRemessa, setDestinoModalRemessa] = useState('');
+  const [remessaEmAcaoId, setRemessaEmAcaoId] = useState<string | null>(null);
+
+  const carregarEnviosRegistrados = useCallback(async () => {
+    if (!origemId) {
+      setEnviosRegistrados([]);
+      setErroEnvios('');
+      return;
+    }
+    setCarregandoEnvios(true);
+    setErroEnvios('');
+    try {
+      const lista = await buscarEnviosRecentesMatrizParaLojas({
+        origemId,
+        destinoId: destinoId.trim() || undefined,
+        limiteTransferencias: 28,
+      });
+      setEnviosRegistrados(lista);
+    } catch (err: unknown) {
+      setEnviosRegistrados([]);
+      setErroEnvios(err instanceof Error ? err.message : 'Não foi possível carregar os envios');
+    } finally {
+      setCarregandoEnvios(false);
+    }
+  }, [origemId, destinoId]);
+
+  useEffect(() => {
+    void carregarEnviosRegistrados();
+  }, [carregarEnviosRegistrados]);
+
+  const salvarNovoDestinoRemessa = async () => {
+    if (!usuario || !envioEditando) return;
+    setRemessaEmAcaoId(envioEditando.transferencia_id);
+    try {
+      await alterarDestinoRemessaMatrizParaLoja(
+        envioEditando.transferencia_id,
+        destinoModalRemessa,
+        usuario.id
+      );
+      setEnvioEditando(null);
+      await carregarEnviosRegistrados();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Não foi possível alterar o destino');
+    } finally {
+      setRemessaEmAcaoId(null);
+    }
+  };
+
+  const excluirRemessaConfirmado = async (env: EnvioMatrizLojaResumo) => {
+    if (!usuario) {
+      alert('Faça login');
+      return;
+    }
+    const msg =
+      `Cancelar esta remessa?\n\n` +
+      `${env.origem_nome} → ${env.destino_nome}\n` +
+      `${env.qtd_unidades} unidade(s)\n${env.resumo_produtos}\n\n` +
+      `A transferência será apagada e as etiquetas do lote ${env.lote_sep ?? '—'} ficam excluídas no sistema. ` +
+      `As unidades (QR) permanecem em estoque na indústria.`;
+    if (!window.confirm(msg)) return;
+    setRemessaEmAcaoId(env.transferencia_id);
+    try {
+      await cancelarRemessaMatrizParaLoja(env.transferencia_id, usuario.id);
+      await carregarEnviosRegistrados();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Não foi possível cancelar a remessa');
+    } finally {
+      setRemessaEmAcaoId(null);
+    }
+  };
 
   /** Busca faltantes da loja + disponível na origem (sem alterar estado de loading). */
   const loadResumoReposicaoData = useCallback(async (): Promise<ResumoReposicaoTela[]> => {
@@ -292,6 +420,14 @@ export default function SepararPorLojaPage() {
     return m;
   }, [itensEscaneados]);
 
+  const estoqueOrigemManual = useMemo(
+    () =>
+      linhasEstoqueOrigemManual.filter(
+        (r) => incluirCompraNoManual || r.origemProduto !== 'COMPRA'
+      ),
+    [linhasEstoqueOrigemManual, incluirCompraNoManual]
+  );
+
   const carregarEstoqueOrigemManual = useCallback(async () => {
     if (!origemId) return;
     setCarregandoEstoqueOrigem(true);
@@ -302,9 +438,24 @@ export default function SepararPorLojaPage() {
         localId: origemId,
         busca: buscaEstoqueManualRef.current.trim() || null,
       });
-      setEstoqueOrigemManual(rows.filter((r) => r.quantidade > 0));
+      const positivos = rows.filter((r) => r.quantidade > 0);
+      const ids = [...new Set(positivos.map((r) => r.produto_id))];
+      const origemMap = new Map<string, string>();
+      for (const part of chunkIds(ids, 500)) {
+        const { data: prods, error: pe } = await supabase
+          .from('produtos')
+          .select('id, origem')
+          .in('id', part);
+        if (pe) throw pe;
+        (prods || []).forEach((p: { id: string; origem: string }) => origemMap.set(p.id, p.origem));
+      }
+      const merged: LinhaEstoqueOrigemManual[] = positivos.map((r) => ({
+        ...r,
+        origemProduto: origemMap.get(r.produto_id) ?? null,
+      }));
+      setLinhasEstoqueOrigemManual(merged);
     } catch (err: unknown) {
-      setEstoqueOrigemManual([]);
+      setLinhasEstoqueOrigemManual([]);
       setErro(err instanceof Error ? err.message : 'Não foi possível carregar o estoque na origem.');
     } finally {
       setCarregandoEstoqueOrigem(false);
@@ -451,31 +602,46 @@ export default function SepararPorLojaPage() {
   const upsertEMontarEtiquetasImpressaoSeparacao = async (
     itens: ItemEscaneado[],
     lote: string,
-    nomeLojaDestino: string
+    nomeLojaDestino: string,
+    destinoLocalId: string | null | undefined
   ): Promise<EtiquetaParaImpressao[]> => {
-    await upsertEtiquetasSeparacaoLoja(
+    const numeros = await upsertEtiquetasSeparacaoLoja(
       itens.map((item) => ({
         id: item.id,
         produto_id: item.produto_id,
         data_validade: item.data_validade,
       })),
-      { lote, mode: 'impresso_agora' }
+      {
+        lote,
+        mode: 'impresso_agora',
+        local_destino_id: destinoLocalId?.trim() || null,
+      }
     );
     const agora = new Date().toISOString();
-    return montarEtiquetasSeparacaoParaImpressao(itens, {
-      lote,
-      nomeLoja: nomeLojaDestino,
-      responsavel: usuario?.nome || 'OPERADOR',
-      agoraIso: agora,
-    });
+    return montarEtiquetasSeparacaoParaImpressao(
+      itens,
+      {
+        lote,
+        nomeLoja: nomeLojaDestino,
+        responsavel: usuario?.nome || 'OPERADOR',
+        agoraIso: agora,
+      },
+      numeros
+    );
   };
 
   const executarUpsertEAbrirJanelaEtiquetas = async (
     itens: ItemEscaneado[],
     lote: string,
-    nomeLojaDestino: string
+    nomeLojaDestino: string,
+    destinoLocalId: string | null | undefined
   ) => {
-    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(itens, lote, nomeLojaDestino);
+    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(
+      itens,
+      lote,
+      nomeLojaDestino,
+      destinoLocalId
+    );
     const abriu = await imprimirEtiquetasEmJobUnico(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
     if (!abriu) {
       throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
@@ -486,9 +652,15 @@ export default function SepararPorLojaPage() {
     itens: ItemEscaneado[],
     lote: string,
     nomeLojaDestino: string,
+    destinoLocalId: string | null | undefined,
     conn: PiPrintConnection
   ) => {
-    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(itens, lote, nomeLojaDestino);
+    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(
+      itens,
+      lote,
+      nomeLojaDestino,
+      destinoLocalId
+    );
     const html = await gerarDocumentoHtmlEtiquetas(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
     await enviarHtmlParaPiPrintBridge(html, { jobName: lote, connection: conn });
   };
@@ -501,7 +673,12 @@ export default function SepararPorLojaPage() {
     const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     setImprimindoEtiquetas(true);
     try {
-      await executarUpsertEAbrirJanelaEtiquetas(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino);
+      await executarUpsertEAbrirJanelaEtiquetas(
+        itensEscaneados,
+        'SEPARACAO-LOJA',
+        nomeLojaDestino,
+        destinoId || null
+      );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
     } finally {
@@ -523,7 +700,13 @@ export default function SepararPorLojaPage() {
     const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
     setImprimindoEtiquetas(true);
     try {
-      await executarUpsertEImprimirPi(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino, piConnection);
+      await executarUpsertEImprimirPi(
+        itensEscaneados,
+        'SEPARACAO-LOJA',
+        nomeLojaDestino,
+        destinoId || null,
+        piConnection
+      );
       alert('Etiquetas enviadas para impressão na estação (Raspberry / Zebra).');
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
@@ -553,6 +736,7 @@ export default function SepararPorLojaPage() {
         ultimaRemessa.itens,
         ultimaRemessa.lote,
         ultimaRemessa.nomeLoja,
+        ultimaRemessa.destinoLocalId ?? null,
         piConnection
       );
       alert(
@@ -574,7 +758,8 @@ export default function SepararPorLojaPage() {
       await executarUpsertEAbrirJanelaEtiquetas(
         ultimaRemessa.itens,
         ultimaRemessa.lote,
-        ultimaRemessa.nomeLoja
+        ultimaRemessa.nomeLoja,
+        ultimaRemessa.destinoLocalId ?? null
       );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao abrir impressão da remessa');
@@ -611,7 +796,12 @@ export default function SepararPorLojaPage() {
         emitidoEmIso: emitidoEm,
       });
       await new Promise((r) => setTimeout(r, 400));
-      await executarUpsertEAbrirJanelaEtiquetas(itensEscaneados, 'SEPARACAO-LOJA', nomeLojaDestino);
+      await executarUpsertEAbrirJanelaEtiquetas(
+        itensEscaneados,
+        'SEPARACAO-LOJA',
+        nomeLojaDestino,
+        destinoId || null
+      );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Falha ao gerar guia ou imprimir etiquetas');
     } finally {
@@ -634,13 +824,13 @@ export default function SepararPorLojaPage() {
       const viagem = await criarViagem({ status: 'PENDING' });
       const loteEtiqueta = `SEP-${viagem.id}`;
 
-      await upsertEtiquetasSeparacaoLoja(
+      const numerosAposUpsert = await upsertEtiquetasSeparacaoLoja(
         snapshotItens.map((item) => ({
           id: item.id,
           produto_id: item.produto_id,
           data_validade: item.data_validade,
         })),
-        { lote: loteEtiqueta, mode: 'manter_impressa_se_existir' }
+        { lote: loteEtiqueta, mode: 'manter_impressa_se_existir', local_destino_id: destinoId }
       );
 
       await criarTransferencia(
@@ -658,6 +848,7 @@ export default function SepararPorLojaPage() {
       const payloadRemessa: UltimaRemessaImpressao = {
         lote: loteEtiqueta,
         nomeLoja: nomeLojaDestino,
+        destinoLocalId: destinoId,
         itens: snapshotItens,
       };
       focarUltimaRemessaAposCriar.current = true;
@@ -676,15 +867,25 @@ export default function SepararPorLojaPage() {
         try {
           if (piPrintAvailable && piConnection) {
             try {
-              await executarUpsertEImprimirPi(snapshotItens, loteEtiqueta, nomeLojaDestino, piConnection);
+              await executarUpsertEImprimirPi(
+                snapshotItens,
+                loteEtiqueta,
+                nomeLojaDestino,
+                destinoId,
+                piConnection
+              );
             } catch (piErr: unknown) {
               const agora = new Date().toISOString();
-              const etiquetasFallback = montarEtiquetasSeparacaoParaImpressao(snapshotItens, {
-                lote: loteEtiqueta,
-                nomeLoja: nomeLojaDestino,
-                responsavel: usuario?.nome || 'OPERADOR',
-                agoraIso: agora,
-              });
+              const etiquetasFallback = montarEtiquetasSeparacaoParaImpressao(
+                snapshotItens,
+                {
+                  lote: loteEtiqueta,
+                  nomeLoja: nomeLojaDestino,
+                  responsavel: usuario?.nome || 'OPERADOR',
+                  agoraIso: agora,
+                },
+                numerosAposUpsert
+              );
               const abriu = await imprimirEtiquetasEmJobUnico(etiquetasFallback, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
               if (!abriu) throw piErr;
               alert(
@@ -692,7 +893,12 @@ export default function SepararPorLojaPage() {
               );
             }
           } else {
-            await executarUpsertEAbrirJanelaEtiquetas(snapshotItens, loteEtiqueta, nomeLojaDestino);
+            await executarUpsertEAbrirJanelaEtiquetas(
+              snapshotItens,
+              loteEtiqueta,
+              nomeLojaDestino,
+              destinoId
+            );
           }
         } catch (err: unknown) {
           alert(err instanceof Error ? err.message : 'Falha ao abrir impressão das etiquetas da remessa');
@@ -817,6 +1023,7 @@ export default function SepararPorLojaPage() {
             setOrigemId(e.target.value);
             setResumoReposicao([]);
             setMensagemReposicao('');
+            setEnviosRegistrados([]);
           }}
         />
         <Select
@@ -831,6 +1038,175 @@ export default function SepararPorLojaPage() {
           }}
         />
       </div>
+
+      {!origemId && (
+        <p className="text-xs text-gray-600 mb-4 leading-relaxed px-1">
+          Depois de escolher a <strong>origem (indústria)</strong>, aparece abaixo o histórico do que já foi{' '}
+          <strong>enviado para as lojas</strong> (ex.: baldes de açaí para a JK) — produtos e quantidades por remessa.
+        </p>
+      )}
+
+      {origemId && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-4 mb-6 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex items-start gap-2 min-w-0">
+              <Package className="w-5 h-5 text-sky-700 shrink-0 mt-0.5" aria-hidden />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-sky-950">Envios já registrados (indústria → loja)</p>
+                <p className="text-xs text-sky-900/90 mt-0.5 leading-relaxed">
+                  Lista do Supabase: separações criadas a partir desta <strong>origem</strong>
+                  {destinoId ? (
+                    <>
+                      {' '}
+                      para <strong>{lojas.find((l) => l.id === destinoId)?.nome ?? 'loja selecionada'}</strong>
+                    </>
+                  ) : (
+                    <> para qualquer loja</>
+                  )}
+                  . Cada linha é uma remessa com produtos (unidades) enviados.{' '}
+                  <strong>Editar destino</strong> e <strong>Excluir</strong> só aparecem em «Aguardando aceite» ou «Aceita»
+                  (antes do despacho).
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void carregarEnviosRegistrados()}
+              disabled={carregandoEnvios}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2.5 py-1.5 hover:bg-sky-100 disabled:opacity-50 shrink-0"
+            >
+              {carregandoEnvios ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              Atualizar
+            </button>
+          </div>
+
+          {erroEnvios && (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{erroEnvios}</p>
+          )}
+
+          {carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
+            <div className="flex items-center gap-2 text-xs text-sky-800 py-2">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              Carregando envios…
+            </div>
+          )}
+
+          {!carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
+            <p className="text-xs text-sky-900 py-1">
+              Nenhuma separação matriz → loja encontrada para este filtro. Crie uma com <strong>Criar separação</strong>{' '}
+              abaixo.
+            </p>
+          )}
+
+          {enviosRegistrados.length > 0 && (
+            <ul className="space-y-2 max-h-[min(24rem,58vh)] overflow-y-auto text-xs border border-sky-100 rounded-lg bg-white/90 p-2">
+              {enviosRegistrados.map((env) => (
+                <li
+                  key={env.transferencia_id}
+                  className="border-b border-sky-100 last:border-0 pb-2 last:pb-0 text-sky-950"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-1">
+                    <span className="font-semibold">
+                      {env.origem_nome} → {env.destino_nome}
+                    </span>
+                    <span className="text-[11px] text-sky-700">
+                      {new Date(env.created_at).toLocaleString('pt-BR', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-sky-800 mt-0.5">
+                    {legivelStatusEnvio(env.status)} · <strong>{env.qtd_unidades}</strong> unidade(s)
+                  </p>
+                  <p className="text-[11px] text-sky-900 mt-1 leading-snug">{env.resumo_produtos}</p>
+                  {env.lote_sep && (
+                    <p className="text-[10px] text-sky-700 mt-1">
+                      Lote etiquetas:{' '}
+                      <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code> — imprimir em{' '}
+                      <Link href="/etiquetas" className="font-semibold text-sky-800 underline underline-offset-2">
+                        Etiquetas
+                      </Link>
+                    </p>
+                  )}
+                  {remessaPermiteEditarOuExcluir(env.status) && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        type="button"
+                        disabled={remessaEmAcaoId !== null}
+                        onClick={() => {
+                          setEnvioEditando(env);
+                          setDestinoModalRemessa(env.destino_id);
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
+                      >
+                        <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                        Editar destino
+                      </button>
+                      <button
+                        type="button"
+                        disabled={remessaEmAcaoId !== null}
+                        onClick={() => void excluirRemessaConfirmado(env)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
+                      >
+                        {remessaEmAcaoId === env.transferencia_id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                        )}
+                        Excluir remessa
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <Modal
+        isOpen={Boolean(envioEditando)}
+        onClose={() => !remessaEmAcaoId && setEnvioEditando(null)}
+        title="Alterar loja de destino"
+        subtitle={
+          envioEditando
+            ? `${envioEditando.origem_nome} → ${envioEditando.destino_nome} · ${envioEditando.qtd_unidades} unidade(s)`
+            : undefined
+        }
+        size="sm"
+      >
+        <div className="space-y-4">
+          <Select
+            label="Novo destino (loja)"
+            value={destinoModalRemessa}
+            onChange={(e) => setDestinoModalRemessa(e.target.value)}
+            options={lojas.map((l) => ({ value: l.id, label: l.nome }))}
+          />
+          <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
+            <Button type="button" variant="outline" disabled={remessaEmAcaoId !== null} onClick={() => setEnvioEditando(null)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={
+                remessaEmAcaoId !== null ||
+                !destinoModalRemessa ||
+                (envioEditando !== null && destinoModalRemessa === envioEditando.destino_id)
+              }
+              onClick={() => void salvarNovoDestinoRemessa()}
+            >
+              {remessaEmAcaoId ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Salvar
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {origemId && destinoId && (
         <>
@@ -850,6 +1226,7 @@ export default function SepararPorLojaPage() {
                   setResumoReposicao([]);
                   setMensagemReposicao('');
                   setErro('');
+                  setIncluirCompraNoManual(false);
                 }}
               >
                 Modo manual
@@ -938,6 +1315,18 @@ export default function SepararPorLojaPage() {
                   QR quando o sistema oferecer. Scanner e digitação servem quando a unidade <strong>já</strong> tiver QR
                   legível (reimpressão, conferência, outro cenário).
                 </p>
+                <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-gray-300"
+                    checked={incluirCompraNoManual}
+                    onChange={(e) => setIncluirCompraNoManual(e.target.checked)}
+                  />
+                  <span>
+                    Mostrar também produtos <strong>só de compra</strong> (fornecedor) — polpas e outros insumos
+                    costumam ficar ocultos aqui; use quando for enviar à loja mercadoria comprada, não só acabado.
+                  </span>
+                </label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <div className="flex-1 min-w-0">
                     <Input
@@ -969,9 +1358,18 @@ export default function SepararPorLojaPage() {
                     Carregando estoque na origem…
                   </p>
                 )}
-                {!carregandoEstoqueOrigem && estoqueOrigemManual.length === 0 && (
-                  <p className="text-xs text-gray-500">Nenhum produto com saldo na origem (com o filtro atual).</p>
-                )}
+                {!carregandoEstoqueOrigem &&
+                  linhasEstoqueOrigemManual.length === 0 && (
+                    <p className="text-xs text-gray-500">Nenhum produto com saldo na origem (com o filtro atual).</p>
+                  )}
+                {!carregandoEstoqueOrigem &&
+                  linhasEstoqueOrigemManual.length > 0 &&
+                  estoqueOrigemManual.length === 0 && (
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Todos os produtos com saldo na origem são de <strong>compra</strong> (fornecedor). Para listar
+                      polpas e similares, marque a opção acima; acabados de <strong>produção</strong> aparecem sem ela.
+                    </p>
+                  )}
                 {estoqueOrigemManual.length > 0 && (
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <div className="max-h-64 overflow-y-auto">

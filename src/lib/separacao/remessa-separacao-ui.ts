@@ -37,7 +37,7 @@ export function formatarDataRemessaPt(iso: string): string {
 }
 
 const STATUS_TRANSFERENCIA_PT: Record<string, string> = {
-  AWAITING_ACCEPT: 'Aguardando motorista',
+  AWAITING_ACCEPT: 'Aguardando aceite',
   ACCEPTED: 'Aceita',
   IN_TRANSIT: 'Em trânsito',
   DELIVERED: 'Entregue',
@@ -63,6 +63,8 @@ export function resumoProdutosRemessa<T extends LinhaComNomeProduto>(rows: T[], 
 export type MetaTransferenciaRemessa = {
   origemNome: string;
   destinoNome: string;
+  /** UUID do local STORE de destino (para RPC de sequência de balde na impressão). */
+  destinoLocalId?: string | null;
   createdAt: string;
   status: string;
 };

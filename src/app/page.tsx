@@ -2,7 +2,7 @@
 
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
-  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer, Factory
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -49,6 +49,14 @@ const features: HomeFeature[] = [
   { title: 'Produtos', description: 'Cadastro.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/produtos' },
   { title: 'Tipos de Embalagem', description: 'Caixa, balde, pote etc.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/embalagens' },
   { title: 'Reposição de estoque por loja', description: 'Mínimos por loja (só produtos de escopo loja).', icon: Store, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/cadastros/reposicao-loja' },
+  {
+    title: 'Cadastros — Indústria',
+    description: 'O que mudou hoje no banco para as lojas; links para editar.',
+    icon: Factory,
+    iconBg: 'bg-violet-100',
+    iconColor: 'text-violet-700',
+    href: '/cadastros/industria',
+  },
   { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
   { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
@@ -81,7 +89,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
     },
   ],
   MANAGER: [
@@ -104,13 +112,13 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Cadastros',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
+      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
     },
   ],
   OPERATOR_WAREHOUSE: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/cadastros/industria', '/qrcode'],
     },
     {
       title: 'Transporte',
@@ -124,7 +132,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE_DRIVER: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/cadastros/industria', '/qrcode'],
     },
     {
       title: 'Transporte',

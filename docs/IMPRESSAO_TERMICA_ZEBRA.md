@@ -103,7 +103,26 @@ Sem calibração, a impressora **não sabe** onde termina cada etiqueta.
 - O layout 60×30 usa **`display: table` / `table-cell`** com metades em **mm fixos** (em vez de flex), para drivers térmicos não deslocarem tudo para um canto da etiqueta.
 - O QR é gerado **no navegador** (biblioteca `qrcode`, PNG em data URL) — **não** depende de serviço externo na hora de imprimir.
 
-## 5. Se ainda falhar
+## 5. Indústria — 60×60 mm (tela **Produção**)
+
+A tela **Produção** usa **uma etiqueta por página** em **60 mm × 60 mm**, com layout “legado” (produto, manipulação, validade, responsável, lote, QR maior). É **diferente** do envio matriz → loja (60×30 com dois QRs).
+
+### Driver / diálogo de impressão
+
+- Crie um **stock** ou tamanho personalizado **60 mm × largura × 60 mm altura** (mídia com **gap** de 60×60, se for o rolo que você usa na indústria).
+- **Escala 100%**, sem cabeçalhos/rodapés, margens mínimas — igual ao fluxo 60×30.
+
+### Raspberry Pi + CUPS (`pi-print-ws`)
+
+O serviço envia HTML com `@page { size: 60mm 60mm }` e **`preferCSSPageSize: true`**, então o Chromium gera PDF no tamanho certo. Ainda assim a **fila CUPS** e o **PPD da Zebra** precisam aceitar esse tamanho:
+
+1. Na interface CUPS (`http://IP-DO-PI:631`) → **Administration** → **Manage Printers** → sua Zebra → **Set Default Options** (ou **Modify Printer**).
+2. Em **Media Size** / **Label**, escolha **60×60 mm** se existir, ou crie **Custom** com **60 × 60 mm** (conforme o driver `zebra.ppd` / Zebra Universal).
+3. Se você mantiver **duas filas** no mesmo Pi (ex.: `Zebra60x30` e `Zebra60x60`), defina `CUPS_QUEUE` no `.env` da **ponte indústria** para a fila que está calibrada em **60×60**.
+
+Guia operacional do segundo Pi: `docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`.
+
+## 6. Se ainda falhar
 
 - Testar outro navegador (às vezes **Firefox** ou outro trata `@page` diferente).
 - Gerar **PDF** “Salvar como PDF” com tamanho custom 60×30 e enviar ao utilitário Zebra, se o fluxo do seu ambiente permitir.
