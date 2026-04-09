@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Etiquetas: padrão 60×60 e aviso SEP vs mídia quadrada
+- **Problema:** impressão em adesivo **60×60** com formato **60×30** no app → PDF **60×30** (duas meias); na Zebra parecia **faixa 30×60** e metade do adesivo vazio.
+- **Mudança:** padrão de formato **60×60** (estado inicial + `localStorage` inválido + `obterFormatoImpressaoPadrao`); rótulo do 60×30 deixa claro que não é para adesivo quadrado inteiro; banner âmbar em remessa **SEP-…** quando 60×30 estiver selecionado.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-08 - Pi `pi-print-ws`: padrão de folha 60×60 mm (não 60×30)
 - **Problema:** com fallback antigo **60×30** no `server.mjs`, impressão em mídia **60×60** saía como meia etiqueta preenchida e metade vazia.
 - **Mudança:** defaults **60×60**; variáveis **`PRINT_DEFAULT_WIDTH_MM`** / **`PRINT_DEFAULT_HEIGHT_MM`** para Pi só de separação 60×30; `env.example` em `scripts/pi-print-ws/`; cliente WebSocket sem `formatoEtiquetaPdf` passa a enviar **60×60** por padrão.

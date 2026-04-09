@@ -250,7 +250,7 @@ export default function EtiquetasPage() {
   });
 
   const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'impressas'>('pendentes');
-  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x30');
+  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x60');
   /** 60×60 prefere ponte indústria; se não houver URL/linha no banco, usa a ponte estoque (um único Pi). */
   const papelPiEtiquetas = formatoImpressao === '60x60' ? 'industria' : 'estoque';
   const piEstoque = usePiPrintBridgeConfig({ papel: 'estoque' });
@@ -710,13 +710,21 @@ export default function EtiquetasPage() {
         </div>
       </div>
 
+      {loteSelecionado?.startsWith('SEP-') && formatoImpressao === '60x30' && (
+        <div className="mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+          <strong>Atenção:</strong> o formato <strong>60×30</strong> gera PDF com folha <strong>60 mm de largura × 30 mm
+          de altura</strong> e <strong>duas meias etiquetas</strong> lado a lado. Em adesivo <strong>60×60</strong> a
+          Zebra costuma imprimir só uma faixa (metade vazia ou torta). Para <strong>uma etiqueta por adesivo
+          quadrado</strong>, selecione <strong>60×60 mm</strong> no menu acima.
+        </div>
+      )}
       <p className="mb-2 text-xs text-gray-500">
         O <strong>formato</strong> escolhido vale para <strong>navegador</strong> e para <strong>Zebra / Pi</strong>:
-        <strong> 60×30</strong> usa a ponte <strong>estoque</strong> (2 QR por folha); <strong> 60×60</strong> tenta a
-        ponte <strong>indústria</strong> e, se não estiver configurada, <strong>cai na ponte estoque</strong> (mesmo Pi
-        da separação — confira mídia 60×60 na Zebra). Remessas <code className="text-[10px]">SEP-…</code>{' '}
-        preenchem automaticamente o <strong>nome da loja de destino</strong> na etiqueta. O padrão fica salvo neste
-        aparelho.{' '}
+        <strong> 60×30</strong> = folha baixa com <strong>2 QR</strong> (separação / meia etiqueta); <strong> 60×60</strong>{' '}
+        = <strong>uma etiqueta por folha</strong> (adesivo quadrado). A ponte <strong>60×60</strong> tenta{' '}
+        <strong>indústria</strong> e pode <strong>cair na estoque</strong> (confira mídia na Zebra). Remessas{' '}
+        <code className="text-[10px]">SEP-…</code> preenchem o <strong>nome da loja de destino</strong>. O padrão fica
+        salvo neste aparelho.{' '}
         <Link href="/teste-impressao-etiqueta" className="text-red-600 font-medium underline underline-offset-2">
           Teste de impressão
         </Link>{' '}

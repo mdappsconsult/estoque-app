@@ -28,7 +28,7 @@ export const FORMATO_CONFIG: Record<
   }
 > = {
   '60x30': {
-    label: '60×30 mm — 2 QR por folha (recorte no pontilhado)',
+    label: '60×30 mm — 2 meias etiquetas por folha (não usar em adesivo 60×60 inteiro)',
     widthMm: 60,
     heightMm: 30,
     paddingMm: 0.5,
@@ -83,7 +83,7 @@ function normalizarFormatoImpressao(valor: string | null): FormatoEtiqueta {
   if (valor === '60x30' || valor === '60x60' || valor === '58x40' || valor === '50x30') {
     return valor;
   }
-  return '60x30';
+  return '60x60';
 }
 
 function escaparHtml(valor: string): string {
@@ -326,7 +326,7 @@ function gerarHtmlEtiquetaLegado(
 }
 
 export function obterFormatoImpressaoPadrao(): FormatoEtiqueta {
-  if (typeof window === 'undefined') return '60x30';
+  if (typeof window === 'undefined') return '60x60';
   return normalizarFormatoImpressao(window.localStorage.getItem(FORMATO_IMPRESSAO_STORAGE_KEY));
 }
 
