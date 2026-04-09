@@ -1,5 +1,16 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - BALDE Nº SEP: impressão sem `destino_id` não renumerava
+- **Problema:** após lógica 1..N por lote `SEP-…`, etiquetas ainda saíam 1,1,2,2… se **`garantirNumeros`** não rodava: exigia `destinoLocalId` e o upsert SEP também exigia `destino` — meta da transferência atrasada ou primeira linha errada → `numerosMap` null → HTML usava `numero_sequencia_loja` antigo do banco.
+- **Mudança:** renumerar remessa **SEP-** em `upsertEtiquetasSeparacaoLoja` **sem** depender de `local_destino_id`; **`garantirNumerosSequenciaBaldeAntesImpressao`** sempre chama upsert em lote `SEP-` (só exige lista não vazia). Meta em `/etiquetas`: transferências `WAREHOUSE_STORE` por `viagem_id`, escolhe a **mais recente** por `created_at` quando há várias.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - BALDE Nº remessa SEP: 1..N por lote (fim 1,1,2,2)
+- **Problema:** na JK, etiquetas 60×60 do lote `SEP-…` saíam **BALDE Nº** repetido (1,1,2,2…5,5) em vez de 1..10.
+- **Causa:** dois upserts (ex.: metade da remessa + sync ou impressão parcial) chamavam `reservar_sequencia_balde_loja` com **5** unidades cada — dois blocos **1–5** no contador global.
+- **Mudança:** em `upsertEtiquetasSeparacaoLoja`, lote **`SEP-`** + loja de destino: numerar baldes **só pela remessa** — união de etiquetas ativas do lote + payload, ordenação por `item_id`, **1..N**; **não** usa RPC nesse caminho. Lotes **`SEPARACAO-LOJA`** mantêm RPC global. Itens do payload deduplicados por `id`; `idsPrecisamNumero` legado também deduplicado.
+- **Validação:** `npm run lint`, `npm run build`. **Corrigir dados já gravados:** nova impressão/sync na remessa `SEP-…` regrava `numero_sequencia_loja`.
+
 ### Sessão - 2026-04-08 - JK: 10 unidades vs 5 etiquetas — sync por viagem + anti-duplicata
 - **Problema:** painel Etiquetas mostrava **5** linhas para lote `SEP-…` enquanto o envio indicava **10** baldes; operação precisa das **10** etiquetas para a loja JK.
 - **Causa provável:** (1) **duas transferências** `WAREHOUSE_STORE` na mesma `viagem_id` com itens **espalhados** — a sync antiga só lia **uma** transferência; (2) **mesmo** `item_id` duas vezes em `transferencia_itens` inflava «unidades» no resumo mas só **5** linhas em `etiquetas` (PK = `item_id`).

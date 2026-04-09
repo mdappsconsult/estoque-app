@@ -13,11 +13,37 @@ export type UpsertEtiquetaSeparacaoItem = {
   data_validade?: string | null;
 };
 
+function dedupeItensSeparacao(itens: UpsertEtiquetaSeparacaoItem[]): UpsertEtiquetaSeparacaoItem[] {
+  const m = new Map<string, UpsertEtiquetaSeparacaoItem>();
+  for (const x of itens) {
+    const id = String(x.id || '').trim();
+    if (!id) continue;
+    m.set(id, x);
+  }
+  return [...m.values()];
+}
+
+function validadeItemParaEtiqueta(item: UpsertEtiquetaSeparacaoItem): string {
+  return item.data_validade && String(item.data_validade).trim()
+    ? item.data_validade!
+    : DATA_SENTINELA_SEM_VALIDADE;
+}
+
+type LinhaMergeSep = {
+  produto_id: string;
+  data_validade: string;
+  data_producao: string;
+  impressa: boolean;
+  lote: string;
+};
+
 /**
  * Garante linhas em `etiquetas` (id = id do item) para itens da separação indústria → loja.
  * - `impresso_agora`: marca impressa (fluxo "Imprimir etiquetas").
  * - `manter_impressa_se_existir`: novo registro sai impressa=false; se já existir, não zera impressa=true.
- * - `local_destino_id`: loja de destino; baldes (PRODUCAO/AMBOS + nome com «balde») recebem `numero_sequencia_loja` contínuo por loja.
+ * - `local_destino_id`: loja de destino; em lotes **não-SEP** é obrigatória para novos números via RPC. Em **SEP-…** é opcional (numerar remessa não depende dela).
+ * - Lotes **SEP-…** (remessa por viagem): **BALDE Nº 1..N** por remessa, ordenado por `item_id` (UUID), usando **todas** as etiquetas ativas do lote + o payload — evita 1,1,2,2 quando houve dois upserts que reservaram o mesmo bloco no RPC global.
+ * - Lotes **SEPARACAO-LOJA** (ou outros): sequência **global** por loja via `reservar_sequencia_balde_loja`.
  * Retorna mapa id do item → número exibido na etiqueta (ou null).
  */
 export async function upsertEtiquetasSeparacaoLoja(
@@ -30,10 +56,38 @@ export async function upsertEtiquetasSeparacaoLoja(
   client: SupabaseClient = supabase
 ): Promise<Map<string, number | null>> {
   const numerosPorItemId = new Map<string, number | null>();
-  if (itens.length === 0) return numerosPorItemId;
+  const itensUnicos = dedupeItensSeparacao(itens);
+  if (itensUnicos.length === 0) return numerosPorItemId;
 
-  const ids = itens.map((i) => i.id);
-  const produtoIds = [...new Set(itens.map((i) => i.produto_id))];
+  const loteNorm = options.lote.trim();
+  const isLoteSep = loteNorm.toUpperCase().startsWith('SEP-');
+  const destino = options.local_destino_id?.trim() || null;
+
+  const ids = itensUnicos.map((i) => i.id);
+
+  let etiquetasExistentesNoLote: {
+    id: string;
+    produto_id: string;
+    data_validade: string;
+    data_producao: string;
+    impressa: boolean;
+  }[] = [];
+  if (isLoteSep) {
+    const { data, error } = await client
+      .from('etiquetas')
+      .select('id, produto_id, data_validade, data_producao, impressa')
+      .eq('lote', loteNorm)
+      .eq('excluida', false);
+    if (error) throw error;
+    etiquetasExistentesNoLote = (data || []) as typeof etiquetasExistentesNoLote;
+  }
+
+  const produtoIds = [
+    ...new Set([
+      ...itensUnicos.map((i) => i.produto_id),
+      ...etiquetasExistentesNoLote.map((r) => String(r.produto_id)),
+    ]),
+  ];
 
   const produtosPorId = new Map<string, { origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS'; nome: string }>();
   const chunkProd = 120;
@@ -62,6 +116,76 @@ export async function upsertEtiquetasSeparacaoLoja(
     }
   }
 
+  const itemEhBalde = (produtoId: string) => {
+    const p = produtosPorId.get(produtoId);
+    if (!p) return false;
+    return produtoParticipaSequenciaBaldeLoja(p);
+  };
+
+  const agora = new Date().toISOString();
+
+  if (isLoteSep) {
+    const merge = new Map<string, LinhaMergeSep>();
+    for (const r of etiquetasExistentesNoLote) {
+      merge.set(String(r.id), {
+        produto_id: String(r.produto_id),
+        data_validade: String(r.data_validade),
+        data_producao: String(r.data_producao),
+        impressa: Boolean(r.impressa),
+        lote: loteNorm,
+      });
+    }
+    for (const item of itensUnicos) {
+      const prev = merge.get(item.id);
+      const impressa =
+        options.mode === 'impresso_agora' ? true : impressaPorId.get(item.id) === true;
+      merge.set(item.id, {
+        produto_id: item.produto_id,
+        data_validade: validadeItemParaEtiqueta(item),
+        data_producao: prev?.data_producao ?? agora,
+        impressa,
+        lote: loteNorm,
+      });
+    }
+
+    const baldeIds = [...merge.keys()]
+      .filter((id) => itemEhBalde(merge.get(id)!.produto_id))
+      .sort((a, b) => a.localeCompare(b));
+    const seqPorId = new Map<string, number>();
+    baldeIds.forEach((id, idx) => seqPorId.set(id, idx + 1));
+
+    const rows: EtiquetaInsert[] = [...merge.entries()].map(([id, m]) => ({
+      id,
+      produto_id: m.produto_id,
+      data_producao: m.data_producao,
+      data_validade: m.data_validade,
+      lote: m.lote,
+      impressa: m.impressa,
+      excluida: false,
+      numero_sequencia_loja: itemEhBalde(m.produto_id) ? (seqPorId.get(id) ?? null) : null,
+    }));
+
+    const upsertChunk = 200;
+    for (let i = 0; i < rows.length; i += upsertChunk) {
+      const chunk = rows.slice(i, i + upsertChunk);
+      const { error } = await client.from('etiquetas').upsert(chunk, { onConflict: 'id' });
+      if (error) throw error;
+    }
+
+    for (const item of itensUnicos) {
+      const m = merge.get(item.id);
+      if (!m) {
+        numerosPorItemId.set(item.id, null);
+        continue;
+      }
+      numerosPorItemId.set(
+        item.id,
+        itemEhBalde(m.produto_id) ? (seqPorId.get(item.id) ?? null) : null
+      );
+    }
+    return numerosPorItemId;
+  }
+
   const numeroExistentePorId = new Map<string, number | null>();
   const chunkExist = 500;
   for (let i = 0; i < ids.length; i += chunkExist) {
@@ -80,16 +204,8 @@ export async function upsertEtiquetasSeparacaoLoja(
     }
   }
 
-  const destino = options.local_destino_id?.trim() || null;
-
-  const itemEhBalde = (produtoId: string) => {
-    const p = produtosPorId.get(produtoId);
-    if (!p) return false;
-    return produtoParticipaSequenciaBaldeLoja(p);
-  };
-
   const idsPrecisamNumero: string[] = [];
-  for (const item of itens) {
+  for (const item of itensUnicos) {
     if (!itemEhBalde(item.produto_id)) {
       numerosPorItemId.set(item.id, null);
       continue;
@@ -103,12 +219,12 @@ export async function upsertEtiquetasSeparacaoLoja(
     idsPrecisamNumero.push(item.id);
   }
 
-  idsPrecisamNumero.sort((a, b) => a.localeCompare(b));
+  const idsPrecisamUnicos = [...new Set(idsPrecisamNumero)].sort((a, b) => a.localeCompare(b));
 
-  if (idsPrecisamNumero.length > 0 && destino) {
+  if (idsPrecisamUnicos.length > 0 && destino) {
     const { data: primeiroRaw, error: rpcErr } = await client.rpc('reservar_sequencia_balde_loja', {
       p_local_destino_id: destino,
-      p_quantidade: idsPrecisamNumero.length,
+      p_quantidade: idsPrecisamUnicos.length,
     });
     if (rpcErr) throw rpcErr;
     const primeiro =
@@ -120,22 +236,16 @@ export async function upsertEtiquetasSeparacaoLoja(
     if (!Number.isFinite(primeiro)) {
       throw new Error('Falha ao reservar sequência de balde para a loja (RPC inválida).');
     }
-    idsPrecisamNumero.forEach((id, idx) => {
+    idsPrecisamUnicos.forEach((id, idx) => {
       const n = primeiro + idx;
       numerosPorItemId.set(id, n);
     });
   }
 
-  const agora = new Date().toISOString();
-  const rows: EtiquetaInsert[] = itens.map((item) => {
-    const validade =
-      item.data_validade && String(item.data_validade).trim()
-        ? item.data_validade!
-        : DATA_SENTINELA_SEM_VALIDADE;
+  const rows: EtiquetaInsert[] = itensUnicos.map((item) => {
+    const validade = validadeItemParaEtiqueta(item);
     const impressa =
-      options.mode === 'impresso_agora'
-        ? true
-        : impressaPorId.get(item.id) === true;
+      options.mode === 'impresso_agora' ? true : impressaPorId.get(item.id) === true;
 
     return {
       id: item.id,

@@ -170,16 +170,18 @@ async function garantirNumerosSequenciaBaldeAntesImpressao(
   lista: EtiquetaRow[],
   destinoLocalId: string | null | undefined
 ): Promise<Map<string, number | null> | null> {
-  if (lista.length === 0 || !String(destinoLocalId || '').trim()) return null;
+  if (lista.length === 0) return null;
   const lote = lista[0]?.lote?.trim();
   if (!lote || !lote.startsWith('SEP-')) return null;
+  /** Lote SEP: renumerar 1..N pela remessa **sem** exigir `destino_id` (meta da transferência pode atrasar; sem isso a impressão usava números duplicados do banco). */
+  const destinoTrim = String(destinoLocalId || '').trim() || null;
   return upsertEtiquetasSeparacaoLoja(
     lista.map((e) => ({
       id: e.id,
       produto_id: e.produto_id,
       data_validade: e.data_validade,
     })),
-    { lote, mode: 'manter_impressa_se_existir', local_destino_id: destinoLocalId }
+    { lote, mode: 'manter_impressa_se_existir', local_destino_id: destinoTrim }
   );
 }
 
@@ -419,6 +421,7 @@ export default function EtiquetasPage() {
         .select(
           'viagem_id, destino_id, created_at, status, origem:locais!origem_id(nome), destino:locais!destino_id(nome)'
         )
+        .eq('tipo', 'WAREHOUSE_STORE')
         .in('viagem_id', ids);
       if (cancelled) return;
       setCarregandoMetaRemessas(false);
@@ -426,12 +429,22 @@ export default function EtiquetasPage() {
         setMetaPorViagemId(new Map());
         return;
       }
-      const m = new Map<string, MetaTransferenciaRemessa>();
+      type RowMeta = (typeof data)[number];
+      const porViagem = new Map<string, RowMeta[]>();
       for (const row of data) {
-        if (!row.viagem_id || m.has(row.viagem_id)) continue;
+        const vid = row.viagem_id as string | null | undefined;
+        if (!vid) continue;
+        const arr = porViagem.get(vid) ?? [];
+        arr.push(row);
+        porViagem.set(vid, arr);
+      }
+      const m = new Map<string, MetaTransferenciaRemessa>();
+      for (const [vid, rows] of porViagem) {
+        rows.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+        const row = rows[0];
         const o = row.origem as { nome?: string } | null;
         const d = row.destino as { nome?: string } | null;
-        m.set(row.viagem_id, {
+        m.set(vid, {
           origemNome: o?.nome?.trim() || 'Origem não informada',
           destinoNome: d?.nome?.trim() || 'Destino não informado',
           destinoLocalId: (row.destino_id as string | null | undefined) ?? null,
