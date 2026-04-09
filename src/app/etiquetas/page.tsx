@@ -20,11 +20,10 @@ import {
   FORMATO_CONFIG,
   FORMATO_IMPRESSAO_STORAGE_KEY,
   FormatoEtiqueta,
-  gerarDocumentoHtmlEtiquetas,
   imprimirEtiquetasEmJobUnico,
   type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
-import { enviarHtmlParaPiPrintBridge } from '@/lib/printing/pi-print-ws-client';
+import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
 import { lerUltimaRemessaPersistida } from '@/lib/separacao/ultima-remessa-storage';
 import {
   type MetaTransferenciaRemessa,
@@ -601,12 +600,10 @@ export default function EtiquetasPage() {
         nomeLojaOuLocalRemessa,
         numerosMap
       );
-      const html = await gerarDocumentoHtmlEtiquetas(etiquetas, formatoImpressao);
-      await enviarHtmlParaPiPrintBridge(html, {
-        jobName,
+      await enviarEtiquetasParaPiEmMultiplosJobs(etiquetas, formatoImpressao, {
+        jobNameBase: jobName,
         connection: piConnection,
         papel: papelPiEtiquetas,
-        formatoEtiquetaPdf: formatoImpressao,
       });
       await marcarImpressa(lista.map((e) => e.id));
     } catch (err: unknown) {

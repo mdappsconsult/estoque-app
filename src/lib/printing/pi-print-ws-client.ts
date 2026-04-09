@@ -19,7 +19,12 @@ import {
   normalizeWebSocketUrl,
   resolveEnvPiPrintWssUrl,
 } from '@/lib/printing/pi-print-wss-env';
-import { FORMATO_CONFIG, type FormatoEtiqueta } from '@/lib/printing/label-print';
+import {
+  FORMATO_CONFIG,
+  gerarDocumentoHtmlEtiquetas,
+  type EtiquetaParaImpressao,
+  type FormatoEtiqueta,
+} from '@/lib/printing/label-print';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -101,6 +106,51 @@ export function isPiPrintEnvConfigured(): boolean {
  */
 export function isPiPrintConfigured(): boolean {
   return isPiPrintEnvConfigured();
+}
+
+/** Máximo de etiquetas por envio ao Pi: um único JSON com HTML enorme pode estourar frame WS ou memória no Chromium da estação. */
+export const ETIQUETAS_POR_JOB_PI_PADRAO = 40;
+
+/**
+ * Gera HTML e envia em vários jobs sequenciais quando a lista é grande (remessas 200–400+ itens).
+ */
+export async function enviarEtiquetasParaPiEmMultiplosJobs(
+  etiquetas: EtiquetaParaImpressao[],
+  formato: FormatoEtiqueta,
+  options: {
+    connection: PiPrintConnection;
+    jobNameBase: string;
+    /** Default {@link ETIQUETAS_POR_JOB_PI_PADRAO}. */
+    porJob?: number;
+    papel?: ImpressaoPiPapel;
+    /** Pausa entre jobs para o CUPS “respirar” (ms). Default 350. */
+    delayEntreJobsMs?: number;
+  }
+): Promise<void> {
+  if (etiquetas.length === 0) return;
+  const porJob = Math.max(5, Math.min(150, options.porJob ?? ETIQUETAS_POR_JOB_PI_PADRAO));
+  const base = options.jobNameBase.trim().slice(0, 72) || 'etiquetas';
+  const totalJobs = Math.ceil(etiquetas.length / porJob);
+
+  for (let i = 0; i < etiquetas.length; i += porJob) {
+    const slice = etiquetas.slice(i, i + porJob);
+    const html = await gerarDocumentoHtmlEtiquetas(slice, formato);
+    const idx = Math.floor(i / porJob) + 1;
+    const jobName =
+      totalJobs > 1 ? `${base} ${idx}/${totalJobs}`.slice(0, 120) : base.slice(0, 120);
+    const timeoutMs = Math.min(600_000, 45_000 + slice.length * 3_000);
+    await enviarHtmlParaPiPrintBridge(html, {
+      jobName,
+      connection: options.connection,
+      papel: options.papel,
+      formatoEtiquetaPdf: formato,
+      timeoutMs,
+    });
+    const delay = options.delayEntreJobsMs ?? 350;
+    if (i + porJob < etiquetas.length && delay > 0) {
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 /**

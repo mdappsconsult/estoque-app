@@ -1,5 +1,16 @@
 # Log de Sessões
 
+### Sessão - 2026-04-09 - Impressão Pi: remessas grandes (multi-job + QRs em lotes)
+- **Problema:** um único HTML com centenas de etiquetas virava payload WebSocket enorme; `Promise.all` em todos os QRs estourava memória no browser; timeout fixo de 120 s era curto para jobs grandes.
+- **Mudança:** `enviarEtiquetasParaPiEmMultiplosJobs` em `pi-print-ws-client.ts` (padrão ~40 etiquetas/job, `jobName` `base i/N`, `timeoutMs` até 10 min proporcional ao lote, delay ~350 ms entre jobs). `gerarDocumentoHtmlEtiquetas` gera data URLs dos QRs em **fatias** de 28. Integrado em **Separar por Loja**, **`/etiquetas`** e **`/producao`** (Pi).
+- **Impacto:** escala melhor para remessas 200–400+ unidades (ex.: estoque → delivery / JK) sem um único job monolítico.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Criar separação: 400+ itens travava (query-string)
+- **Causa:** `criarTransferencia` validava todos os `item_id` num único `.in('id', …)` — URL do PostgREST estourava / demorava indefinidamente; `insert` em `transferencia_itens` sem checar `error`.
+- **Mudança:** validação e `insert` em **chunks** (100 / 150); rollback `delete` da `transferencias` se falhar o vínculo; `Separar por Loja`: texto de etapa ao salvar + `confirm` extra se mais de 150 itens.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-09 - Separar por Loja (manual): campo Qtd e rolagem da tabela
 - **Problema:** em telas estreitas / mobile, difícil usar quantidade ou o **+**; `type="number"` e wrapper do `Input` atrapalhavam.
 - **Mudança:** `input` texto com `inputMode="numeric"`, só dígitos; `overflow-x-auto` + `min-w` na tabela; `adicionarUnidadesPorProduto` recebe `livreMax` e limita a quantidade; saldo total com fallback se `Number` falhar.

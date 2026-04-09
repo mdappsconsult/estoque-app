@@ -45,13 +45,12 @@ import {
   confirmarImpressao,
   FORMATO_CONFIG,
   FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
-  gerarDocumentoHtmlEtiquetas,
   imprimirEtiquetasEmJobUnico,
   type EtiquetaParaImpressao,
   type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
 import {
-  enviarHtmlParaPiPrintBridge,
+  enviarEtiquetasParaPiEmMultiplosJobs,
   type PiPrintConnection,
 } from '@/lib/printing/pi-print-ws-client';
 import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
@@ -180,6 +179,8 @@ export default function SepararPorLojaPage() {
   const [imprimindoEtiquetas, setImprimindoEtiquetas] = useState(false);
   const [mensagemReposicao, setMensagemReposicao] = useState('');
   const [saving, setSaving] = useState(false);
+  /** Feedback em remessas grandes (centenas de unidades). */
+  const [savingEtapa, setSavingEtapa] = useState('');
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
   /** HTTPS + ws:// bloqueado pelo navegador (conteúdo misto). */
@@ -701,11 +702,9 @@ export default function SepararPorLojaPage() {
       nomeLojaDestino,
       destinoLocalId
     );
-    const html = await gerarDocumentoHtmlEtiquetas(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
-    await enviarHtmlParaPiPrintBridge(html, {
-      jobName: lote,
+    await enviarEtiquetasParaPiEmMultiplosJobs(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL, {
+      jobNameBase: lote,
       connection: conn,
-      formatoEtiquetaPdf: FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
     });
   };
 
@@ -855,19 +854,25 @@ export default function SepararPorLojaPage() {
 
   const criarSeparacao = async () => {
     if (!usuario) return alert('Faça login');
-    const confirmou = window.confirm(
-      `Confirmar criação da separação com ${itensEscaneados.length} item(ns)?`
-    );
+    const n = itensEscaneados.length;
+    const msgBase = `Confirmar criação da separação com ${n} item(ns)?`;
+    const msgGrande =
+      n > 150
+        ? `${msgBase}\n\nRemessas muitos grandes podem levar até cerca de um minuto (várias gravações no servidor). Mantenha a aba aberta.`
+        : msgBase;
+    const confirmou = window.confirm(msgGrande);
     if (!confirmou) return;
 
     const snapshotItens = [...itensEscaneados];
     const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
 
     setSaving(true);
+    setSavingEtapa('Criando viagem…');
     try {
       const viagem = await criarViagem({ status: 'PENDING' });
       const loteEtiqueta = `SEP-${viagem.id}`;
 
+      setSavingEtapa(`Registrando ${snapshotItens.length} etiqueta(s)…`);
       const numerosAposUpsert = await upsertEtiquetasSeparacaoLoja(
         snapshotItens.map((item) => ({
           id: item.id,
@@ -877,6 +882,7 @@ export default function SepararPorLojaPage() {
         { lote: loteEtiqueta, mode: 'manter_impressa_se_existir', local_destino_id: destinoId }
       );
 
+      setSavingEtapa(`Gravando transferência (${snapshotItens.length} unidades)…`);
       await criarTransferencia(
         {
           tipo: 'WAREHOUSE_STORE',
@@ -906,6 +912,7 @@ export default function SepararPorLojaPage() {
       setMensagemReposicao('');
       setMostrarEntradaManual(false);
 
+      setSavingEtapa('');
       if (confirmarImpressao(snapshotItens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) {
         setImprimindoEtiquetas(true);
         try {
@@ -953,6 +960,7 @@ export default function SepararPorLojaPage() {
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Erro');
     } finally {
+      setSavingEtapa('');
       setSaving(false);
     }
   };
@@ -1678,6 +1686,11 @@ export default function SepararPorLojaPage() {
             {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Truck className="w-4 h-4 mr-2" />}
             Criar Separação ({itensEscaneados.length} itens)
           </Button>
+          {saving && savingEtapa ? (
+            <p className="text-xs text-gray-600 text-center mt-2 leading-relaxed" role="status">
+              {savingEtapa}
+            </p>
+          ) : null}
         </>
       )}
     </div>

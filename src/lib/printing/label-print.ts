@@ -147,6 +147,21 @@ async function qrTokenParaDataUrl(token: string, qrSizeMm: number): Promise<stri
   });
 }
 
+/** Centenas de `toDataURL` em um único `Promise.all` estouram memória no celular/notebook. */
+async function qrTokensParaDataUrlsEmLotes(
+  tokens: string[],
+  qrSizeMm: number,
+  paralelo = 28
+): Promise<string[]> {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i += paralelo) {
+    const slice = tokens.slice(i, i + paralelo);
+    const part = await Promise.all(slice.map((t) => qrTokenParaDataUrl(t, qrSizeMm)));
+    out.push(...part);
+  }
+  return out;
+}
+
 /** Uma metade da folha 60×30: loja, produto, QR, validade (ou data de impressão) e operador. */
 function gerarCelula60x30(
   item: EtiquetaParaImpressao,
@@ -789,8 +804,9 @@ export async function gerarDocumentoHtmlEtiquetas(
   let estilos: string;
 
   if (formato === '60x30') {
-    const qrPorIndice = await Promise.all(
-      itens.map((it) => qrTokenParaDataUrl(it.tokenQr, cfg.qrSizeMm))
+    const qrPorIndice = await qrTokensParaDataUrlsEmLotes(
+      itens.map((it) => it.tokenQr),
+      cfg.qrSizeMm
     );
     const pedacos: string[] = [];
     for (let i = 0; i < itens.length; i += 2) {
@@ -818,8 +834,9 @@ export async function gerarDocumentoHtmlEtiquetas(
       .page-break { break-after: page; page-break-after: always; }
     `;
   } else {
-    const qrLegado = await Promise.all(
-      itens.map((item) => qrTokenParaDataUrl(item.tokenQr, cfg.qrSizeMm))
+    const qrLegado = await qrTokensParaDataUrlsEmLotes(
+      itens.map((item) => item.tokenQr),
+      cfg.qrSizeMm
     );
     const folha6060Css =
       formato === '60x60'

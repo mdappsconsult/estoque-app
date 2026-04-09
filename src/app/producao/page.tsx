@@ -17,10 +17,9 @@ import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import {
   confirmarImpressao,
   FORMATO_ETIQUETA_INDUSTRIA,
-  gerarDocumentoHtmlEtiquetas,
   imprimirEtiquetasEmJobUnico,
 } from '@/lib/printing/label-print';
-import { enviarHtmlParaPiPrintBridge } from '@/lib/printing/pi-print-ws-client';
+import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
 
 function novaLinhaInsumo() {
   return {
@@ -262,16 +261,15 @@ export default function ProducaoPage() {
 
     setImprimindoPi(true);
     try {
-      const html = await gerarDocumentoHtmlEtiquetas(
+      await enviarEtiquetasParaPiEmMultiplosJobs(
         montarPayloadImpressao(),
-        FORMATO_ETIQUETA_INDUSTRIA
+        FORMATO_ETIQUETA_INDUSTRIA,
+        {
+          jobNameBase: `producao-${etiquetasPendentesImpressao[0]?.lote || 'lote'}`.slice(0, 72),
+          connection: piConnection,
+          papel: 'industria',
+        }
       );
-      await enviarHtmlParaPiPrintBridge(html, {
-        jobName: `producao-${etiquetasPendentesImpressao[0]?.lote || 'lote'}`.slice(0, 120),
-        connection: piConnection,
-        papel: 'industria',
-        formatoEtiquetaPdf: FORMATO_ETIQUETA_INDUSTRIA,
-      });
 
       const idsEtiquetas = etiquetasPendentesImpressao.map((etiqueta) => etiqueta.id);
       const { error: erroImpressa } = await supabase

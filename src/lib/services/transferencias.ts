@@ -105,6 +105,10 @@ export async function getTransferenciaById(id: string): Promise<TransferenciaCom
   return { ...data, itens: itens || [] };
 }
 
+/** PostgREST empilha `in.(…)` na query-string; listas grandes estouram URL e travam o browser. */
+const IN_CLAUSE_CHUNK = 100;
+const INSERT_TRANSFERENCIA_ITENS_CHUNK = 150;
+
 export async function criarTransferencia(
   transferencia: TransferenciaInsert,
   itemIds: string[]
@@ -118,14 +122,19 @@ export async function criarTransferencia(
     throw new Error('A lista contém o mesmo item mais de uma vez. Cada unidade (QR) deve aparecer só uma vez.');
   }
 
-  // Blindagem no service: itens precisam estar EM_ESTOQUE e no local de origem.
-  const { data: itens, error: itensError } = await supabase
-    .from('itens')
-    .select('id, local_atual_id, estado')
-    .in('id', idsOrd);
-  if (itensError) throw itensError;
+  // Blindagem no service: itens precisam estar EM_ESTOQUE e no local de origem (consulta em fatias).
+  type ItemLinha = { id: string; local_atual_id: string | null; estado: string };
+  const itensValidos: ItemLinha[] = [];
+  for (let i = 0; i < idsOrd.length; i += IN_CLAUSE_CHUNK) {
+    const slice = idsOrd.slice(i, i + IN_CLAUSE_CHUNK);
+    const { data: chunk, error: itensError } = await supabase
+      .from('itens')
+      .select('id, local_atual_id, estado')
+      .in('id', slice);
+    if (itensError) throw itensError;
+    itensValidos.push(...((chunk || []) as ItemLinha[]));
+  }
 
-  const itensValidos = itens || [];
   if (itensValidos.length !== idsOrd.length) {
     throw new Error('Um ou mais itens não foram encontrados');
   }
@@ -144,13 +153,22 @@ export async function criarTransferencia(
     .single();
   if (error) throw error;
 
-  // Vincular itens
+  // Vincular itens em lotes (corpo JSON; evita payload único gigante e falhas silenciosas).
   if (idsOrd.length > 0) {
-    const transItens = idsOrd.map((itemId) => ({
-      transferencia_id: data.id,
-      item_id: itemId,
-    }));
-    await supabase.from('transferencia_itens').insert(transItens);
+    try {
+      for (let i = 0; i < idsOrd.length; i += INSERT_TRANSFERENCIA_ITENS_CHUNK) {
+        const slice = idsOrd.slice(i, i + INSERT_TRANSFERENCIA_ITENS_CHUNK);
+        const transItens = slice.map((itemId) => ({
+          transferencia_id: data.id,
+          item_id: itemId,
+        }));
+        const { error: insErr } = await supabase.from('transferencia_itens').insert(transItens);
+        if (insErr) throw insErr;
+      }
+    } catch (e) {
+      await supabase.from('transferencias').delete().eq('id', data.id);
+      throw e;
+    }
   }
 
   await registrarAuditoria({
