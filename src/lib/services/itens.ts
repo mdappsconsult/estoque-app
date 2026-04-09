@@ -45,6 +45,51 @@ export async function contarItensDisponiveisLocal(
   return count ?? 0;
 }
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Quantas linhas existem em `itens` (EM_ESTOQUE) por produto no local.
+ * O RPC `resumo_estoque_agrupado` também soma saldo em lote sem QR; na separação manual só dá para enviar unidades já mintadas.
+ */
+export async function contarItensComQrPorProdutosNoLocal(
+  produtoIds: string[],
+  localId: string
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const unique = [...new Set(produtoIds.filter(Boolean))];
+  for (const id of unique) map.set(id, 0);
+  if (!localId || unique.length === 0) return map;
+
+  const PAGE = 1000;
+  for (const part of chunkArray(unique, 120)) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from('itens')
+        .select('produto_id')
+        .eq('estado', 'EM_ESTOQUE')
+        .eq('local_atual_id', localId)
+        .in('produto_id', part)
+        .order('id', { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw error;
+      const rows = data || [];
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const pid = row.produto_id as string;
+        map.set(pid, (map.get(pid) || 0) + 1);
+      }
+      if (rows.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
+  return map;
+}
+
 export async function getItens(filtros?: {
   local_id?: string;
   estado?: Item['estado'];

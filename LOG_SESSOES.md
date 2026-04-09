@@ -1,5 +1,20 @@
 # Log de Sessões
 
+### Sessão - 2026-04-09 - Separar por Loja (manual): campo Qtd e rolagem da tabela
+- **Problema:** em telas estreitas / mobile, difícil usar quantidade ou o **+**; `type="number"` e wrapper do `Input` atrapalhavam.
+- **Mudança:** `input` texto com `inputMode="numeric"`, só dígitos; `overflow-x-auto` + `min-w` na tabela; `adicionarUnidadesPorProduto` recebe `livreMax` e limita a quantidade; saldo total com fallback se `Number` falhar.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Separar por Loja (manual): emitir QR do lote ao adicionar
+- **Problema:** produto só com saldo em lote (ex.: detergente) não entrava na lista — faltava mint antes do **+**.
+- **Mudança:** `adicionarUnidadesPorProduto` chama `emitirUnidadesCompraFifo` para a diferença; exige `usuario.id`; **Livre** = total agregado − na lista; textos de ajuda; recarrega tabela após sucesso.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Separar por Loja (manual): coluna «Livre» vs saldo só em lote
+- **Problema:** resumo mostrava saldo alto (ex.: 54) mas **Adicionar** falhava com 0 unidades — o total agregado incluía **lote sem QR**; só existem linhas em `itens` para separação.
+- **Mudança:** `contarItensComQrPorProdutosNoLocal` em `itens.ts`; tabela manual: colunas **Total** / **Com QR** / Lista / **Livre** (derivada de Com QR); textos de ajuda e erro mais claros.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-09 - Correção de dados: Galvanotek + Porta talher (1 QR = 1 caixa)
 - **Problema:** potes e porta talher estavam com milhares de `itens`/QR (fator peças por caixa); estoque real era **27 / 19 / 9 caixas**.
 - **Ação (Supabase, MCP `execute_sql`):** transação — manter os N itens `EM_ESTOQUE` mais antigos por produto; `DELETE` do excesso; `lotes_compra.quantidade` e `custo_unitario` alinhados à caixa; remoção de lotes vazios; `produtos` (nomes Galvanotek 30/60 ml, `custo_referencia` 112 / 126 / 286,98); `estoque` upsert.

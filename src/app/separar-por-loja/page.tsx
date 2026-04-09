@@ -27,7 +27,10 @@ import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { useAuth } from '@/hooks/useAuth';
-import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
+import {
+  contarItensComQrPorProdutosNoLocal,
+  getItemPorCodigoEscaneado,
+} from '@/lib/services/itens';
 import {
   alterarDestinoRemessaMatrizParaLoja,
   cancelarRemessaMatrizParaLoja,
@@ -35,6 +38,7 @@ import {
 } from '@/lib/services/transferencias';
 import { criarViagem } from '@/lib/services/viagens';
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
+import { emitirUnidadesCompraFifo } from '@/lib/services/lotes-compra';
 import { getResumoEstoqueAgrupado, type ResumoEstoqueRow } from '@/lib/services/estoque-resumo';
 import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
@@ -83,7 +87,11 @@ interface ResumoReposicaoTela {
 }
 
 /** Estoque na origem (modo manual): inclui origem do cadastro para filtrar insumos de compra. */
-type LinhaEstoqueOrigemManual = ResumoEstoqueRow & { origemProduto: string | null };
+type LinhaEstoqueOrigemManual = ResumoEstoqueRow & {
+  origemProduto: string | null;
+  /** Linhas em `itens` (QR); o total `quantidade` do resumo pode incluir lote ainda sem etiqueta. */
+  quantidadeComQr: number;
+};
 
 function chunkIds<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -449,9 +457,11 @@ export default function SepararPorLojaPage() {
         if (pe) throw pe;
         (prods || []).forEach((p: { id: string; origem: string }) => origemMap.set(p.id, p.origem));
       }
+      const qrPorProduto = await contarItensComQrPorProdutosNoLocal(ids, origemId);
       const merged: LinhaEstoqueOrigemManual[] = positivos.map((r) => ({
         ...r,
         origemProduto: origemMap.get(r.produto_id) ?? null,
+        quantidadeComQr: qrPorProduto.get(r.produto_id) ?? 0,
       }));
       setLinhasEstoqueOrigemManual(merged);
     } catch (err: unknown) {
@@ -490,37 +500,66 @@ export default function SepararPorLojaPage() {
     return () => window.clearTimeout(id);
   }, [ultimaRemessa]);
 
-  const adicionarUnidadesPorProduto = async (produtoId: string, produtoNome: string) => {
+  const adicionarUnidadesPorProduto = async (
+    produtoId: string,
+    produtoNome: string,
+    livreMax: number
+  ) => {
     if (!origemId) {
       setErro('Selecione a origem (indústria).');
       return;
     }
+    if (!usuario?.id) {
+      setErro('Usuário não identificado. Entre de novo no app.');
+      return;
+    }
     const raw = (qtdPorProdutoManual[produtoId] ?? '1').trim();
-    const quantidade = Number.parseInt(raw, 10);
-    if (!Number.isFinite(quantidade) || quantidade < 1) {
+    const parsed = raw === '' ? 1 : Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
       setErro('Informe uma quantidade inteira maior ou igual a 1.');
       return;
+    }
+    const livreOk = Math.max(0, Math.floor(Number.isFinite(livreMax) ? livreMax : 0));
+    if (livreOk <= 0) {
+      setErro('Não há saldo livre para este produto na origem.');
+      return;
+    }
+    const quantidade = Math.min(parsed, livreOk);
+    if (parsed > livreOk) {
+      setQtdPorProdutoManual((prev) => ({ ...prev, [produtoId]: String(livreOk) }));
     }
     setErro('');
     setAdicionandoProdutoId(produtoId);
     try {
       const jaSelecionados = new Set(itensEscaneados.map((i) => i.id));
-      const { data, error: qError } = await supabase
-        .from('itens')
-        .select('id, token_qr, token_short, produto_id, data_validade, produto:produtos(nome)')
-        .eq('estado', 'EM_ESTOQUE')
-        .eq('local_atual_id', origemId)
-        .eq('produto_id', produtoId)
-        .order('created_at', { ascending: true })
-        .limit(3000);
-      if (qError) throw qError;
-      const candidatos = (data || []).filter((row) => !jaSelecionados.has(row.id));
+
+      const buscarCandidatos = async () => {
+        const { data, error: qError } = await supabase
+          .from('itens')
+          .select('id, token_qr, token_short, produto_id, data_validade, produto:produtos(nome)')
+          .eq('estado', 'EM_ESTOQUE')
+          .eq('local_atual_id', origemId)
+          .eq('produto_id', produtoId)
+          .order('created_at', { ascending: true })
+          .limit(3000);
+        if (qError) throw qError;
+        return (data || []).filter((row) => !jaSelecionados.has(row.id));
+      };
+
+      let candidatos = await buscarCandidatos();
+      if (candidatos.length < quantidade) {
+        const falta = quantidade - candidatos.length;
+        await emitirUnidadesCompraFifo(produtoId, origemId, falta, usuario.id);
+        candidatos = await buscarCandidatos();
+      }
+
       if (candidatos.length < quantidade) {
         setErro(
-          `Saldo insuficiente na origem para «${produtoNome}»: ${candidatos.length} unidade(s) disponível(is) fora da lista (pedido: ${quantidade}).`
+          `Saldo insuficiente para «${produtoNome}» (itens + lote de compra): ${candidatos.length} fora da lista; pedido: ${quantidade}.`
         );
         return;
       }
+
       const escolhidos = candidatos.slice(0, quantidade);
       setItensEscaneados((prev) => [
         ...prev,
@@ -536,6 +575,7 @@ export default function SepararPorLojaPage() {
           };
         }),
       ]);
+      void carregarEstoqueOrigemManual();
     } catch (err: unknown) {
       setErro(err instanceof Error ? err.message : 'Não foi possível adicionar unidades.');
     } finally {
@@ -1376,14 +1416,24 @@ export default function SepararPorLojaPage() {
                   )}
                 {estoqueOrigemManual.length > 0 && (
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="max-h-64 overflow-y-auto">
-                      <table className="w-full text-sm">
+                    <div className="max-h-64 overflow-y-auto overflow-x-auto">
+                      <table className="w-full text-sm min-w-[520px]">
                         <thead className="bg-gray-50 sticky top-0">
                           <tr className="text-left text-gray-600">
                             <th className="px-3 py-2">Produto</th>
-                            <th className="px-3 py-2 w-14">Origem</th>
-                            <th className="px-3 py-2 w-14">Lista</th>
-                            <th className="px-3 py-2 w-14">Livre</th>
+                            <th className="px-3 py-2 w-16" title="Saldo agregado (pode incluir compra sem QR)">
+                              Total
+                            </th>
+                            <th className="px-3 py-2 w-16" title="Unidades com etiqueta/QR no local">
+                              Com QR
+                            </th>
+                            <th className="px-3 py-2 w-12">Lista</th>
+                            <th
+                              className="px-3 py-2 w-14"
+                              title="Saldo total ainda fora da lista (o + pode emitir QR do lote se precisar)"
+                            >
+                              Livre
+                            </th>
                             <th className="px-3 py-2 w-28">Qtd</th>
                             <th className="px-3 py-2 w-24" />
                           </tr>
@@ -1391,37 +1441,58 @@ export default function SepararPorLojaPage() {
                         <tbody>
                           {estoqueOrigemManual.map((linha) => {
                             const naLista = jaNaListaPorProduto.get(linha.produto_id) || 0;
-                            const livre = Math.max(0, linha.quantidade - naLista);
+                            const comQr = linha.quantidadeComQr;
+                            const totalSaldo = Number(linha.quantidade);
+                            const totalOk = Number.isFinite(totalSaldo) ? totalSaldo : 0;
+                            const livre = Math.max(0, totalOk - naLista);
                             return (
                               <tr key={linha.produto_id} className="border-t border-gray-100">
                                 <td className="px-3 py-2">{linha.produto_nome}</td>
                                 <td className="px-3 py-2 tabular-nums">{linha.quantidade}</td>
+                                <td className="px-3 py-2 tabular-nums">{comQr}</td>
                                 <td className="px-3 py-2 tabular-nums">{naLista}</td>
                                 <td className="px-3 py-2 font-medium tabular-nums">{livre}</td>
-                                <td className="px-3 py-2">
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    max={livre > 0 ? livre : 1}
-                                    className="!py-1.5 text-sm"
-                                    value={qtdPorProdutoManual[linha.produto_id] ?? '1'}
-                                    onChange={(e) =>
-                                      setQtdPorProdutoManual((prev) => ({
-                                        ...prev,
-                                        [linha.produto_id]: e.target.value,
-                                      }))
-                                    }
+                                <td className="px-3 py-2 align-middle w-24 min-w-[5.5rem]">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    autoComplete="off"
+                                    enterKeyHint="done"
                                     disabled={livre === 0}
                                     aria-label={`Quantidade para ${linha.produto_nome}`}
+                                    className="w-full min-w-0 px-2 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed tabular-nums"
+                                    value={qtdPorProdutoManual[linha.produto_id] ?? '1'}
+                                    onChange={(e) => {
+                                      const digits = e.target.value.replace(/\D/g, '');
+                                      setQtdPorProdutoManual((prev) => ({
+                                        ...prev,
+                                        [linha.produto_id]: digits,
+                                      }));
+                                    }}
+                                    onBlur={() => {
+                                      const v = (qtdPorProdutoManual[linha.produto_id] ?? '').replace(/\D/g, '');
+                                      if (v === '' || Number.parseInt(v, 10) < 1) {
+                                        setQtdPorProdutoManual((prev) => ({
+                                          ...prev,
+                                          [linha.produto_id]: '1',
+                                        }));
+                                      }
+                                    }}
                                   />
                                 </td>
-                                <td className="px-3 py-2">
+                                <td className="px-3 py-2 align-middle whitespace-nowrap">
                                   <Button
                                     type="button"
                                     variant="primary"
                                     className="!px-2 !py-1.5"
                                     disabled={livre === 0 || adicionandoProdutoId === linha.produto_id}
-                                    onClick={() => void adicionarUnidadesPorProduto(linha.produto_id, linha.produto_nome)}
+                                    onClick={() =>
+                                      void adicionarUnidadesPorProduto(
+                                        linha.produto_id,
+                                        linha.produto_nome,
+                                        livre
+                                      )
+                                    }
                                     aria-label={`Adicionar ${linha.produto_nome}`}
                                   >
                                     {adicionandoProdutoId === linha.produto_id ? (
@@ -1437,6 +1508,13 @@ export default function SepararPorLojaPage() {
                         </tbody>
                       </table>
                     </div>
+                    <p className="text-xs text-gray-600 px-1 pt-2 leading-relaxed border-t border-gray-100">
+                      <strong>Total</strong> inclui compra ainda sem etiqueta. <strong>Com QR</strong> são unidades já
+                      existentes no estoque com etiqueta. O botão{' '}
+                      <strong>+</strong> usa primeiro o que já tem QR; se faltar, <strong>emite</strong> do lote (FIFO),
+                      grava etiquetas e coloca na lista — imprima na tela <strong>Etiquetas</strong> ou após criar a
+                      separação.
+                    </p>
                   </div>
                 )}
               </div>
@@ -1507,9 +1585,8 @@ export default function SepararPorLojaPage() {
                 Eles só liberam quando existir pelo menos <strong>uma unidade</strong> na lista <strong>Itens separados</strong>{' '}
                 (cada uma com QR no estoque da origem). No <strong>modo reposição</strong>, a lista é preenchida
                 automaticamente ao escolher origem e destino (ou em <strong>Recarregar faltantes e sugestão</strong>). No{' '}
-                <strong>modo manual</strong>, use a tabela de estoque na origem (produto + quantidade) ou, se a unidade já
-                tiver QR, scanner/digitação. Se não houver saldo na origem, a lista pode vir vazia ou parcial — confira as
-                mensagens acima.
+                <strong>modo manual</strong>, use a tabela ou scanner/digitação. O <strong>+</strong> pode emitir QR do
+                lote quando só houver saldo em compra sem etiqueta.
               </p>
             </div>
           )}
