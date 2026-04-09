@@ -1,5 +1,22 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Impressão 60×60 na Zebra: uma folha por etiqueta (viewport Pi)
+- **Problema:** PDF gerado no Raspberry saía com conteúdo **minúsculo no canto** da etiqueta física 60×60 (viewport padrão do Chromium ~800×600 + `@page` 60 mm).
+- **`pi-print-ws/server.mjs`:** `setViewport` em px a partir de `widthMm`/`heightMm` do JSON; `emulateMediaType('print')` antes do `page.pdf`.
+- **Front:** `enviarHtmlParaPiPrintBridge` envia `formatoEtiquetaPdf` → dimensões do `FORMATO_CONFIG`; HTML 60×60 com wrapper **`.folha-6060`** (60×60 mm + `page-break`) e etiqueta **100%** da folha.
+- **Deploy:** atualizar o script `server.mjs` no Pi (reiniciar `pi-print-ws`).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - `/etiquetas`: Pi 60×60 com fallback para ponte estoque
+- **Problema:** com formato **60×60**, só se resolvia `usePiPrintBridgeConfig({ papel: 'industria' })`; quem tem **apenas** a ponte **estoque** via Supabase/env ficava com **Zebra desabilitada** (botão inativo).
+- **Correção:** carregar **estoque** e **indústria** em paralelo; em **60×60** usar conexão **indústria** ou, se ausente, **estoque**; aviso âmbar + tooltips; texto de ajuda no topo da página.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-08 - Etiqueta 60×60 indústria: hierarquia, lote curto, rodapé no fundo
+- **Problema:** na impressão 60×60 o bloco legal (empresa/CNPJ) e tokens pareciam “no topo” na leitura operacional; **loja** duplicada ao lado do QR; **lote** `SEP-{uuid}` longo demais na térmica.
+- **Mudança (`label-print`):** HTML/CSS dedicados (`e6060-*`): **produto → loja → balde → RESFRIADO** primeiro; **Validade + Gerou** ao lado do QR; **tokens + lote**; **`margin-top: auto`** no bloco legal para grudar no fundo. Helper `formatarLoteExibicao6060` (ex.: `SEP-2697e6df` a partir de `SEP-2697e6df-…-uuid`).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-08 - `/etiquetas`: gravar sequência de balde na hora da impressão
 - **Problema:** impressão pela tela **Etiquetas** só lia `numero_sequencia_loja` do banco; remessas antigas ou criadas sem upsert com destino ficavam **sem BALDE Nº** na etiqueta.
 - **Correção:** antes de gerar HTML (navegador e Pi), `upsertEtiquetasSeparacaoLoja` com `destino_id` da transferência (`meta` passa a carregar `destino_id`). `rowsParaEtiquetasImpressao` aceita `Map` devolvido pelo upsert.

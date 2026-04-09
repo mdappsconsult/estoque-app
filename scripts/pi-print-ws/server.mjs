@@ -1,6 +1,7 @@
 /**
  * Servidor WebSocket no Pi: recebe HTML (mesmo fluxo das etiquetas do app),
  * renderiza PDF via Chromium headless e envia para CUPS (`lp`).
+ * Usa `widthMm`/`heightMm` do JSON para `setViewport` (evita etiqueta 60×60 minúscula no canto).
  *
  * Variáveis: PRINT_WS_PORT (default 8765), PRINT_WS_TOKEN (opcional),
  * CHROMIUM_PATH (default /usr/bin/chromium), CUPS_QUEUE (opcional, fila padrão se vazio).
@@ -30,6 +31,11 @@ function parseMessage(raw) {
   }
 }
 
+/** Converte mm (CSS 96dpi) para pixels inteiros — viewport alinhada à folha evita layout minúsculo no canto. */
+function mmToCssPx(mm) {
+  return Math.max(64, Math.ceil((Number(mm) * 96) / 25.4));
+}
+
 async function htmlToPdf(html, widthMm, heightMm, preferCssPageSize) {
   const browser = await puppeteer.launch({
     executablePath: CHROMIUM,
@@ -45,7 +51,16 @@ async function htmlToPdf(html, widthMm, heightMm, preferCssPageSize) {
   const tmp = path.join(os.tmpdir(), `wsprint-${Date.now()}-${Math.random().toString(16).slice(2)}.pdf`);
   try {
     const page = await browser.newPage();
+    const wPx = mmToCssPx(widthMm);
+    const hPx = mmToCssPx(heightMm);
+    /* Largura = folha (evita layout “achatado” em 800px). Altura generosa: várias páginas no mesmo HTML. */
+    await page.setViewport({
+      width: wPx,
+      height: Math.max(hPx, 1200),
+      deviceScaleFactor: 1,
+    });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 120_000 });
+    await page.emulateMediaType('print');
     const baseMargin = { top: '0', right: '0', bottom: '0', left: '0' };
     const pdfOptions = preferCssPageSize
       ? {

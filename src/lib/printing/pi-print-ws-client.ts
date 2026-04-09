@@ -6,6 +6,9 @@
  * 2. `NEXT_PUBLIC_PI_PRINT_WS_URL_ESTOQUE` ou `NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA` — URL estável no
  *    deploy (ex. Railway + túnel nomeado); token/fila podem vir do `.env` ou da linha no Supabase.
  * 3. Coluna `ws_public_url` em `config_impressao_pi` (sync do Pi ou edição manual).
+ *
+ * O payload de impressão deve incluir `widthMm`/`heightMm` (via `formatoEtiquetaPdf` no app) para o Pi
+ * dimensionar o viewport do Chromium alinhado à folha.
  */
 
 import {
@@ -16,6 +19,7 @@ import {
   normalizeWebSocketUrl,
   resolveEnvPiPrintWssUrl,
 } from '@/lib/printing/pi-print-wss-env';
+import { FORMATO_CONFIG, type FormatoEtiqueta } from '@/lib/printing/label-print';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -113,6 +117,11 @@ export async function enviarHtmlParaPiPrintBridge(
     papel?: ImpressaoPiPapel;
     /** Se omitido, chama `resolvePiPrintConnection(papel)` de novo. */
     connection?: PiPrintConnection | null;
+    /**
+     * Formato da etiqueta: define `widthMm`/`heightMm` no Pi para viewport do Chromium alinhada à folha.
+     * Sem isso, o padrão 60×30 encolhe layouts 60×60 no canto do PDF.
+     */
+    formatoEtiquetaPdf?: FormatoEtiqueta;
   }
 ): Promise<void> {
   if (typeof window === 'undefined') {
@@ -130,6 +139,10 @@ export async function enviarHtmlParaPiPrintBridge(
   const queue = options?.queue ?? conn.queue;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const jobName = options?.jobName ?? 'etiquetas';
+  const fmtPdf = options?.formatoEtiquetaPdf;
+  const cfgPdf = fmtPdf ? FORMATO_CONFIG[fmtPdf] : null;
+  const widthMm = cfgPdf?.widthMm ?? 60;
+  const heightMm = cfgPdf?.heightMm ?? 30;
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -167,6 +180,8 @@ export async function enviarHtmlParaPiPrintBridge(
           type: 'print',
           html,
           preferCssPageSize: true,
+          widthMm,
+          heightMm,
           jobName: jobName.slice(0, 120),
           ...(queue ? { queue } : {}),
         })

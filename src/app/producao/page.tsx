@@ -270,6 +270,7 @@ export default function ProducaoPage() {
         jobName: `producao-${etiquetasPendentesImpressao[0]?.lote || 'lote'}`.slice(0, 120),
         connection: piConnection,
         papel: 'industria',
+        formatoEtiquetaPdf: FORMATO_ETIQUETA_INDUSTRIA,
       });
 
       const idsEtiquetas = etiquetasPendentesImpressao.map((etiqueta) => etiqueta.id);

@@ -662,7 +662,11 @@ export default function SepararPorLojaPage() {
       destinoLocalId
     );
     const html = await gerarDocumentoHtmlEtiquetas(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
-    await enviarHtmlParaPiPrintBridge(html, { jobName: lote, connection: conn });
+    await enviarHtmlParaPiPrintBridge(html, {
+      jobName: lote,
+      connection: conn,
+      formatoEtiquetaPdf: FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
+    });
   };
 
   const imprimirEtiquetasSeparacao = async () => {

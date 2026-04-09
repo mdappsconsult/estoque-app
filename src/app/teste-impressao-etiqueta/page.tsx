@@ -77,6 +77,7 @@ function TesteImpressaoEtiquetaInner() {
         jobName: `teste-impressao-${formato}`,
         connection: piConnection,
         papel,
+        formatoEtiquetaPdf: formato,
       });
       alert('Amostra enviada para impressão na estação (Raspberry / Zebra).');
     } catch (err: unknown) {

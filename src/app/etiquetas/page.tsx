@@ -251,13 +251,25 @@ export default function EtiquetasPage() {
 
   const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'impressas'>('pendentes');
   const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x30');
-  /** 60×60 na Zebra costuma ir no segundo Pi (fila 60×60); demais formatos usam ponte estoque. */
+  /** 60×60 prefere ponte indústria; se não houver URL/linha no banco, usa a ponte estoque (um único Pi). */
   const papelPiEtiquetas = formatoImpressao === '60x60' ? 'industria' : 'estoque';
-  const {
-    loading: piCfgLoading,
-    available: piPrintAvailable,
-    connection: piConnection,
-  } = usePiPrintBridgeConfig({ papel: papelPiEtiquetas });
+  const piEstoque = usePiPrintBridgeConfig({ papel: 'estoque' });
+  const piIndustria = usePiPrintBridgeConfig({ papel: 'industria' });
+  const piCfgLoading =
+    formatoImpressao === '60x60'
+      ? piIndustria.loading || (!piIndustria.available && piEstoque.loading)
+      : piEstoque.loading;
+  const piConnection =
+    formatoImpressao === '60x60'
+      ? piIndustria.connection ?? piEstoque.connection
+      : piEstoque.connection;
+  const piPrintAvailable = Boolean(piConnection);
+  const piUsaPonteEstoqueFallback6060 =
+    formatoImpressao === '60x60' &&
+    !piIndustria.loading &&
+    !piIndustria.available &&
+    Boolean(piEstoque.connection) &&
+    Boolean(piConnection);
   const [printing, setPrinting] = useState(false);
   const [erroImpressao, setErroImpressao] = useState('');
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
@@ -554,7 +566,7 @@ export default function EtiquetasPage() {
     if (!piPrintAvailable || !piConnection) {
       alert(
         formatoImpressao === '60x60'
-          ? 'Impressão 60×60 indisponível. Configure a ponte **indústria** em Configurações → Impressoras ou NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA. Veja docs/RASPBERRY_INDUSTRIA_NOVO_PI.md.'
+          ? 'Impressão 60×60: nenhuma ponte Pi resolvida. Configure indústria ou estoque em Configurações → Impressoras, ou NEXT_PUBLIC_PI_PRINT_WS_URL / _ESTOQUE / _INDUSTRIA. Veja docs/RASPBERRY_INDUSTRIA_NOVO_PI.md.'
           : 'Impressão na estação indisponível. Configure em Configurações → Impressoras (Pi) ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
       );
       return;
@@ -581,6 +593,7 @@ export default function EtiquetasPage() {
         jobName,
         connection: piConnection,
         papel: papelPiEtiquetas,
+        formatoEtiquetaPdf: formatoImpressao,
       });
       await marcarImpressa(lista.map((e) => e.id));
     } catch (err: unknown) {
@@ -678,7 +691,9 @@ export default function EtiquetasPage() {
                   !piPrintAvailable && !piCfgLoading
                     ? 'Configure a ponte Pi em Configurações → Impressoras'
                     : formatoImpressao === '60x60'
-                      ? 'Envia 60×60 para Pi indústria (fila configurada no CUPS)'
+                      ? piUsaPonteEstoqueFallback6060
+                        ? '60×60 via ponte estoque (indústria não configurada); confira papel 60×60 no CUPS'
+                        : 'Envia 60×60 para Pi indústria (ou estoque se for o único Pi)'
                       : 'Envia 60×30 para Pi estoque (2 QR por folha)'
                 }
                 className="w-full sm:w-auto border-emerald-300 text-emerald-900 hover:bg-emerald-50"
@@ -697,8 +712,9 @@ export default function EtiquetasPage() {
 
       <p className="mb-2 text-xs text-gray-500">
         O <strong>formato</strong> escolhido vale para <strong>navegador</strong> e para <strong>Zebra / Pi</strong>:
-        <strong> 60×30</strong> usa a ponte <strong>estoque</strong> (2 QR por folha); <strong> 60×60</strong> usa a
-        ponte <strong>indústria</strong> (uma etiqueta por folha, layout completo). Remessas <code className="text-[10px]">SEP-…</code>{' '}
+        <strong> 60×30</strong> usa a ponte <strong>estoque</strong> (2 QR por folha); <strong> 60×60</strong> tenta a
+        ponte <strong>indústria</strong> e, se não estiver configurada, <strong>cai na ponte estoque</strong> (mesmo Pi
+        da separação — confira mídia 60×60 na Zebra). Remessas <code className="text-[10px]">SEP-…</code>{' '}
         preenchem automaticamente o <strong>nome da loja de destino</strong> na etiqueta. O padrão fica salvo neste
         aparelho.{' '}
         <Link href="/teste-impressao-etiqueta" className="text-red-600 font-medium underline underline-offset-2">
@@ -929,7 +945,9 @@ export default function EtiquetasPage() {
               onClick={() => void imprimirListaNoPi(linhasRemessaBulk)}
               title={
                 formatoImpressao === '60x60'
-                  ? 'Um job na Pi indústria: todas as etiquetas 60×60 desta remessa'
+                  ? piUsaPonteEstoqueFallback6060
+                    ? 'Um job 60×60 na ponte estoque (fallback): confira mídia na Zebra'
+                    : 'Um job na Pi: todas as etiquetas 60×60 desta remessa'
                   : 'Um job na Pi estoque: todas as etiquetas 60×30 desta remessa'
               }
             >
@@ -946,6 +964,13 @@ export default function EtiquetasPage() {
               Navegador — remessa inteira ({formatoImpressao})
             </Button>
           </div>
+          {piUsaPonteEstoqueFallback6060 && (
+            <p className="text-xs text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2">
+              <strong>Ponte indústria não configurada</strong> — o envio 60×60 usa a <strong>mesma ponte estoque</strong>{' '}
+              (Separar por Loja). Confira se a Zebra/CUPS está com <strong>mídia 60×60 mm</strong>; caso contrário use{' '}
+              <strong>60×30</strong> no seletor ou configure o segundo Pi em Configurações → Impressoras.
+            </p>
+          )}
           {!piCfgLoading && !piPrintAvailable && (
             <p className="text-xs text-amber-900">
               Pi indisponível: use o botão do navegador ou Configurações → Impressoras.

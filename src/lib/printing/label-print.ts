@@ -116,6 +116,17 @@ function extrairVolumeProduto(nome: string): string {
   return match ? match[1].replace(/\s+/g, '').toUpperCase() : '';
 }
 
+/** Lote SEP-{uuid}: na etiqueta mostra só o primeiro bloco (ex. SEP-2697e6df) para caber na térmica. */
+function formatarLoteExibicao6060(lote: string): string {
+  const t = String(lote || '').trim();
+  if (!t) return '—';
+  if (!t.startsWith('SEP-')) return t.length > 28 ? `${t.slice(0, 26)}…` : t;
+  const rest = t.slice(4).trim();
+  const primeiro = rest.split('-')[0]?.trim() || '';
+  if (primeiro.length >= 6) return `SEP-${primeiro}`;
+  return t.length > 24 ? `${t.slice(0, 22)}…` : t;
+}
+
 /**
  * Pixels da imagem do QR (fonte) maiores que o mínimo teórico em 203 dpi.
  * O CSS limita o tamanho físico em mm; bitmap pequeno (~80px) vira “borrão” na térmica após raster do SO/driver.
@@ -193,11 +204,14 @@ function gerarFolha60x30Par(
   return `<div class="folha-60x30">${celEsq}${celDir}</div>`;
 }
 
-/** 60×60 indústria: validade em destaque ao lado do QR; loja e operador na mesma faixa do QR (sem linha de manipulação). */
+/**
+ * 60×60 indústria: ordem de leitura de cima para baixo — produto/loja/balde → validade + QR → tokens/lote
+ * (curto) → rodapé legal. Evita bloco legal no topo e loja duplicada ao lado do QR.
+ */
 function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: string): string {
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
-  const lote = escaparHtml(item.lote || '-');
+  const lote = escaparHtml(formatarLoteExibicao6060(item.lote || ''));
   const responsavel = escaparHtml((item.responsavel || '—').trim() || '—');
   const tokenShort = escaparHtml(item.tokenShort || item.id.slice(0, 8).toUpperCase());
   const tokenQr = escaparHtml(item.tokenQr);
@@ -206,53 +220,46 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
   const nBalde = item.numeroSequenciaLoja;
   const faixaBaldeTopo6060 =
     nBalde != null && Number.isFinite(Number(nBalde))
-      ? `<div class="topo-num-balde">BALDE Nº ${escaparHtml(String(nBalde))}</div>`
+      ? `<div class="e6060-num-balde">BALDE Nº ${escaparHtml(String(nBalde))}</div>`
       : '';
 
   return `
     <div class="etiqueta fmt-6060">
-      <div class="topo">
-        <div class="produto">${produtoNome}</div>
-        <div class="nome-loja-local">${nomeLocalOuLoja}</div>
+      <div class="e6060-head">
+        <div class="e6060-produto">${produtoNome}</div>
+        <div class="e6060-loja">${nomeLocalOuLoja}</div>
         ${faixaBaldeTopo6060}
-        <div class="sub-linha">
+        <div class="e6060-resf">
           <span>RESFRIADO</span>
           <span>${volume || '&nbsp;'}</span>
         </div>
-        <div class="linha"></div>
       </div>
-
-      <div class="baixo-6060">
-      <div class="rodape rodape-6060">
-        <div class="rodape-left rodape-left-6060">
-          <div class="empresa">ACAI DO KIM - CENTRAL DE PRODUCAO</div>
-          <div class="empresa">CNPJ: 24.880.097/0001-02</div>
-          <div class="empresa">CEP: 47804-000 AVENIDA JK</div>
-          <div class="empresa">821, LUIS EDUARDO MAGALHAES, BA</div>
-          <div class="token">${tokenShort}</div>
-          <div class="token-qr">${tokenQr}</div>
-          <div class="lote">LOTE: ${lote}</div>
-        </div>
-        <div class="qr-lateral-6060">
-          <div class="qr-meta-6060">
-            <div class="qm-block">
-              <span class="qm-label">Validade</span>
-              <span class="qm-valor-validade">${validade}</span>
-            </div>
-            <div class="qm-block">
-              <span class="qm-label">Loja</span>
-              <span class="qm-valor">${nomeLocalOuLoja}</span>
-            </div>
-            <div class="qm-block">
-              <span class="qm-label">Gerou</span>
-              <span class="qm-valor">${responsavel}</span>
-            </div>
+      <div class="e6060-rule"></div>
+      <div class="e6060-mid">
+        <div class="e6060-meta">
+          <div class="e6060-qm">
+            <span class="e6060-ql">Validade</span>
+            <span class="e6060-qv e6060-qv-val">${validade}</span>
           </div>
-          <div class="bloco-qr bloco-qr-6060">
-            <img class="qr" src="${qrDataUrl}" alt="" width="512" height="512" />
+          <div class="e6060-qm">
+            <span class="e6060-ql">Gerou</span>
+            <span class="e6060-qv">${responsavel}</span>
           </div>
         </div>
+        <div class="e6060-qr-wrap">
+          <img class="qr" src="${qrDataUrl}" alt="" width="512" height="512" />
+        </div>
       </div>
+      <div class="e6060-ids">
+        <div class="e6060-tok">${tokenShort}</div>
+        <div class="e6060-tokqr">${tokenQr}</div>
+        <div class="e6060-lote">LOTE: ${lote}</div>
+      </div>
+      <div class="e6060-legal">
+        <div class="e6060-emp">ACAI DO KIM - CENTRAL DE PRODUCAO</div>
+        <div class="e6060-emp">CNPJ: 24.880.097/0001-02</div>
+        <div class="e6060-emp">CEP: 47804-000 AVENIDA JK</div>
+        <div class="e6060-emp">821, LUIS EDUARDO MAGALHAES, BA</div>
       </div>
     </div>
   `;
@@ -545,12 +552,34 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
     }
-    .fmt-6060 .nome-loja-local {
-      font-size: 7.6pt;
-      max-height: 5mm;
-      margin-top: 0.3mm;
+    .etiqueta.fmt-6060 {
+      justify-content: flex-start;
+      gap: 0.35mm;
     }
-    .fmt-6060 .topo-num-balde {
+    .e6060-head {
+      flex-shrink: 0;
+      text-align: center;
+      width: 100%;
+    }
+    .e6060-produto {
+      font-size: 10pt;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: 0.3px;
+      min-height: 3.8mm;
+    }
+    .e6060-loja {
+      margin-top: 0.3mm;
+      font-size: 7.6pt;
+      font-weight: 800;
+      line-height: 1.08;
+      max-height: 5mm;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .e6060-num-balde {
       margin-top: 0.25mm;
       font-size: 9.5pt;
       font-weight: 900;
@@ -559,13 +588,112 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       line-height: 1;
       flex-shrink: 0;
     }
-    .fmt-6060 .topo .produto {
-      font-size: 10pt;
-      min-height: 3.8mm;
-    }
-    .fmt-6060 .sub-linha {
+    .e6060-resf {
       margin-top: 0.35mm;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       font-size: 7.5pt;
+      font-weight: 700;
+    }
+    .e6060-rule {
+      flex-shrink: 0;
+      margin-top: 0.5mm;
+      border-top: 0.45mm solid #000;
+      width: 100%;
+    }
+    .e6060-mid {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1mm;
+      width: 100%;
+    }
+    .e6060-meta {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: flex-end;
+      text-align: right;
+      gap: 0.45mm;
+      min-width: 0;
+      max-width: 22mm;
+    }
+    .e6060-qm {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.05mm;
+    }
+    .e6060-ql {
+      font-size: 4.8pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+    .e6060-qv {
+      font-size: 6.2pt;
+      font-weight: 700;
+      line-height: 1.08;
+      word-break: break-word;
+      max-width: 22mm;
+    }
+    .e6060-qv-val {
+      font-size: 9.5pt;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      line-height: 1.05;
+    }
+    .e6060-qr-wrap {
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .e6060-ids {
+      flex-shrink: 0;
+      width: 100%;
+      text-align: left;
+    }
+    .e6060-tok {
+      margin-top: 0.35mm;
+      font-size: 8pt;
+      font-weight: 900;
+      letter-spacing: 0.8px;
+    }
+    .e6060-tokqr {
+      margin-top: 0.25mm;
+      font-size: 4.7pt;
+      color: #333;
+      line-height: 1.05;
+      max-height: 3.2mm;
+      overflow: hidden;
+      word-break: break-all;
+    }
+    .e6060-lote {
+      margin-top: 0.25mm;
+      font-size: 5pt;
+      font-weight: 700;
+      color: #222;
+    }
+    .e6060-legal {
+      margin-top: auto;
+      flex-shrink: 0;
+      width: 100%;
+      padding-top: 0.35mm;
+    }
+    .e6060-emp {
+      font-size: 4.8pt;
+      line-height: 1.12;
+      font-weight: 700;
+      letter-spacing: 0.1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .fmt-5840 .nome-loja-local,
     .fmt-5030 .nome-loja-local {
@@ -600,63 +728,6 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
     }
     .data-row .label { font-size: 9pt; font-weight: 800; }
     .data-row .valor { font-size: 9pt; font-weight: 700; }
-    .fmt-6060 .baixo-6060 {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      min-height: 0;
-    }
-    .fmt-6060 .rodape-6060 {
-      margin-top: 0.6mm;
-      align-items: flex-end;
-    }
-    .fmt-6060 .rodape-left-6060 .empresa { font-size: 4.8pt; }
-    .fmt-6060 .qr-lateral-6060 {
-      display: flex;
-      flex-direction: row;
-      align-items: flex-end;
-      gap: 0.9mm;
-      flex-shrink: 0;
-      max-width: 52%;
-    }
-    .fmt-6060 .qr-meta-6060 {
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      align-items: flex-end;
-      text-align: right;
-      gap: 0.45mm;
-      max-width: 22mm;
-      min-width: 0;
-    }
-    .fmt-6060 .qm-block {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 0.05mm;
-    }
-    .fmt-6060 .qm-label {
-      font-size: 4.8pt;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-      line-height: 1;
-    }
-    .fmt-6060 .qm-valor {
-      font-size: 6.2pt;
-      font-weight: 700;
-      line-height: 1.08;
-      word-break: break-word;
-      max-width: 22mm;
-    }
-    .fmt-6060 .qm-valor-validade {
-      font-size: 9.5pt;
-      font-weight: 900;
-      letter-spacing: 0.02em;
-      line-height: 1.05;
-    }
-    .fmt-6060 .bloco-qr-6060 { gap: 0; }
     .rodape {
       margin-top: 1mm;
       display: flex;
@@ -750,10 +821,37 @@ export async function gerarDocumentoHtmlEtiquetas(
     const qrLegado = await Promise.all(
       itens.map((item) => qrTokenParaDataUrl(item.tokenQr, cfg.qrSizeMm))
     );
+    const folha6060Css =
+      formato === '60x60'
+        ? `
+      .folha-6060 {
+        box-sizing: border-box;
+        width: 60mm;
+        height: 60mm;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        page-break-after: always;
+        break-after: page;
+      }
+      .folha-6060:last-of-type {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      .folha-6060 .etiqueta.fmt-6060 {
+        width: 100%;
+        height: 100%;
+      }
+    `
+        : '';
     htmlCorpo = itens
       .map((item, index) => {
+        const inner = gerarHtmlEtiquetaLegado(item, formato, qrLegado[index]);
+        if (formato === '60x60') {
+          return `<div class="folha-6060">${inner}</div>`;
+        }
         const quebra = index < itens.length - 1 ? '<div class="page-break"></div>' : '';
-        return `${gerarHtmlEtiquetaLegado(item, formato, qrLegado[index])}${quebra}`;
+        return `${inner}${quebra}`;
       })
       .join('');
     estilos = `
@@ -768,6 +866,7 @@ export async function gerarDocumentoHtmlEtiquetas(
         html, body { margin: 0 !important; padding: 0 !important; }
       }
       ${estilosGlobaisLegado(formato)}
+      ${folha6060Css}
       .page-break { break-after: page; page-break-after: always; }
     `;
   }
