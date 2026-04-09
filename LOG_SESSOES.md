@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Pi + Supabase: fila CUPS 60×60 e linha `industria`
+- **Causa metade da etiqueta:** fila `ZebraZD220` com **PageSize=Custom.60x30mm**; o app em 60×60 fazia fallback para ponte **estoque** e enviava **`queue=ZebraZD220`** no WebSocket (ignorava `.env` do Pi).
+- **Pi (`kim`):** criada fila **`ZebraZD220-6060`** (mesmo USB), **DefaultPageSize Custom.60x60mm**; `CUPS_QUEUE=ZebraZD220-6060` no `.env` do `pi-print-ws`; `systemctl restart pi-print-ws`.
+- **Supabase:** `config_impressao_pi` linha **`industria`** preenchida com mesmo `wss`/`ws_token` da **estoque** e **`cups_queue` = `ZebraZD220-6060`** (estoque mantém `ZebraZD220` para 60×30).
+- **Validação:** `lpoptions` / PPD; `execute_sql` MCP.
+
 ### Sessão - 2026-04-08 - Doc CUPS Zebra 60×60 mm no Raspberry
 - **Conteúdo:** `docs/CUPS_ZEBRA_60X60.md` (web CUPS, segunda fila USB, `lpoptions`); `scripts/pi-print-ws/cups-adicionar-fila-60x60.sh`; `env.example` com `CUPS_QUEUE=ZebraZD220-6060`; links em `RASPBERRY_INDUSTRIA_NOVO_PI.md`, `IMPRESSAO_TERMICA_ZEBRA.md`, `README.md`; `CONTEXTO_ATUAL.md`.
 - **Validação:** `bash -n` no script.
