@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-09 - Etiquetas: lista de remessas lenta / «pesquisando» sem fim
+- **Causa:** `buscarOpcoesRemessaSepParaEtiquetas` lia até **10 mil linhas** de `etiquetas` só para montar o select (cada remessa tem N linhas → poucos lotes distintos, payload enorme). Meta das remessas: um `.in('viagem_id', …)` com até **200 UUID** podia estourar URL ou demorar. Com `maxRows`, o hook buscava páginas **só em série**.
+- **Mudança:** migração **`20260409120000_etiquetas_lotes_sep_recentes_rpc.sql`** — função `etiquetas_lotes_sep_recentes` (GROUP BY lote) + índice parcial; serviço chama a RPC e cai em fallback **2000** linhas se a RPC falhar. **Pula** o complemento por etiquetas quando já há **200** opções só de transferências. **`/etiquetas`:** meta em chunks de **45** `viagem_id` + `try/finally` no loading. **`useRealtimeQuery`:** faixas com `maxRows` em paralelo (4).
+- **Impacto:** select de remessas e abertura de lote grande (ex.: Stock Delivery / CEP) ficam muito mais rápidos após aplicar a migração no Supabase.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-09 - Impressão Pi: remessas grandes (multi-job + QRs em lotes)
 - **Problema:** um único HTML com centenas de etiquetas virava payload WebSocket enorme; `Promise.all` em todos os QRs estourava memória no browser; timeout fixo de 120 s era curto para jobs grandes.
 - **Mudança:** `enviarEtiquetasParaPiEmMultiplosJobs` em `pi-print-ws-client.ts` (padrão ~40 etiquetas/job, `jobName` `base i/N`, `timeoutMs` até 10 min proporcional ao lote, delay ~350 ms entre jobs). `gerarDocumentoHtmlEtiquetas` gera data URLs dos QRs em **fatias** de 28. Integrado em **Separar por Loja**, **`/etiquetas`** e **`/producao`** (Pi).

@@ -9,8 +9,11 @@ export type BuscarOpcoesRemessaSepOpts = {
 
 /** Transferências matriz→loja recentes (mesma base que Separar por Loja). */
 const LIM_TRANSFERENCIAS_VIAGEM = 200;
-/** Scan em `etiquetas` para lotes SEP ativos não cobertos pela lista de transferências. */
-const SCAN_ETIQUETAS_LOTES_FALLBACK = 10000;
+/**
+ * Fallback se a RPC `etiquetas_lotes_sep_recentes` não existir (migração não aplicada).
+ * Bem menor que o antigo 10k — cada lote tem N linhas; 10k linhas ≠ 10k remessas e travava o app.
+ */
+const SCAN_ETIQUETAS_LOTES_FALLBACK = 2000;
 /** Teto total de opções no select (evita listas enormes no DOM). */
 const MAX_OPCOES_REMESSA_TOTAL = 200;
 
@@ -67,22 +70,38 @@ export async function buscarOpcoesRemessaSepParaEtiquetas(
   let ordenadas = ordenarPorCreatedAtDesc(opcoes);
   const seen = new Set(ordenadas.map((o) => o.lote));
 
-  const { data: slim, error: eSlim } = await supabase
-    .from('etiquetas')
-    .select('lote, created_at')
-    .eq('excluida', false)
-    .like('lote', 'SEP-%')
-    .order('created_at', { ascending: false })
-    .limit(SCAN_ETIQUETAS_LOTES_FALLBACK);
+  if (ordenadas.length < MAX_OPCOES_REMESSA_TOTAL) {
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc('etiquetas_lotes_sep_recentes', {
+      p_limit: MAX_OPCOES_REMESSA_TOTAL,
+    });
 
-  if (eSlim) throw eSlim;
+    if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+      for (const row of rpcRows as { lote?: string; created_at?: string }[]) {
+        if (ordenadas.length >= MAX_OPCOES_REMESSA_TOTAL) break;
+        const l = row.lote != null ? String(row.lote).trim() : '';
+        if (!l || seen.has(l)) continue;
+        seen.add(l);
+        ordenadas.push({ lote: l, created_at: String(row.created_at ?? '') });
+      }
+    } else {
+      const { data: slim, error: eSlim } = await supabase
+        .from('etiquetas')
+        .select('lote, created_at')
+        .eq('excluida', false)
+        .like('lote', 'SEP-%')
+        .order('created_at', { ascending: false })
+        .limit(SCAN_ETIQUETAS_LOTES_FALLBACK);
 
-  for (const row of slim || []) {
-    if (ordenadas.length >= MAX_OPCOES_REMESSA_TOTAL) break;
-    const l = row.lote as string | null;
-    if (!l || seen.has(l)) continue;
-    seen.add(l);
-    ordenadas.push({ lote: l, created_at: String(row.created_at) });
+      if (eSlim) throw eSlim;
+
+      for (const row of slim || []) {
+        if (ordenadas.length >= MAX_OPCOES_REMESSA_TOTAL) break;
+        const l = row.lote as string | null;
+        if (!l || seen.has(l)) continue;
+        seen.add(l);
+        ordenadas.push({ lote: l, created_at: String(row.created_at) });
+      }
+    }
   }
 
   ordenadas = ordenarPorCreatedAtDesc(ordenadas);

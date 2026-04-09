@@ -88,15 +88,35 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
 
         if (maxRows != null && maxRows > 0) {
           const cap = maxRows;
+          const offsets: number[] = [];
           for (let offset = 0; offset < cap; offset += batchSize) {
-            const end = Math.min(offset + batchSize - 1, cap - 1);
-            const { data: page, error: fetchError } = await applyClauses(
-              supabase.from(table).select(select).range(offset, end)
+            offsets.push(offset);
+          }
+          const maxParallel = 4;
+          for (let i = 0; i < offsets.length; i += maxParallel) {
+            const wave = offsets.slice(i, i + maxParallel);
+            const responses = await Promise.all(
+              wave.map(async (offset) => {
+                const end = Math.min(offset + batchSize - 1, cap - 1);
+                const { data: page, error: fetchError } = await applyClauses(
+                  supabase.from(table).select(select).range(offset, end)
+                );
+                if (fetchError) throw fetchError;
+                return { offset, page: page || [] };
+              })
             );
-            if (fetchError) throw fetchError;
-            const chunk = page || [];
-            result.push(...chunk);
-            if (chunk.length === 0 || chunk.length < end - offset + 1) break;
+            responses.sort((a, b) => a.offset - b.offset);
+            let shortPage = false;
+            for (const { offset, page } of responses) {
+              result.push(...page);
+              const end = Math.min(offset + batchSize - 1, cap - 1);
+              const expected = end - offset + 1;
+              if (page.length === 0 || page.length < expected) {
+                shortPage = true;
+                break;
+              }
+            }
+            if (shortPage) break;
           }
         } else {
           const { count, error: countError } = await applyClauses(

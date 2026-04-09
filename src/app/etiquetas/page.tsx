@@ -82,6 +82,8 @@ const MAX_ETIQUETAS_POR_REMESSA = 6000;
 const ETIQUETAS_VISIVEIS_POR_GRUPO = 50;
 const REFETCH_DEBOUNCE_ETIQUETAS_MS = 600;
 const CHUNK_ITENS_TOKENS_ETIQUETAS = 400;
+/** PostgREST: `.in('viagem_id', …)` com centenas de UUID estoura URL ou demora no gateway. */
+const CHUNK_VIAGEM_IDS_META_REMESSA = 45;
 
 async function carregarItensTokensPorIds(
   ids: string[]
@@ -415,22 +417,39 @@ export default function EtiquetasPage() {
     let cancelled = false;
     setCarregandoMetaRemessas(true);
     void (async () => {
-      const { data, error } = await supabase
-        .from('transferencias')
-        .select(
-          'viagem_id, destino_id, created_at, status, origem:locais!origem_id(nome), destino:locais!destino_id(nome)'
-        )
-        .eq('tipo', 'WAREHOUSE_STORE')
-        .in('viagem_id', ids);
-      if (cancelled) return;
-      setCarregandoMetaRemessas(false);
-      if (error || !data) {
-        setMetaPorViagemId(new Map());
+      type RowMeta = {
+        viagem_id: string | null | undefined;
+        destino_id: string | null | undefined;
+        created_at: string | null | undefined;
+        status: string | null | undefined;
+        origem: { nome?: string } | null;
+        destino: { nome?: string } | null;
+      };
+      const todasLinhas: RowMeta[] = [];
+      try {
+        for (let i = 0; i < ids.length; i += CHUNK_VIAGEM_IDS_META_REMESSA) {
+          const slice = ids.slice(i, i + CHUNK_VIAGEM_IDS_META_REMESSA);
+          const { data, error } = await supabase
+            .from('transferencias')
+            .select(
+              'viagem_id, destino_id, created_at, status, origem:locais!origem_id(nome), destino:locais!destino_id(nome)'
+            )
+            .eq('tipo', 'WAREHOUSE_STORE')
+            .in('viagem_id', slice);
+          if (error) throw error;
+          if (data?.length) todasLinhas.push(...(data as RowMeta[]));
+        }
+      } catch {
+        if (!cancelled) {
+          setMetaPorViagemId(new Map());
+        }
         return;
+      } finally {
+        setCarregandoMetaRemessas(false);
       }
-      type RowMeta = (typeof data)[number];
+      if (cancelled) return;
       const porViagem = new Map<string, RowMeta[]>();
-      for (const row of data) {
+      for (const row of todasLinhas) {
         const vid = row.viagem_id as string | null | undefined;
         if (!vid) continue;
         const arr = porViagem.get(vid) ?? [];
@@ -447,8 +466,8 @@ export default function EtiquetasPage() {
           origemNome: o?.nome?.trim() || 'Origem não informada',
           destinoNome: d?.nome?.trim() || 'Destino não informado',
           destinoLocalId: (row.destino_id as string | null | undefined) ?? null,
-          createdAt: row.created_at,
-          status: row.status,
+          createdAt: String(row.created_at ?? ''),
+          status: String(row.status ?? ''),
         });
       }
       setMetaPorViagemId(m);
@@ -802,7 +821,7 @@ export default function EtiquetasPage() {
           <strong>{MAX_ETIQUETAS_POR_REMESSA.toLocaleString('pt-BR')}</strong> unidades por lote). Lista de remessas:{' '}
           <strong>transferências</strong> matriz→loja (como «Envios já registrados»; na indústria, filtradas pela sua
           origem), até <strong>{ETIQUETAS_UI_LIMITES_REMESA.maxOpcoesNoSelect.toLocaleString('pt-BR')}</strong> opções,
-          completando com lotes <code className="text-[10px]">SEP-…</code> ativos em etiquetas.
+          completando com lotes <code className="text-[10px]">SEP-…</code> distintos (RPC no banco quando a migração estiver aplicada; senão leitura limitada em etiquetas).
         </p>
       </div>
 
