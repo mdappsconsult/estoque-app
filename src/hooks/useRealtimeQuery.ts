@@ -17,6 +17,11 @@ interface UseRealtimeQueryOptions<T> {
   maxRows?: number;
   /** Atrasa refetch após evento realtime (ms). Evita tempestade de requisições. */
   refetchDebounceMs?: number;
+  /**
+   * Se true, após a primeira carga bem-sucedida os refetch (realtime ou `refetch()`) não ligam `loading`
+   * e não limpam a lista em caso de erro — evita piscar a tela inteira.
+   */
+  preserveDataWhileRefetching?: boolean;
 }
 
 interface UseRealtimeQueryResult<T> {
@@ -40,6 +45,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     pageSize = 1000,
     maxRows,
     refetchDebounceMs = 0,
+    preserveDataWhileRefetching = false,
   } = options;
 
   const [data, setData] = useState<T[]>([]);
@@ -48,6 +54,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
   const channelRef = useRef<RealtimeChannel | null>(null);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedOnceRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     if (inFlightRef.current) {
@@ -55,7 +62,9 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     }
 
     const task = (async () => {
-      setLoading(true);
+      const silent =
+        preserveDataWhileRefetching && hasLoadedOnceRef.current;
+      if (!silent) setLoading(true);
       try {
         const filtrosAplicados = [...(filters || []), ...(filter ? [filter] : [])];
         /* Encadeamento dinâmico do client PostgREST (tipos internos não expostos de forma estável). */
@@ -99,6 +108,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
           if (total === 0) {
             setData([]);
             setError(null);
+            hasLoadedOnceRef.current = true;
             return;
           }
 
@@ -143,12 +153,16 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
 
         setData(finalData);
         setError(null);
+        hasLoadedOnceRef.current = true;
       } catch (err) {
         console.error(`Erro ao buscar ${table}:`, err);
-        setData([]);
-        setError(err as Error);
+        if (!silent) {
+          setData([]);
+          setError(err as Error);
+        }
+        hasLoadedOnceRef.current = true;
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     })();
 
@@ -171,10 +185,12 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     transform,
     pageSize,
     maxRows,
+    preserveDataWhileRefetching,
   ]);
 
   useEffect(() => {
     if (!enabled) {
+      hasLoadedOnceRef.current = false;
       setLoading(false);
       setData([]);
       setError(null);

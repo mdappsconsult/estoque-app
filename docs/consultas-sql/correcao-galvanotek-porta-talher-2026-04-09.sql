@@ -1,0 +1,19 @@
+-- Correção aplicada em produção (2026-04-09): unidade de rastreio = caixa (1 QR/caixa)
+--
+-- Contexto: produtos comprados por caixa com muitas peças (700 / 3000) tinham sido lançados com
+-- fator = peças por caixa → milhares de itens/QR. Estoque físico conferia em caixas (27 / 19 / 9).
+--
+-- Ação executada (transação única):
+-- 1) Manter os N itens mais antigos EM_ESTOQUE por produto (N = caixas reais).
+-- 2) Remover os demais itens (sem vínculo em transferências/baixas neste projeto).
+-- 3) Ajustar lotes: quantidade = count(itens do lote), custo_unitario = preço da caixa.
+-- 4) Remover lotes sem itens.
+-- 5) Atualizar nomes/custo_referencia nos produtos.
+-- 6) Upsert em estoque (quantidade = itens EM_ESTOQUE).
+--
+-- IDs usados no deploy (substitua se reproduzir em outro banco):
+--   Pote 30 ml  → fb3aeaa4-b86e-4ad3-b240-661f7bb6fdc2 → nome «Pote Galvanotek 30 ml», 27 cx, R$ 112
+--   Pote 60 ml  → edc6aadc-8da9-498b-b6e6-ce3992f6d407 → nome «Pote Galvanotek 60 ml», 19 cx, R$ 126
+--   Porta talher → 31f20eb0-133c-4005-97aa-0887d9ba102b → 9 cx, R$ 286,98
+--
+-- Antes de qualquer replay: backup; conferir FKs (transferencia_itens, baixas, etc.) nos itens a apagar.

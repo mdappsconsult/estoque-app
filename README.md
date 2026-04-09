@@ -11,6 +11,7 @@ PWA de controle de estoque por unidade, com rastreio por QR do inicio ao fim.
 - `APP_LOGICA.md`: especificacao funcional de negocio
 - `SISTEMA_ESTRUTURA.md`: estrutura de evolucao do sistema sem perder relevancia
 - `SPRINT_1.md`: execucao e status da sprint atual
+- `docs/consultas-sql/README.md`: scripts SQL no Supabase (estoque, operadoras, legado unidade de rastreio)
 
 ## Objetivo do projeto
 

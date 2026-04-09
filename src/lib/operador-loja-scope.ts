@@ -1,5 +1,48 @@
 import { Usuario } from '@/types/database';
 
+/** Escopo da tela Validades: loja, indústria (local padrão) ou visão consolidada (gerência). */
+export type EscopoValidades =
+  | { tipo: 'local'; localId: string; contexto: 'loja' | 'industria' }
+  | { tipo: 'todos_locais' }
+  | { tipo: 'indisponivel'; mensagem: string };
+
+/**
+ * Define qual `local_atual_id` filtra itens em validade — ou todos os locais para dono/gerente.
+ */
+export function escopoValidadesPorPerfil(usuario: Usuario | null): EscopoValidades {
+  if (!usuario) {
+    return { tipo: 'indisponivel', mensagem: '' };
+  }
+  const p = usuario.perfil;
+  if (p === 'OPERATOR_STORE') {
+    if (!usuario.local_padrao_id) {
+      return {
+        tipo: 'indisponivel',
+        mensagem:
+          'Sem loja vinculada ao usuário. Cadastre a loja em Usuários e entre de novo.',
+      };
+    }
+    return { tipo: 'local', localId: usuario.local_padrao_id, contexto: 'loja' };
+  }
+  if (p === 'OPERATOR_WAREHOUSE' || p === 'OPERATOR_WAREHOUSE_DRIVER') {
+    if (!usuario.local_padrao_id) {
+      return {
+        tipo: 'indisponivel',
+        mensagem:
+          'Sem local da indústria vinculado ao usuário. Cadastre o local padrão em Usuários e entre de novo.',
+      };
+    }
+    return { tipo: 'local', localId: usuario.local_padrao_id, contexto: 'industria' };
+  }
+  if (p === 'MANAGER' || p === 'ADMIN_MASTER') {
+    return { tipo: 'todos_locais' };
+  }
+  return {
+    tipo: 'indisponivel',
+    mensagem: 'Seu perfil não pode consultar validades nesta tela.',
+  };
+}
+
 /**
  * UUID da loja (`STORE`) quando o usuário é operador de loja com `local_padrao_id`.
  * Usado para escopo único em estoque, recebimento, validades etc. — nunca listar indústria/outras lojas.

@@ -154,6 +154,9 @@ export default function EntradaCompraPage() {
   );
   const quantidadeUnitaria = quantidadeCompra * fatorUnidades;
   const custoUnitarioCalculado = fatorUnidades > 0 ? custoEmbalagem / fatorUnidades : 0;
+  /** Cada unidade do lote vira até um QR na separação; valores altos geram muitas etiquetas. */
+  const avisoMuitosQrsSeparacao =
+    form.unidade_compra !== 'UN' && fatorUnidades > 50 && quantidadeUnitaria > 0;
 
   const abrirNovaCategoria = () => {
     setCategoriaEditandoId(null);
@@ -354,8 +357,10 @@ export default function EntradaCompraPage() {
     if (!form.fornecedor.trim()) return alert('Fornecedor é obrigatório');
     if (quantidadeCompra <= 0) return alert('Quantidade comprada deve ser maior que zero');
     if (custoEmbalagem < 0) return alert('Custo não pode ser negativo');
-    if (form.unidade_compra !== 'UN' && fatorUnidades <= 1) {
-      return alert('Para caixa/fardo, informe quantas unidades existem em cada embalagem');
+    if (form.unidade_compra !== 'UN' && fatorUnidades < 1) {
+      return alert(
+        'Para caixa/fardo, informe quantas unidades rastreáveis existem em cada embalagem (mínimo 1). Use 1 se só houver um QR por caixa/fardo.'
+      );
     }
     if (quantidadeUnitaria <= 0) {
       return alert('Quantidade unitária calculada inválida. Revise os campos de embalagem.');
@@ -378,9 +383,9 @@ export default function EntradaCompraPage() {
           : 'fardo(s)';
     const confirmou = window.confirm(
       `Confirmar compra de ${quantidadeCompra} ${labelUnidadeCompra}?\n` +
-      `Entrada no estoque: ${quantidadeUnitaria} unidade(s) no lote (sem QR por enquanto).\n` +
-      `Os códigos QR serão gerados na separação para a loja ou ao consumir na produção.\n` +
-      `Custo unitário calculado: R$ ${custoUnitarioCalculado.toFixed(2)}`
+      `Entrada no lote: ${quantidadeUnitaria} unidade(s) rastreável(eis) (sem QR ainda). Cada uma poderá gerar um QR na separação ou na produção.\n` +
+      `Se você só cola um adesivo na caixa/fardo inteiro, essa quantidade deve ser o número de caixas/fardos (use «Unidades por embalagem» = 1 ou modo Unidade por caixa).\n` +
+      `Custo unitário calculado (por unidade rastreável no lote): R$ ${custoUnitarioCalculado.toFixed(2)}`
     );
     if (!confirmou) return;
     setSaving(true);
@@ -630,7 +635,8 @@ export default function EntradaCompraPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Registrar Compra</h1>
           <p className="text-sm text-gray-500">
-            Cada lançamento gera um lote com validade; os QR são emitidos na saída (separação) ou no consumo (produção)
+            O lote guarda <strong>unidades rastreáveis</strong> (cada uma → até um QR na separação). Caixa com muitas peças
+            internas: conte <strong>caixas</strong>, não peças — veja o aviso abaixo no formulário.
           </p>
         </div>
       </div>
@@ -641,7 +647,8 @@ export default function EntradaCompraPage() {
           <div>
             <p className="font-semibold text-green-800">Lote registrado!</p>
             <p className="text-sm text-green-600">
-              {resultado.quantidadeUnidades} unidade(s) registradas no lote. QR ao separar para a loja ou ao usar na produção.
+              {resultado.quantidadeUnidades} unidade(s) rastreável(eis) no lote. Cada uma pode virar um QR ao separar para a
+              loja ou ao usar na produção.
             </p>
           </div>
         </div>
@@ -735,6 +742,9 @@ export default function EntradaCompraPage() {
                 ? ' — abaixo ou no limite; considere repor.'
                 : null}
             </p>
+            <p className="mt-2 text-xs opacity-90 border-t border-black/5 pt-2">
+              O mínimo e este saldo contam <strong>unidades com QR</strong> (ex.: se o produto é «caixa fechada», cada caixa = 1).
+            </p>
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -746,27 +756,40 @@ export default function EntradaCompraPage() {
               { value: 'FARDO', label: 'Fardo' },
             ]}
             value={form.unidade_compra}
-            onChange={(e) =>
+            onChange={(e) => {
+              const v = e.target.value as UnidadeCompra;
               setForm((prev) => ({
                 ...prev,
-                unidade_compra: e.target.value as UnidadeCompra,
-                itens_por_embalagem: e.target.value === 'UN' ? '1' : prev.itens_por_embalagem,
-              }))
-            }
+                unidade_compra: v,
+                itens_por_embalagem:
+                  v === 'UN' ? '1' : prev.unidade_compra === 'UN' ? '1' : prev.itens_por_embalagem,
+              }));
+            }}
           />
           {form.unidade_compra === 'UN' ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 flex items-center">
-              Compra unitária: cada item comprado gera 1 QR.
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              <p>
+                Cada <strong>unidade comprada</strong> vira 1 linha no lote e, na separação, até <strong>1 QR</strong>. Se a
+                unidade física for uma <strong>caixa inteira</strong>, a quantidade é o número de caixas (não o de tampas
+                dentro).
+              </p>
             </div>
           ) : (
-            <Input
-              label="Unidades por embalagem"
-              type="number"
-              min="2"
-              value={form.itens_por_embalagem}
-              onChange={(e) => setForm({ ...form, itens_por_embalagem: e.target.value })}
-              required
-            />
+            <div className="space-y-1.5">
+              <Input
+                label="Unidades rastreáveis por embalagem"
+                type="number"
+                min="1"
+                value={form.itens_por_embalagem}
+                onChange={(e) => setForm({ ...form, itens_por_embalagem: e.target.value })}
+                required
+              />
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Quantas <strong>unidades do lote</strong> (e futuros QRs) cada caixa/fardo representa. Só um adesivo na
+                embalagem fechada → use <strong>1</strong>. O total de peças dentro (ex.: 700 tampas) pode ficar só no{' '}
+                <strong>nome do produto</strong>, não aqui.
+              </p>
+            </div>
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -800,11 +823,27 @@ export default function EntradaCompraPage() {
             required
           />
         </div>
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-          Conversão da compra: <span className="font-semibold tabular-nums">{quantidadeUnitaria}</span> item(ns) unitários com QR
-          {' '}• Custo unitário estimado:{' '}
-          <span className="font-semibold tabular-nums">R$ {custoUnitarioCalculado.toFixed(2)}</span>
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 space-y-1">
+          <p>
+            Total no lote: <span className="font-semibold tabular-nums">{quantidadeUnitaria}</span> unidade(s){' '}
+            <strong>rastreável(eis)</strong> (cada uma pode gerar um QR na separação ou na produção). Custo por unidade
+            rastreável: <span className="font-semibold tabular-nums">R$ {custoUnitarioCalculado.toFixed(2)}</span>
+          </p>
         </div>
+        {avisoMuitosQrsSeparacao ? (
+          <div
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+            role="status"
+          >
+            <p className="font-medium">Muitos QRs na separação</p>
+            <p className="mt-1 leading-relaxed">
+              Com <span className="tabular-nums font-semibold">{fatorUnidades}</span> unidades rastreáveis por embalagem, ao
+              enviar mercadoria para a loja o sistema poderá gerar etiquetas demais para conferir. Se a operação real usa{' '}
+              <strong>só um QR por caixa/fardo</strong>, ajuste o campo acima para <strong>1</strong> ou use modo{' '}
+              <strong>Unidade</strong> contando caixas.
+            </p>
+          </div>
+        ) : null}
         <Input
           label="Fornecedor"
           required
@@ -877,7 +916,7 @@ export default function EntradaCompraPage() {
             !form.local_id ||
             (produtoExigeValidade && !form.data_validade) ||
             !form.fornecedor.trim() ||
-            (form.unidade_compra !== 'UN' && fatorUnidades <= 1) ||
+            (form.unidade_compra !== 'UN' && fatorUnidades < 1) ||
             quantidadeUnitaria <= 0 ||
             (!form.sem_nota_fiscal && !form.nota_fiscal.trim()) ||
             (form.sem_nota_fiscal && !form.motivo_sem_nota.trim())

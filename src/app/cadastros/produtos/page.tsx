@@ -1,26 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Edit2, Trash2, Snowflake, Thermometer, Loader2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import ProdutoModal, { type ProdutoModalSavePayload } from '@/components/produtos/ProdutoModal';
-import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
+import {
+  fetchProdutosCadastroLista,
+  type ProdutoComGruposLista,
+} from '@/lib/services/produtos-cadastro-lista';
 import { supabase } from '@/lib/supabase';
-import { Produto } from '@/types/database';
 
-interface FamiliaRow {
-  id: string;
-  nome: string;
-  cor: string;
-}
-
-interface ProdutoComGrupos extends Produto {
-  familia: FamiliaRow | null;
-  grupos: { id: string; nome: string; cor: string }[];
-  conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
-}
+/** Alias local — mesmo formato esperado pelo `ProdutoModal`. */
+type ProdutoComGrupos = ProdutoComGruposLista;
 
 const LABEL_ORIGEM: Record<string, string> = {
   COMPRA: 'Compra',
@@ -28,62 +21,68 @@ const LABEL_ORIGEM: Record<string, string> = {
   AMBOS: 'Ambos',
 };
 
-type ProdutoRowRaw = Record<string, unknown> & { id: string; familia_id?: string | null };
-type GrupoEmb = { id: string; nome: string; cor: string };
-type PgGrupoRow = { grupos: GrupoEmb | GrupoEmb[] | null };
-
-function primeiroGrupoRel(g: PgGrupoRow['grupos']): GrupoEmb | null {
-  if (g == null) return null;
-  return Array.isArray(g) ? (g[0] ?? null) : g;
-}
+const REALTIME_DEBOUNCE_MS = 350;
 
 export default function ProdutosPage() {
-  const { data: produtosRaw, loading, refetch } = useRealtimeQuery<ProdutoComGrupos>({
-    table: 'produtos',
-    select: '*',
-    orderBy: { column: 'nome', ascending: true },
-    transform: async (prods) => {
-      const rows = prods as ProdutoRowRaw[];
-      const famIds = [
-        ...new Set(
-          rows
-            .map((p) => p.familia_id)
-            .filter((x): x is string => typeof x === 'string' && x.length > 0)
-        ),
-      ];
-      let famMap = new Map<string, FamiliaRow>();
-      if (famIds.length > 0) {
-        const { data: fams } = await supabase.from('familias').select('id, nome, cor').in('id', famIds);
-        famMap = new Map((fams || []).map((f) => [f.id, f]));
-      }
-      const result = await Promise.all(
-        rows.map(async (produto) => {
-          const { data: gruposData } = await supabase
-            .from('produto_grupos')
-            .select('grupo_id, grupos(id, nome, cor)')
-            .eq('produto_id', produto.id);
-          const { data: conservacoesData } = await supabase
-            .from('conservacoes')
-            .select('*')
-            .eq('produto_id', produto.id);
-          return {
-            ...produto,
-            origem: (produto.origem as Produto['origem']) ?? 'AMBOS',
-            estoque_minimo: (produto.estoque_minimo as number | undefined) ?? 0,
-            custo_referencia: (produto.custo_referencia as number | null | undefined) ?? null,
-            familia: produto.familia_id ? famMap.get(produto.familia_id) ?? null : null,
-            grupos: (gruposData || [])
-              .map((pg: PgGrupoRow) => primeiroGrupoRel(pg.grupos))
-              .filter((g): g is GrupoEmb => g != null),
-            conservacoes: conservacoesData || [],
-          } as ProdutoComGrupos;
-        })
-      );
-      return result;
-    },
-  });
+  const [produtos, setProdutos] = useState<ProdutoComGrupos[]>([]);
+  const [loadingInicial, setLoadingInicial] = useState(true);
+  const [recarregandoSilencioso, setRecarregandoSilencioso] = useState(false);
+  const [erroLista, setErroLista] = useState<string | null>(null);
 
-  const produtos = produtosRaw;
+  const primeiraCargaOk = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const carregar = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true && primeiraCargaOk.current;
+    if (!silent) {
+      if (!primeiraCargaOk.current) setLoadingInicial(true);
+      else setRecarregandoSilencioso(true);
+    }
+    setErroLista(null);
+    try {
+      const { produtos: lista, error } = await fetchProdutosCadastroLista();
+      if (error) {
+        setErroLista(error.message);
+        if (!primeiraCargaOk.current) setProdutos([]);
+      } else {
+        setProdutos(lista);
+        primeiraCargaOk.current = true;
+      }
+    } catch (e) {
+      setErroLista(e instanceof Error ? e.message : 'Erro ao carregar produtos');
+      if (!primeiraCargaOk.current) setProdutos([]);
+    } finally {
+      setLoadingInicial(false);
+      setRecarregandoSilencioso(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregar();
+  }, [carregar]);
+
+  useEffect(() => {
+    const agendar = () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        void carregar({ silent: true });
+      }, REALTIME_DEBOUNCE_MS);
+    };
+
+    const channel = supabase
+      .channel('produtos-cadastro-lista')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, agendar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'produto_grupos' }, agendar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conservacoes' }, agendar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'familias' }, agendar)
+      .subscribe();
+
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [carregar]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filtroUnidade, setFiltroUnidade] = useState('todos');
@@ -110,6 +109,8 @@ export default function ProdutosPage() {
   const produtosFiltrados = produtos.filter((produto) => {
     if (!produto.nome.toLowerCase().includes(searchTerm.toLowerCase())) return false;
     if (filtroOrigem !== 'todos' && (produto.origem || 'AMBOS') !== filtroOrigem) return false;
+    if (filtroUnidade === 'ativos' && produto.status !== 'ativo') return false;
+    if (filtroUnidade === 'inativos' && produto.status !== 'inativo') return false;
     return true;
   });
 
@@ -128,6 +129,7 @@ export default function ProdutosPage() {
       try {
         const { error } = await supabase.from('produtos').delete().eq('id', produtoId);
         if (error) throw error;
+        await carregar({ silent: true });
       } catch (error) {
         console.error('Erro ao excluir produto:', error);
         alert('Erro ao excluir produto');
@@ -230,7 +232,7 @@ export default function ProdutosPage() {
       }
 
       setModalOpen(false);
-      await refetch();
+      await carregar({ silent: true });
     } catch (error) {
       console.error('Erro ao salvar produto:', error);
       alert('Erro ao salvar produto');
@@ -243,28 +245,49 @@ export default function ProdutosPage() {
     return <Thermometer className="w-5 h-5 text-gray-500" />;
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
+  if (loadingInicial && !primeiraCargaOk.current) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
+      </div>
+    );
   }
 
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Produtos</h1>
-        <Button variant="primary" onClick={handleCriarProduto} className="w-full sm:w-auto">Criar produto</Button>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Produtos</h1>
+          {recarregandoSilencioso && (
+            <Loader2 className="w-5 h-5 text-red-500 animate-spin shrink-0" aria-hidden />
+          )}
+        </div>
+        <Button variant="primary" onClick={handleCriarProduto} className="w-full sm:w-auto">
+          Criar produto
+        </Button>
       </div>
+
+      {erroLista && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex flex-wrap items-center justify-between gap-2">
+          <span>{erroLista}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => void carregar()}>
+            Tentar de novo
+          </Button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
         <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          Cadastro de produto define os padrões. Para lançar compras do dia a dia (com validade e lote reais), use a tela <strong>Registrar Compra</strong>.
+          Cadastro de produto define os padrões. Para lançar compras do dia a dia (com validade e lote
+          reais), use a tela <strong>Registrar Compra</strong>.
         </div>
         <div className="flex flex-wrap gap-4">
           <div className="w-full sm:w-64">
             <Select
               options={[
-                { value: 'todos', label: 'Produtos da Unidade' },
-                { value: 'ativos', label: 'Produtos Ativos' },
-                { value: 'inativos', label: 'Produtos Inativos' },
+                { value: 'todos', label: 'Todos (ativos e inativos)' },
+                { value: 'ativos', label: 'Só ativos' },
+                { value: 'inativos', label: 'Só inativos' },
               ]}
               value={filtroUnidade}
               onChange={(e) => setFiltroUnidade(e.target.value)}
@@ -284,7 +307,12 @@ export default function ProdutosPage() {
             />
           </div>
           <div className="w-full sm:flex-1 relative min-w-0">
-            <Input placeholder="Buscar produto pelo nome" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+            <Input
+              placeholder="Buscar produto pelo nome"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
             <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
         </div>
@@ -310,6 +338,9 @@ export default function ProdutosPage() {
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-500">Produto</span>
                   <p className="font-semibold text-gray-900">{produto.nome}</p>
+                  {produto.status === 'inativo' && (
+                    <span className="text-xs text-amber-700">Inativo</span>
+                  )}
                 </td>
                 <td className="px-4 py-4 text-sm text-gray-700">
                   {LABEL_ORIGEM[produto.origem] || produto.origem}
@@ -338,8 +369,18 @@ export default function ProdutosPage() {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => handleEditarProduto(produto)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Edit2 className="w-5 h-5" /></button>
-                    <button onClick={() => handleExcluirProduto(produto.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-5 h-5" /></button>
+                    <button
+                      onClick={() => handleEditarProduto(produto)}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Edit2 className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => handleExcluirProduto(produto.id)}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -347,11 +388,18 @@ export default function ProdutosPage() {
           </tbody>
         </table>
         {produtosFiltrados.length === 0 && (
-          <div className="text-center py-12"><p className="text-gray-500">Nenhum produto encontrado.</p></div>
+          <div className="text-center py-12">
+            <p className="text-gray-500">Nenhum produto encontrado.</p>
+          </div>
         )}
       </div>
 
-      <ProdutoModal isOpen={modalOpen} onClose={() => setModalOpen(false)} produto={produtoEditando} onSave={handleSalvarProduto} />
+      <ProdutoModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        produto={produtoEditando}
+        onSave={handleSalvarProduto}
+      />
     </div>
   );
 }

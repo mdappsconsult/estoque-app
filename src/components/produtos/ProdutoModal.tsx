@@ -341,6 +341,10 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
                 Fornecedor e custo sugerem valores na <strong>Entrada de compra</strong>; cada NF registra o valor real no lote.
               </p>
             )}
+            <p className="text-xs text-gray-600 -mt-1">
+              Use a mesma <strong>unidade de rastreio</strong> que na separação (ex.: caixa fechada = 1 unidade; não use
+              quantidade de peças dentro da caixa salvo que cada peça tenha QR).
+            </p>
             <div className="grid grid-cols-2 gap-4">
               <Input
                 label="Estoque mínimo (unidades com QR)"

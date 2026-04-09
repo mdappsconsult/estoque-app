@@ -3,7 +3,6 @@
 import {
   Loader2,
   Truck,
-  CheckCircle,
   Play,
   ChevronDown,
   ChevronRight,
@@ -12,6 +11,7 @@ import {
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import Modal from '@/components/ui/Modal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { aceitarViagem, iniciarViagem } from '@/lib/services/viagens';
@@ -105,15 +105,23 @@ function statusTransferenciaLegivel(s: string): string {
 
 export default function ViagemAceitePage() {
   const { usuario } = useAuth();
-  const { data: viagens, loading } = useRealtimeQuery<ViagemRow>({
+  const { data: viagens, loading, refetch: refetchViagens } = useRealtimeQuery<ViagemRow>({
     table: 'viagens',
     select: '*, motorista:usuarios!motorista_id(nome)',
     orderBy: { column: 'created_at', ascending: false },
+    maxRows: 400,
+    preserveDataWhileRefetching: true,
   });
 
   const [transMap, setTransMap] = useState<Record<string, TransRow[]>>({});
   const [loadingTrans, setLoadingTrans] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  /** Feedback imediato após aceitar/iniciar (refetch já atualiza a lista sem piscar a tela). */
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'info'; text: string } | null>(null);
+  const [erroOperacao, setErroOperacao] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<
+    null | { modo: 'aceitar_iniciar' | 'iniciar'; viagemId: string }
+  >(null);
   /** Viagens com painel de detalhes aberto */
   const [viagemExpandida, setViagemExpandida] = useState<Record<string, boolean>>({});
   /** Por viagem, qual remessa (transferência) está expandida para ver lista unitária */
@@ -163,30 +171,42 @@ export default function ViagemAceitePage() {
     }));
   };
 
-  const handleAceitar = async (viagemId: string) => {
-    if (!usuario) return;
-    const confirmou = window.confirm('Confirmar aceite desta viagem?');
-    if (!confirmou) return;
-    setLoadingAction(viagemId);
-    try {
-      await aceitarViagem(viagemId, usuario.id);
-    } catch (err: unknown) {
-      alert(errMessage(err, 'Erro'));
-    }
-    setLoadingAction(null);
+  const showFeedback = (tone: 'success' | 'info', text: string) => {
+    setFeedback({ tone, text });
+    window.setTimeout(() => setFeedback(null), 6500);
   };
 
-  const handleIniciar = async (viagemId: string) => {
-    if (!usuario) return;
-    const confirmou = window.confirm('Confirmar início desta viagem?');
-    if (!confirmou) return;
+  const fecharModalConfirmacao = () => {
+    if (loadingAction) return;
+    setConfirmModal(null);
+  };
+
+  const executarConfirmacaoModal = async () => {
+    if (!usuario || !confirmModal) return;
+    const { modo, viagemId } = confirmModal;
+    setErroOperacao(null);
     setLoadingAction(viagemId);
     try {
-      await iniciarViagem(viagemId, usuario.id);
+      if (modo === 'aceitar_iniciar') {
+        await aceitarViagem(viagemId, usuario.id);
+        await iniciarViagem(viagemId, usuario.id);
+        showFeedback('success', 'Viagem aceita e já em trânsito. Boa rota!');
+      } else {
+        await iniciarViagem(viagemId, usuario.id);
+        showFeedback(
+          'success',
+          'Viagem iniciada. Boa rota — as unidades de destino já veem o envio em trânsito.'
+        );
+      }
+      await refetchViagens();
+      setConfirmModal(null);
     } catch (err: unknown) {
-      alert(errMessage(err, 'Erro'));
+      setErroOperacao(errMessage(err, 'Operação não concluída'));
+      await refetchViagens();
+      setConfirmModal(null);
+    } finally {
+      setLoadingAction(null);
     }
-    setLoadingAction(null);
   };
 
   const statusBadge = (s: string) => {
@@ -250,6 +270,99 @@ export default function ViagemAceitePage() {
           </p>
         </div>
       </div>
+
+      {feedback && (
+        <div
+          role="status"
+          className={
+            feedback.tone === 'success'
+              ? 'mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900'
+              : 'mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900'
+          }
+        >
+          {feedback.text}
+        </div>
+      )}
+
+      {erroOperacao && (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 flex justify-between gap-3 items-start"
+        >
+          <span>{erroOperacao}</span>
+          <button
+            type="button"
+            onClick={() => setErroOperacao(null)}
+            className="shrink-0 text-red-700 font-medium underline"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
+
+      <Modal
+        isOpen={confirmModal !== null}
+        onClose={() => {
+          if (confirmModal && loadingAction === confirmModal.viagemId) return;
+          fecharModalConfirmacao();
+        }}
+        title={
+          confirmModal?.modo === 'aceitar_iniciar'
+            ? 'Aceitar e iniciar viagem?'
+            : 'Iniciar viagem?'
+        }
+        subtitle={
+          confirmModal?.modo === 'aceitar_iniciar'
+            ? 'Confirme só se já estiver saindo.'
+            : 'As lojas passam a ver o envio em trânsito.'
+        }
+        size="sm"
+      >
+        <div className="px-6 py-4 space-y-4">
+          <p className="text-sm text-gray-600 leading-relaxed">
+            {confirmModal?.modo === 'aceitar_iniciar' ? (
+              <>
+                Você será registrado como motorista, a viagem será aceita e as remessas irão para{' '}
+                <strong>em trânsito</strong> na hora. As unidades de destino podem preparar o recebimento.
+              </>
+            ) : (
+              <>
+                As remessas desta viagem passam para <strong>em trânsito</strong> e as lojas de destino
+                podem preparar o recebimento.
+              </>
+            )}
+          </p>
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={fecharModalConfirmacao}
+              disabled={Boolean(confirmModal && loadingAction === confirmModal.viagemId)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="w-full sm:w-auto"
+              onClick={() => void executarConfirmacaoModal()}
+              disabled={Boolean(confirmModal && loadingAction === confirmModal.viagemId)}
+            >
+              {confirmModal && loadingAction === confirmModal.viagemId ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Processando…
+                </>
+              ) : confirmModal?.modo === 'aceitar_iniciar' ? (
+                'Confirmar e sair'
+              ) : (
+                'Iniciar agora'
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {viagensPendentes.length === 0 && (
         <div className="text-center py-12 text-gray-400">
@@ -408,28 +521,28 @@ export default function ViagemAceitePage() {
                 )}
               </div>
 
-              <div className="px-4 pb-4">
+              <div className="px-4 pb-4 space-y-2">
                 {v.status === 'PENDING' && (
                   <Button
                     variant="primary"
                     className="w-full"
-                    onClick={() => handleAceitar(v.id)}
-                    disabled={loadingAction === v.id}
+                    onClick={() => setConfirmModal({ modo: 'aceitar_iniciar', viagemId: v.id })}
+                    disabled={loadingAction === v.id || loadingTrans}
                   >
                     {loadingAction === v.id ? (
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />
                     ) : (
-                      <CheckCircle className="w-4 h-4 mr-2" />
+                      <Play className="w-4 h-4 mr-2" />
                     )}
-                    Aceitar viagem
+                    Aceitar e iniciar agora
                   </Button>
                 )}
                 {v.status === 'ACCEPTED' && v.motorista_id === usuario?.id && (
                   <Button
                     variant="primary"
                     className="w-full"
-                    onClick={() => handleIniciar(v.id)}
-                    disabled={loadingAction === v.id}
+                    onClick={() => setConfirmModal({ modo: 'iniciar', viagemId: v.id })}
+                    disabled={loadingAction === v.id || loadingTrans}
                   >
                     {loadingAction === v.id ? (
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />

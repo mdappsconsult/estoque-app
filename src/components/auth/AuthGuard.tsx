@@ -6,6 +6,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import MobileHeader from '@/components/layout/MobileHeader';
+import { ValidadeAlertProvider } from '@/components/validade/ValidadeAlertProvider';
+import { ValidadeBanner } from '@/components/validade/ValidadeBanner';
 import { ShieldX } from 'lucide-react';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -63,11 +65,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Authenticated with access
   return (
-    <>
+    <ValidadeAlertProvider>
       <MobileHeader />
-      <main className="p-4 min-h-[calc(100vh-3.5rem)]">
-        {children}
-      </main>
-    </>
+      <ValidadeBanner />
+      <main className="p-4 min-h-[calc(100vh-3.5rem)]">{children}</main>
+    </ValidadeAlertProvider>
   );
 }

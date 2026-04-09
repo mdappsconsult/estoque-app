@@ -40,6 +40,7 @@ Entrada por compra (distribuidora)
 - Cada compra gera um lote de compra com a quantidade informada; **nao** gera linhas em `itens` nem QR na hora.
 - A validade (quando aplicavel) fica em `lotes_compra.data_validade` para uso na emissao posterior.
 - Os QR sao emitidos sob demanda: **Separar por Loja** (manual ou sugestao de reposicao) e **Producao** (consumo de insumos), via FIFO dos lotes no local (`emitirUnidadesCompraFifo`).
+- **Unidade de rastreio vs conteudo da embalagem:** a quantidade no lote e sempre em **unidades rastreaveis** (cada uma pode virar um QR). Ex.: uma caixa fechada com 700 tampas, se so recebe **um** adesivo na loja, deve entrar como **1** unidade por caixa (modo Unidade contando caixas, ou Caixa/Fardo com **1** unidade rastreavel por embalagem). O numero de pecas internas pode constar apenas no **nome** do produto; usar o total de pecas nesse campo gera centenas de QRs na separacao. Consultas de diagnostico legado: `docs/consultas-sql/caixa-unidade-rastreio-legado.sql`.
 - QR nao contem preco.
 - Custo fica salvo no lote.
 - Loja nao tem acesso ao custo.

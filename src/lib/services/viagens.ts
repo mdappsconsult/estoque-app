@@ -54,18 +54,20 @@ export async function aceitarViagem(id: string, motoristaId: string): Promise<vo
     throw new Error('Somente viagens pendentes podem ser aceitas');
   }
 
-  await supabase
+  const { error: upV } = await supabase
     .from('viagens')
     .update({ status: 'ACCEPTED', motorista_id: motoristaId })
     .eq('id', id);
+  if (upV) throw upV;
 
   // Mantém viagem e transferências coerentes: ao aceitar a viagem,
   // transferências pendentes da viagem também viram ACCEPTED.
-  await supabase
+  const { error: upT } = await supabase
     .from('transferencias')
     .update({ status: 'ACCEPTED', aceito_por: motoristaId })
     .eq('viagem_id', id)
     .eq('status', 'AWAITING_ACCEPT');
+  if (upT) throw upT;
 
   await registrarAuditoria({
     usuario_id: motoristaId,
@@ -100,20 +102,35 @@ export async function iniciarViagem(id: string, motoristaId: string): Promise<vo
     throw new Error('Nenhuma transferência aceita para iniciar esta viagem');
   }
 
-  await supabase.from('viagens').update({ status: 'IN_TRANSIT' }).eq('id', id);
+  const { error: upViag } = await supabase
+    .from('viagens')
+    .update({ status: 'IN_TRANSIT' })
+    .eq('id', id);
+  if (upViag) throw upViag;
 
-  for (const t of transferencias || []) {
-    const { data: transItens } = await supabase
-      .from('transferencia_itens')
-      .select('item_id')
-      .eq('transferencia_id', t.id);
+  await Promise.all(
+    transferencias.map(async (t) => {
+      const { data: transItens, error: eTi } = await supabase
+        .from('transferencia_itens')
+        .select('item_id')
+        .eq('transferencia_id', t.id);
+      if (eTi) throw eTi;
 
-    const itemIds = (transItens || []).map(ti => ti.item_id);
-    if (itemIds.length > 0) {
-      await supabase.from('itens').update({ estado: 'EM_TRANSFERENCIA' }).in('id', itemIds);
-    }
-    await supabase.from('transferencias').update({ status: 'IN_TRANSIT' }).eq('id', t.id);
-  }
+      const itemIds = (transItens || []).map((ti) => ti.item_id);
+      if (itemIds.length > 0) {
+        const { error: eIt } = await supabase
+          .from('itens')
+          .update({ estado: 'EM_TRANSFERENCIA' })
+          .in('id', itemIds);
+        if (eIt) throw eIt;
+      }
+      const { error: eTr } = await supabase
+        .from('transferencias')
+        .update({ status: 'IN_TRANSIT' })
+        .eq('id', t.id);
+      if (eTr) throw eTr;
+    })
+  );
 
   await registrarAuditoria({
     usuario_id: motoristaId,

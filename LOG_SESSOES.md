@@ -1,5 +1,59 @@
 # Log de Sessões
 
+### Sessão - 2026-04-09 - Correção de dados: Galvanotek + Porta talher (1 QR = 1 caixa)
+- **Problema:** potes e porta talher estavam com milhares de `itens`/QR (fator peças por caixa); estoque real era **27 / 19 / 9 caixas**.
+- **Ação (Supabase, MCP `execute_sql`):** transação — manter os N itens `EM_ESTOQUE` mais antigos por produto; `DELETE` do excesso; `lotes_compra.quantidade` e `custo_unitario` alinhados à caixa; remoção de lotes vazios; `produtos` (nomes Galvanotek 30/60 ml, `custo_referencia` 112 / 126 / 286,98); `estoque` upsert.
+- **Código:** `entrada-compra` — ao mudar de **Unidade** para **Caixa/Fardo**, força **«Unidades rastreáveis por embalagem» = 1** (evita arrastar fator errado). Registro: `docs/consultas-sql/correcao-galvanotek-porta-talher-2026-04-09.sql` + README da pasta.
+- **Impacto:** saldo agregado e lotes batem com caixas físicas; novas compras devem usar **Caixa** + fator **1** + custo por caixa.
+- **Validação:** consultas pós-SQL (27/19/9, lotes); `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Diagnóstico: erro `data_validade` em Registrar Compra (produção)
+- **Sintoma:** alerta PostgREST «Could not find the 'data_validade' column of 'lotes_compra' in the schema cache» ao salvar em `/entrada-compra` (ex.: sem NF, contagem).
+- **Causa:** código e `schema_public.sql` já esperam `lotes_compra.data_validade` (migração `20260408100000_compra_sem_qr_resumo_estoque.sql`); o **projeto Supabase de produção** aparenta não ter essa migração aplicada (app à frente do banco).
+- **Ação (feita):** migração aplicada via **MCP Supabase** (`apply_migration`) no projeto alinhado ao `.env.local` — coluna `data_validade` (tipo `date`), índice `idx_lotes_compra_produto_local_created`, funções `resumo_estoque_agrupado` / `resumo_estoque_minimo` + `GRANT`.
+- **Validação:** `information_schema` confirma `lotes_compra.data_validade`; repetir **Registrar compra** no app.
+
+### Sessão - 2026-04-09 - Unidade de rastreio: caixa com muitas peças, um QR
+- **Problema:** compra em caixa com centenas de peças internas gerava igual número de unidades no lote e, na separação, QRs demais para a loja.
+- **Mudança:** `entrada-compra`: permite **1** em «Unidades rastreáveis por embalagem» (antes mínimo 2); textos de ajuda, resumo e confirmação alinhados a «unidade rastreável ≠ peça dentro da caixa»; aviso âmbar se fator por embalagem **> 50**; dica no hint de estoque. `ProdutoModal`: nota no bloco estoque mínimo. SQL de diagnóstico/notas: `docs/consultas-sql/caixa-unidade-rastreio-legado.sql` + README da pasta. `APP_LOGICA.md`, `CONTEXTO_ATUAL.md`.
+- **Impacto:** operação pode registrar **uma caixa = uma unidade rastreável** sem mudar o modelo `itens`/QR.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Cadastros → Produtos: lista sem N+1
+- **Problema:** após carregar todos os produtos, o `transform` do `useRealtimeQuery` fazia **2 consultas por produto** (`produto_grupos` e `conservacoes`).
+- **Mudança:** serviço `fetchProdutosCadastroLista` (`produtos-cadastro-lista.ts`) — embeds em uma query + fallback `.in` em lotes; página com estado local, realtime Supabase (debounce), primeira carga vs. recarga silenciosa, filtro ativo/inativo, faixa de erro e **Tentar de novo**; recarga após salvar/excluir.
+- **Impacto:** menos idas ao Supabase e carregamento mais rápido em bases grandes.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Viagem / Aceite: confirmação no app + um só fluxo pendente
+- **UX:** removido «Só aceitar»; pendente só **Aceitar e iniciar agora** (abre `Modal`). **Iniciar viagem** (estado `ACCEPTED` legado) usa o mesmo modal. Sem `window.confirm` / `alert`; erro em faixa vermelha com Fechar. Modal não fecha por overlay/ESC enquanto **Processando…**
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Viagem / Aceite: resposta imediata e fluxo no celular
+- **Problema:** após aceitar/iniciar, a tela parecia “não fazer nada” e depois atualizava — `useRealtimeQuery` ligava `loading` em todo refetch (sumia a página) e faltava feedback explícito.
+- **Mudança:** opção `preserveDataWhileRefetching` no hook; `/viagem-aceite` usa `maxRows` + refetch após mutação; faixa de sucesso; **Aceitar e iniciar agora** + **Só aceitar**; confirmações mais claras; botões desabilitam enquanto remessas carregam. `viagens.ts`: erros nas `update` do aceite; `iniciarViagem` com `Promise.all` nas remessas.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Validade: modelo avançado (banner + badge, janela 3 dias)
+- **Objetivo:** avisar ao abrir o app sem alterar o layout da home — faixa sob o header + ícone **Validades** com contador no `MobileHeader`.
+- **Código:** `ValidadeAlertProvider` + `ValidadeBanner` (`src/components/validade/`); `listarItensAlertaValidade` com **3 dias** para «a vencer» + vencidos; severidade **crítico** / **atenção**; dismiss por `sessionStorage` até mudar contagens; removido `HomeAlertasValidade` da home.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Home: alertas de validade mais compactos
+- **UI:** cabeçalho em uma linha (ícone pequeno, «Validade · Matriz/Loja/Rede», contagens abreviadas, link **Ver tudo**); até **3** linhas de prévia; texto **«Vence em N dia(s)»** (e **Vence hoje**); padding reduzido.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-09 - Home: alertas de validade por escopo (loja / indústria / rede)
+- **Objetivo:** na **home**, aviso visível de itens vencidos e a vencer (7 dias) para o funcionário acompanhar o que **ele** contabiliza fisicamente.
+- **Código:** componente `HomeAlertasValidade` — `escopoValidadesPorPerfil` + `listarItensAlertaValidade` (limites 80/80), `hasAccessWithMap` para `/validades`; prévia de linhas + **Ver tudo** → `/validades`; sem alertas não renderiza o cartão.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Validades: botão/tela funcional e escopo por perfil
+- **Problema:** `/validades` usava `useRealtimeQuery` em **todos** os `itens` (paginação completa), o que podia travar ou não concluir em bases grandes; escopo de indústria não era explícito.
+- **Mudança:** serviço `listarItensAlertaValidade` (`validades-itens.ts`) — só `EM_ESTOQUE`, validade real (`< 2100`), vencidos + janela de N dias, limite de linhas; filtro opcional por `local_atual_id`. `escopoValidadesPorPerfil` em `operador-loja-scope.ts`: loja, indústria (local padrão) ou todos os locais (MANAGER/ADMIN_MASTER). UI: textos por contexto, **Atualizar**, refresh ~90 s.
+- **Impacto:** cada perfil vê só o que vence **no seu** estoque físico (loja ou matriz) ou visão consolidada para gerência.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-08 - BALDE Nº SEP: impressão sem `destino_id` não renumerava
 - **Problema:** após lógica 1..N por lote `SEP-…`, etiquetas ainda saíam 1,1,2,2… se **`garantirNumeros`** não rodava: exigia `destinoLocalId` e o upsert SEP também exigia `destino` — meta da transferência atrasada ou primeira linha errada → `numerosMap` null → HTML usava `numero_sequencia_loja` antigo do banco.
 - **Mudança:** renumerar remessa **SEP-** em `upsertEtiquetasSeparacaoLoja` **sem** depender de `local_destino_id`; **`garantirNumerosSequenciaBaldeAntesImpressao`** sempre chama upsert em lote `SEP-` (só exige lista não vazia). Meta em `/etiquetas`: transferências `WAREHOUSE_STORE` por `viagem_id`, escolhe a **mais recente** por `created_at` quando há várias.
