@@ -1,5 +1,18 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - JK: 10 unidades vs 5 etiquetas — sync por viagem + anti-duplicata
+- **Problema:** painel Etiquetas mostrava **5** linhas para lote `SEP-…` enquanto o envio indicava **10** baldes; operação precisa das **10** etiquetas para a loja JK.
+- **Causa provável:** (1) **duas transferências** `WAREHOUSE_STORE` na mesma `viagem_id` com itens **espalhados** — a sync antiga só lia **uma** transferência; (2) **mesmo** `item_id` duas vezes em `transferencia_itens` inflava «unidades» no resumo mas só **5** linhas em `etiquetas` (PK = `item_id`).
+- **Código:** `sincronizarEtiquetasRemessaPorLoteSep` passa a unir **todos** os itens de **todas** as transferências da viagem com **destino_id** único; valida destinos divergentes; deduplica `item_id`; exige que `itens` retorne o mesmo total. `criarTransferencia` rejeita lista com **item repetido**. `envios-matriz-lojas` conta **unidades distintas** por `item_id`. `/etiquetas`: bloco âmbar de sync **sempre** em remessa `SEP-…` (texto se já há etiquetas). Migração `20260408203000_transferencia_itens_unique_item.sql` + `schema_public.sql`.
+- **Validação:** `npm run lint`, `npm run build`. **Deploy:** aplicar migração no Supabase; em remessa afetada, usar **Gravar etiquetas a partir da transferência** com login/senha.
+
+### Sessão - 2026-04-08 - Etiquetas: 10 unidades vs «5 impressões» + sync remessa
+- **Operação:** remessa Indústria → Loja JK, **10** baldes, lote `SEP-7cec353d-…` — na prática relataram **5** «etiquetas».
+- **Explicação provável:** fluxo **Separar por Loja** usa **60×30** = **duas meias-etiquetas por folha**; **10 unidades = 5 folhas** na Zebra. Contar **folhas** como se fossem **unidades** gera essa diferença.
+- **Outras verificações:** em `/etiquetas`, filtro **Pendentes** só imprime o que ainda não está `impressa`; usar **Todas** ou **Zebra — remessa inteira** garante as 10 linhas se o banco tiver 10 registros.
+- **Código:** `sincronizarEtiquetasRemessaPorLoteSep` deixou de usar `.limit(1)` sem ordem (Postgres sem `ORDER BY` = linha arbitrária). Com **várias** `transferencias` `WAREHOUSE_STORE` no mesmo `viagem_id`, escolhe a transferência com **mais** linhas em `transferencia_itens` e, em empate, a **mais recente** por `created_at`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-08 - Pi + Supabase: fila CUPS 60×60 e linha `industria`
 - **Causa metade da etiqueta:** fila `ZebraZD220` com **PageSize=Custom.60x30mm**; o app em 60×60 fazia fallback para ponte **estoque** e enviava **`queue=ZebraZD220`** no WebSocket (ignorava `.env` do Pi).
 - **Pi (`kim`):** criada fila **`ZebraZD220-6060`** (mesmo USB), **DefaultPageSize Custom.60x60mm**; `CUPS_QUEUE=ZebraZD220-6060` no `.env` do `pi-print-ws`; `systemctl restart pi-print-ws`.

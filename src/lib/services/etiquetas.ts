@@ -174,26 +174,35 @@ export async function sincronizarEtiquetasRemessaPorLoteSep(
 
   const { data: trs, error: e1 } = await client
     .from('transferencias')
-    .select('id, destino_id')
+    .select('id, destino_id, created_at')
     .eq('tipo', 'WAREHOUSE_STORE')
     .eq('viagem_id', viagemId)
-    .limit(1);
+    .order('created_at', { ascending: false });
 
   if (e1) throw e1;
-  const tr0 = trs?.[0] as { id: string; destino_id: string } | undefined;
-  const transferenciaId = tr0?.id;
-  const destinoId = tr0?.destino_id ?? null;
-  if (!transferenciaId) {
+  const candidatas = (trs ?? []) as { id: string; destino_id: string; created_at: string }[];
+  if (candidatas.length === 0) {
     throw new Error('Nenhuma transferência indústria → loja encontrada para este lote.');
   }
 
+  const destinosDistintos = new Set(
+    candidatas.map((c) => (c.destino_id != null ? String(c.destino_id).trim() : '')).filter(Boolean)
+  );
+  if (destinosDistintos.size > 1) {
+    throw new Error(
+      'Esta viagem tem transferências com lojas de destino diferentes. Corrija no cadastro antes de sincronizar etiquetas.'
+    );
+  }
+  const destinoId = candidatas[0]?.destino_id ?? null;
+
+  const idsTr = candidatas.map((t) => t.id);
   const { data: titens, error: e2 } = await client
     .from('transferencia_itens')
     .select('item_id')
-    .eq('transferencia_id', transferenciaId);
+    .in('transferencia_id', idsTr);
   if (e2) throw e2;
 
-  const itemIds = (titens || []).map((r) => r.item_id as string).filter(Boolean);
+  const itemIds = [...new Set((titens || []).map((r) => r.item_id as string).filter(Boolean))];
   if (itemIds.length === 0) {
     throw new Error('Esta remessa não tem unidades vinculadas em transferência.');
   }
@@ -217,6 +226,11 @@ export async function sincronizarEtiquetasRemessaPorLoteSep(
   }
   if (itensRows.length === 0) {
     throw new Error('Unidades (itens) da remessa não foram encontradas.');
+  }
+  if (itensRows.length !== itemIds.length) {
+    throw new Error(
+      `Unidades da remessa incompletas: ${itensRows.length} de ${itemIds.length} encontradas em itens (confira vínculos em transferencia_itens).`
+    );
   }
 
   const payload: UpsertEtiquetaSeparacaoItem[] = itensRows.map((row) => ({

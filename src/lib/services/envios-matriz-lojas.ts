@@ -74,6 +74,7 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
     .select(
       `
       transferencia_id,
+      item_id,
       item:itens!transferencia_itens_item_id_fkey(
         produto_id,
         produto:produtos(nome)
@@ -83,22 +84,27 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
     .in('transferencia_id', ids);
   if (e2) throw e2;
 
-  const porTransf = new Map<string, Map<string, { nome: string; qtd: number }>>();
+  /** Por transferência: agregação por produto só com `item_id` distintos (evita contar linha duplicada duas vezes). */
+  const porTransf = new Map<string, { agg: Map<string, { nome: string; qtd: number }>; vistos: Set<string> }>();
 
   for (const row of linhas || []) {
     const tid = row.transferencia_id as string;
-    let agg = porTransf.get(tid);
-    if (!agg) {
-      agg = new Map();
-      porTransf.set(tid, agg);
+    const itemId = String((row as { item_id?: string }).item_id || '').trim();
+    if (!itemId) continue;
+    let bucket = porTransf.get(tid);
+    if (!bucket) {
+      bucket = { agg: new Map(), vistos: new Set() };
+      porTransf.set(tid, bucket);
     }
+    if (bucket.vistos.has(itemId)) continue;
+    bucket.vistos.add(itemId);
     const it = row.item as { produto_id?: string } | null;
     const pid = it?.produto_id;
     if (!pid) continue;
     const pnom = nomeProdutoDoItem(row.item);
-    const cur = agg.get(pid);
+    const cur = bucket.agg.get(pid);
     if (cur) cur.qtd += 1;
-    else agg.set(pid, { nome: pnom, qtd: 1 });
+    else bucket.agg.set(pid, { nome: pnom, qtd: 1 });
   }
 
   function resumoTexto(m: Map<string, { nome: string; qtd: number }>): string {
@@ -111,8 +117,9 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
   }
 
   return trans.map((t) => {
-    const m = porTransf.get(t.id as string) || new Map();
-    const qtd = [...m.values()].reduce((s, x) => s + x.qtd, 0);
+    const bucket = porTransf.get(t.id as string);
+    const m = bucket?.agg || new Map();
+    const qtd = bucket ? bucket.vistos.size : [...m.values()].reduce((s, x) => s + x.qtd, 0);
     const vid = (t.viagem_id as string | null) ?? null;
     return {
       transferencia_id: t.id as string,

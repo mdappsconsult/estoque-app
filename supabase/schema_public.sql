@@ -267,6 +267,9 @@ CREATE TABLE IF NOT EXISTS public.transferencia_itens (
   recebido BOOLEAN NOT NULL DEFAULT false
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS transferencia_itens_transferencia_item_uidx
+  ON public.transferencia_itens (transferencia_id, item_id);
+
 -- DIVERGENCIAS
 CREATE TABLE IF NOT EXISTS public.divergencias (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,

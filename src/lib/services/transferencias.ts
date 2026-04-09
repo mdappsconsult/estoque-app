@@ -113,15 +113,20 @@ export async function criarTransferencia(
     throw new Error('A transferência precisa de pelo menos 1 item');
   }
 
+  const idsOrd = [...new Set(itemIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (idsOrd.length !== itemIds.length) {
+    throw new Error('A lista contém o mesmo item mais de uma vez. Cada unidade (QR) deve aparecer só uma vez.');
+  }
+
   // Blindagem no service: itens precisam estar EM_ESTOQUE e no local de origem.
   const { data: itens, error: itensError } = await supabase
     .from('itens')
     .select('id, local_atual_id, estado')
-    .in('id', itemIds);
+    .in('id', idsOrd);
   if (itensError) throw itensError;
 
   const itensValidos = itens || [];
-  if (itensValidos.length !== itemIds.length) {
+  if (itensValidos.length !== idsOrd.length) {
     throw new Error('Um ou mais itens não foram encontrados');
   }
 
@@ -140,8 +145,8 @@ export async function criarTransferencia(
   if (error) throw error;
 
   // Vincular itens
-  if (itemIds.length > 0) {
-    const transItens = itemIds.map(itemId => ({
+  if (idsOrd.length > 0) {
+    const transItens = idsOrd.map((itemId) => ({
       transferencia_id: data.id,
       item_id: itemId,
     }));
@@ -154,7 +159,7 @@ export async function criarTransferencia(
     acao: 'CRIAR_TRANSFERENCIA',
     origem_id: transferencia.origem_id,
     destino_id: transferencia.destino_id,
-    detalhes: { transferencia_id: data.id, qtd_itens: itemIds.length },
+    detalhes: { transferencia_id: data.id, qtd_itens: idsOrd.length },
   });
 
   return data;

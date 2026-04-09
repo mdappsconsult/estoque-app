@@ -850,15 +850,23 @@ export default function EtiquetasPage() {
               </p>
               {parseViagemIdDeLoteSep(loteSelecionado) &&
                 !carregandoEtiquetasRemessa &&
-                !erroQueryEtiquetas &&
-                linhasRemessaBulk.length === 0 && (
+                !erroQueryEtiquetas && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2 text-xs text-amber-950">
-                    <p>
-                      <strong>Nenhuma etiqueta ativa</strong> para este lote. Preencha <strong>login</strong> e{' '}
-                      <strong>senha</strong> (os mesmos da tela de entrada) e confirme: o servidor grava em{' '}
-                      <code className="text-[10px]">etiquetas</code> a partir da transferência (contorna bloqueio de
-                      permissão no navegador).
-                    </p>
+                    {linhasRemessaBulk.length === 0 ? (
+                      <p>
+                        <strong>Nenhuma etiqueta ativa</strong> para este lote. Preencha <strong>login</strong> e{' '}
+                        <strong>senha</strong> (os mesmos da tela de entrada) e confirme: o servidor grava em{' '}
+                        <code className="text-[10px]">etiquetas</code> a partir da transferência (contorna bloqueio de
+                        permissão no navegador).
+                      </p>
+                    ) : (
+                      <p>
+                        Se <strong>Separar por Loja</strong> mostra mais unidades do que esta lista, use abaixo: o
+                        servidor recompõe <code className="text-[10px]">etiquetas</code> com <strong>todos</strong> os
+                        itens das transferências matriz→loja desta viagem (mesmo destino), sem apagar o que já estava
+                        impresso.
+                      </p>
+                    )}
                     {sucessoSincEtiquetasRemessa && (
                       <p className="text-emerald-900 bg-emerald-100 border border-emerald-200 rounded px-2 py-1.5">
                         {sucessoSincEtiquetasRemessa}
