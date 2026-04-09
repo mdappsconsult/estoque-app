@@ -117,6 +117,9 @@ chmod +x cloudflared-quick-tunnel-sync.sh
 PRINT_WS_TOKEN=cole_o_mesmo_ws_token_da_linha_industria_no_Supabase
 CUPS_QUEUE=ZebraZD220
 
+# Padrão do server: folha 60×60 mm se o JSON não mandar widthMm/heightMm (o app em produção manda).
+# Não precisa repetir aqui na indústria. Pi **só** de separação 60×30: use PRINT_DEFAULT_HEIGHT_MM=30.
+
 # Sincronizar URL do túnel quick → Supabase (linha industria)
 SUPABASE_URL=https://SEU_PROJETO.supabase.co
 SUPABASE_ANON_KEY=sua_anon_key

@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Pi `pi-print-ws`: padrão de folha 60×60 mm (não 60×30)
+- **Problema:** com fallback antigo **60×30** no `server.mjs`, impressão em mídia **60×60** saía como meia etiqueta preenchida e metade vazia.
+- **Mudança:** defaults **60×60**; variáveis **`PRINT_DEFAULT_WIDTH_MM`** / **`PRINT_DEFAULT_HEIGHT_MM`** para Pi só de separação 60×30; `env.example` em `scripts/pi-print-ws/`; cliente WebSocket sem `formatoEtiquetaPdf` passa a enviar **60×60** por padrão.
+- **Validação:** `npm run lint`, `npm run build`. **Deploy Pi:** copiar `server.mjs` + reiniciar `pi-print-ws`.
+
 ### Sessão - 2026-04-08 - Impressão 60×60 na Zebra: uma folha por etiqueta (viewport Pi)
 - **Problema:** PDF gerado no Raspberry saía com conteúdo **minúsculo no canto** da etiqueta física 60×60 (viewport padrão do Chromium ~800×600 + `@page` 60 mm).
 - **`pi-print-ws/server.mjs`:** `setViewport` em px a partir de `widthMm`/`heightMm` do JSON; `emulateMediaType('print')` antes do `page.pdf`.

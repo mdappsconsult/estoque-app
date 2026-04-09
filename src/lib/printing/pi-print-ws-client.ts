@@ -119,7 +119,7 @@ export async function enviarHtmlParaPiPrintBridge(
     connection?: PiPrintConnection | null;
     /**
      * Formato da etiqueta: define `widthMm`/`heightMm` no Pi para viewport do Chromium alinhada à folha.
-     * Sem isso, o padrão 60×30 encolhe layouts 60×60 no canto do PDF.
+     * Sem isso, o app envia 60×60 mm (alinhado ao padrão do Pi).
      */
     formatoEtiquetaPdf?: FormatoEtiqueta;
   }
@@ -142,7 +142,7 @@ export async function enviarHtmlParaPiPrintBridge(
   const fmtPdf = options?.formatoEtiquetaPdf;
   const cfgPdf = fmtPdf ? FORMATO_CONFIG[fmtPdf] : null;
   const widthMm = cfgPdf?.widthMm ?? 60;
-  const heightMm = cfgPdf?.heightMm ?? 30;
+  const heightMm = cfgPdf?.heightMm ?? 60;
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;

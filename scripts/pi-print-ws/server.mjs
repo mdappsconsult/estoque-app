@@ -4,7 +4,9 @@
  * Usa `widthMm`/`heightMm` do JSON para `setViewport` (evita etiqueta 60×60 minúscula no canto).
  *
  * Variáveis: PRINT_WS_PORT (default 8765), PRINT_WS_TOKEN (opcional),
- * CHROMIUM_PATH (default /usr/bin/chromium), CUPS_QUEUE (opcional, fila padrão se vazio).
+ * CHROMIUM_PATH (default /usr/bin/chromium), CUPS_QUEUE (opcional, fila padrão se vazio),
+ * PRINT_DEFAULT_WIDTH_MM / PRINT_DEFAULT_HEIGHT_MM — fallback quando o JSON não manda widthMm/heightMm
+ *   (padrão **60×60** para mídia quadrada; Pi só de separação 60×30 pode usar PRINT_DEFAULT_HEIGHT_MM=30).
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -21,6 +23,15 @@ const PORT = Number(process.env.PRINT_WS_PORT) || 8765;
 const TOKEN = (process.env.PRINT_WS_TOKEN || '').trim();
 const CHROMIUM = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 const DEFAULT_QUEUE = (process.env.CUPS_QUEUE || '').trim();
+
+const DEFAULT_W_MM =
+  Number(process.env.PRINT_DEFAULT_WIDTH_MM) > 0
+    ? Number(process.env.PRINT_DEFAULT_WIDTH_MM)
+    : 60;
+const DEFAULT_H_MM =
+  Number(process.env.PRINT_DEFAULT_HEIGHT_MM) > 0
+    ? Number(process.env.PRINT_DEFAULT_HEIGHT_MM)
+    : 60;
 
 function parseMessage(raw) {
   const text = typeof raw === 'string' ? raw : raw.toString();
@@ -122,9 +133,9 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ ok: false, error: 'Esperado JSON: { type: "print", html: string, widthMm?, heightMm?, jobName?, queue? }' }));
       return;
     }
-    /* Fallback só se preferCssPageSize=false; com true o PDF segue @page do HTML (60×30, 60×60, etc.) */
-    const widthMm = Number(msg.widthMm) > 0 ? Number(msg.widthMm) : 60;
-    const heightMm = Number(msg.heightMm) > 0 ? Number(msg.heightMm) : 30;
+    /* Viewport Chromium: usa dimensões do JSON; senão env (PRINT_DEFAULT_*); senão 60×60 (mídia quadrada). */
+    const widthMm = Number(msg.widthMm) > 0 ? Number(msg.widthMm) : DEFAULT_W_MM;
+    const heightMm = Number(msg.heightMm) > 0 ? Number(msg.heightMm) : DEFAULT_H_MM;
     const preferCssPageSize = Boolean(msg.preferCssPageSize);
     const queue = typeof msg.queue === 'string' && msg.queue.trim() ? msg.queue.trim() : DEFAULT_QUEUE;
 
@@ -143,5 +154,7 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`pi-print-ws escutando ws://0.0.0.0:${PORT}${TOKEN ? ' (com token)' : ' (sem token — use só em LAN confiável)'}`);
+  console.log(
+    `pi-print-ws escutando ws://0.0.0.0:${PORT}${TOKEN ? ' (com token)' : ' (sem token — use só em LAN confiável)'} — fallback folha ${DEFAULT_W_MM}×${DEFAULT_H_MM} mm`
+  );
 });
