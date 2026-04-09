@@ -114,13 +114,12 @@ A tela **Produção** usa **uma etiqueta por página** em **60 mm × 60 mm**, co
 
 ### Raspberry Pi + CUPS (`pi-print-ws`)
 
-O serviço envia HTML com `@page { size: 60mm 60mm }` e **`preferCSSPageSize: true`**, então o Chromium gera PDF no tamanho certo. Ainda assim a **fila CUPS** e o **PPD da Zebra** precisam aceitar esse tamanho:
+O serviço envia HTML com `@page { size: 60mm 60mm }` e **`preferCSSPageSize: true`**, então o Chromium gera PDF no tamanho certo. A **fila CUPS** deve estar com **mídia padrão 60×60 mm** — passo a passo e script: **`docs/CUPS_ZEBRA_60X60.md`** e `scripts/pi-print-ws/cups-adicionar-fila-60x60.sh`.
 
-1. Na interface CUPS (`http://IP-DO-PI:631`) → **Administration** → **Manage Printers** → sua Zebra → **Set Default Options** (ou **Modify Printer**).
-2. Em **Media Size** / **Label**, escolha **60×60 mm** se existir, ou crie **Custom** com **60 × 60 mm** (conforme o driver `zebra.ppd` / Zebra Universal).
-3. Se você mantiver **duas filas** no mesmo Pi (ex.: `Zebra60x30` e `Zebra60x60`), defina `CUPS_QUEUE` no `.env` da **ponte indústria** para a fila que está calibrada em **60×60**.
+1. CUPS (`http://IP-DO-PI:631`) → impressora → **Set Default Options** → **Media Size** / **Label** → **60×60 mm** ou custom equivalente.
+2. Duas filas no mesmo USB (60×30 vs 60×60): ver guia acima; `CUPS_QUEUE` no `.env` / Supabase = nome da fila **60×60**.
 
-Guia operacional do segundo Pi: `docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`.
+Guia do segundo Pi: `docs/RASPBERRY_INDUSTRIA_NOVO_PI.md`.
 
 ## 6. Se ainda falhar
 

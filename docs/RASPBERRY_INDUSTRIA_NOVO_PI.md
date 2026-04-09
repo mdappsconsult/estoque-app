@@ -80,12 +80,12 @@ curl -sS http://127.0.0.1:8765/health
 
 ### Mídia 60×60 mm na Zebra (produção / indústria)
 
-O app manda PDF/HTML com **página 60×60 mm**. No **CUPS**:
+O app manda PDF/HTML com **página 60×60 mm**. No **CUPS** a fila precisa ter **mídia padrão 60×60** — guia completo: **`docs/CUPS_ZEBRA_60X60.md`**. Script opcional no repo: `scripts/pi-print-ws/cups-adicionar-fila-60x60.sh` (duplica fila USB; depois ajuste **Media Size** na web).
 
 1. Abra `http://127.0.0.1:631` no Pi → impressora → **Set Default Options**.
-2. Ajuste **Media Size** / rótulo para **60×60 mm** (stock custom, se o PPD permitir). Se o driver só listar 60×30, crie **outra fila** `lpadmin` apontando para a mesma impressora com opções diferentes, ou use o utilitário Zebra para gravar um perfil 60×60 e escolha-o no CUPS.
-3. Confira com `lpoptions -p NOME_DA_FILA -l` (lista opções; procure `PageSize`, `Media` ou `zePrintLabelLength` / nomes do PPD).
-4. No `.env` do Pi da indústria, **`CUPS_QUEUE=`** deve ser o nome **exato** da fila calibrada para **60×60** (ex.: `ZebraIndustria6060`).
+2. **Media Size** / rótulo → **60×60 mm** ou **Custom 60×60**. Se o PPD só listar 60×30, crie **outra fila** (`cups-adicionar-fila-60x60.sh` ou `lpadmin` com o mesmo URI USB) e defina **só nela** o tamanho 60×60.
+3. `lpoptions -p NOME_DA_FILA -l` — procure `PageSize`, `Media`, `Label` (valores variam por PPD).
+4. No `.env` do Pi: **`CUPS_QUEUE=`** = nome **exato** da fila 60×60 (ex.: `ZebraZD220-6060`).
 
 Teste: **`/teste-impressao-etiqueta?papel=industria`** → formato **60×60** → **Imprimir na estação**.
 
@@ -115,7 +115,7 @@ chmod +x cloudflared-quick-tunnel-sync.sh
 ```env
 # Obrigatório para o bridge
 PRINT_WS_TOKEN=cole_o_mesmo_ws_token_da_linha_industria_no_Supabase
-CUPS_QUEUE=ZebraZD220
+CUPS_QUEUE=ZebraZD220-6060
 
 # Padrão do server: folha 60×60 mm se o JSON não mandar widthMm/heightMm (o app em produção manda).
 # Não precisa repetir aqui na indústria. Pi **só** de separação 60×30: use PRINT_DEFAULT_HEIGHT_MM=30.

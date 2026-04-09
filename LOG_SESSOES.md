@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-04-08 - Doc CUPS Zebra 60×60 mm no Raspberry
+- **Conteúdo:** `docs/CUPS_ZEBRA_60X60.md` (web CUPS, segunda fila USB, `lpoptions`); `scripts/pi-print-ws/cups-adicionar-fila-60x60.sh`; `env.example` com `CUPS_QUEUE=ZebraZD220-6060`; links em `RASPBERRY_INDUSTRIA_NOVO_PI.md`, `IMPRESSAO_TERMICA_ZEBRA.md`, `README.md`; `CONTEXTO_ATUAL.md`.
+- **Validação:** `bash -n` no script.
+
 ### Sessão - 2026-04-08 - Etiquetas: padrão 60×60 e aviso SEP vs mídia quadrada
 - **Problema:** impressão em adesivo **60×60** com formato **60×30** no app → PDF **60×30** (duas meias); na Zebra parecia **faixa 30×60** e metade do adesivo vazio.
 - **Mudança:** padrão de formato **60×60** (estado inicial + `localStorage` inválido + `obterFormatoImpressaoPadrao`); rótulo do 60×30 deixa claro que não é para adesivo quadrado inteiro; banner âmbar em remessa **SEP-…** quando 60×30 estiver selecionado.
