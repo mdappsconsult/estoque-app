@@ -49,8 +49,9 @@
   - marcação pendente/escaneado;
   - bloqueio de QR fora da transferência;
   - proteção contra scan duplicado;
-  - confirmação da transferência grava `transferencia_itens` e `itens` em **lote** (poucas idas ao Supabase) e sincroniza `estoque` por produto em paralelo;
-  - **Um aparelho por remessa até confirmar:** escaneados ficam só na memória do telefone; dois logins na mesma conta **não** somam listas — o primeiro **Confirmar recebimento** passa a remessa para `DELIVERED` ou `DIVERGENCE` e o outro aparelho deixa de ver `IN_TRANSIT` (aviso em tela + realtime).
+  - **Confirmar recebimento** só com **todos** os itens esperados escaneados → `DELIVERED`; **`Encerrar com divergência…`** (confirmação explícita) encerra com faltante/excedente → `DIVERGENCE`; o serviço `receberTransferencia` **recusa** divergência sem o flag `encerrarComDivergencia` (evita fechar remessa com 1 QR por engano);
+  - confirmação grava `transferencia_itens` e `itens` em **lote** e sincroniza `estoque` por produto em paralelo;
+  - **Um aparelho por remessa até confirmar:** escaneados ficam só na memória do telefone; dois logins na mesma conta **não** somam listas — o primeiro confirmar/divergência passa a remessa para `DELIVERED` ou `DIVERGENCE` e o outro aparelho deixa de ver `IN_TRANSIT` (aviso em tela + realtime).
 - **Divergências** (`/divergencias`, `ADMIN_MASTER` / `MANAGER`): lista via `listarDivergenciasAdmin` com filtro por **loja destino**, **tipo**, **remessa** (`<select>` alimentado por `listarRemessasParaFiltroDivergencias`, UUID legível ao escolher), busca em produto/token/id; **agrupar por remessa**; realtime; teto ~**800** linhas.
 - Confirmação (`window.confirm`) nos principais botões operacionais.
 - Sincronização de estoque agregado (`estoque`) via recálculo por produto nos fluxos de despacho, recebimento, entrada de compra, produção, baixa diária e descarte.

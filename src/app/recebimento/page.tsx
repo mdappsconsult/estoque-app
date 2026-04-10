@@ -175,6 +175,13 @@ export default function RecebimentoPage() {
     [itensRecebidos]
   );
 
+  const conferenciaCompleta = useMemo(() => {
+    if (loadingEsperados || itensEsperados.length === 0) return false;
+    if (itensRecebidos.length !== itensEsperados.length) return false;
+    const esperadosIds = new Set(itensEsperados.map((e) => e.id));
+    return itensRecebidos.every((r) => esperadosIds.has(r.id));
+  }, [loadingEsperados, itensEsperados, itensRecebidos]);
+
   const escanear = async (codigo?: string) => {
     const tk = codigo || tokenInput.trim();
     if (!tk) return;
@@ -222,8 +229,10 @@ export default function RecebimentoPage() {
       setErro('Selecione uma transferência em trânsito');
       return;
     }
-    if (itensRecebidos.length === 0) {
-      setErro('Escaneie pelo menos 1 item antes de confirmar');
+    if (!conferenciaCompleta) {
+      setErro(
+        'Escaneie todos os itens da lista antes de confirmar. Se faltar produto na entrega, use «Encerrar com divergência».'
+      );
       return;
     }
 
@@ -247,7 +256,7 @@ export default function RecebimentoPage() {
       return;
     }
     const confirmou = window.confirm(
-      `Confirmar recebimento de ${itensRecebidos.length} item(ns) desta transferência?`
+      `Confirmar recebimento completo de ${itensRecebidos.length} item(ns)? A remessa será marcada como entregue.`
     );
     if (!confirmou) return;
 
@@ -265,6 +274,73 @@ export default function RecebimentoPage() {
       setSelecionada('');
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao confirmar recebimento'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const encerrarComDivergencia = async () => {
+    if (!usuario) {
+      setErro('Faça login novamente para continuar');
+      return;
+    }
+    if (!selecionada) {
+      setErro('Selecione uma transferência em trânsito');
+      return;
+    }
+    if (loadingEsperados || itensEsperados.length === 0) {
+      setErro('Aguarde carregar os itens esperados da transferência.');
+      return;
+    }
+    if (conferenciaCompleta) {
+      setErro('Todos os itens já foram escaneados. Use «Confirmar recebimento».');
+      return;
+    }
+
+    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    if (!transSelecionada) {
+      setErro('Transferência não encontrada. Atualize a página e tente novamente.');
+      return;
+    }
+    if (transSelecionada.status !== 'IN_TRANSIT') {
+      setErro(
+        transSelecionada.status === 'DELIVERED'
+          ? 'Esta entrega já foi concluída.'
+          : transSelecionada.status === 'DIVERGENCE'
+            ? 'Esta remessa já foi encerrada com divergência.'
+            : 'Esta transferência não está mais em trânsito.'
+      );
+      return;
+    }
+    if (!pendentes.some((t) => t.id === selecionada)) {
+      setErro('Esta transferência não está disponível para o seu usuário.');
+      return;
+    }
+
+    const total = itensEsperados.length;
+    const escaneados = itensRecebidos.length;
+    const mensagemConfirm =
+      escaneados === 0
+        ? `Nenhum item foi escaneado. A remessa tem ${total} unidade(s) — tudo será registrado como FALTANTE e a remessa ficará em DIVERGÊNCIA. Só use se realmente nada foi entregue. Continuar?`
+        : `Foram escaneados ${escaneados} de ${total} itens. O que faltar será registrado como divergência (faltante). A remessa será encerrada. Continuar?`;
+
+    if (!window.confirm(mensagemConfirm)) return;
+
+    setSaving(true);
+    setErro('');
+    try {
+      const res = await receberTransferencia(
+        selecionada,
+        itensRecebidos.map((i) => i.id),
+        transSelecionada.destino_id,
+        usuario.id,
+        { encerrarComDivergencia: true }
+      );
+      setResultado({ divergencias: res.divergencias.length });
+      setItensRecebidos([]);
+      setSelecionada('');
+    } catch (err: unknown) {
+      setErro(errMessage(err, 'Erro ao encerrar com divergência'));
     } finally {
       setSaving(false);
     }
@@ -402,7 +478,8 @@ export default function RecebimentoPage() {
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-3">
-              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro).
+              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro). Só é possível concluir sem escanear tudo usando{' '}
+              <strong>Encerrar com divergência</strong>, com confirmação explícita.
             </p>
             {loadingEsperados ? (
               <div className="py-6 flex items-center justify-center text-gray-400">
@@ -498,10 +575,37 @@ export default function RecebimentoPage() {
             </div>
           )}
 
-          <Button variant="primary" className="w-full" onClick={confirmarRecebimento} disabled={saving || itensRecebidos.length === 0}>
-            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-            Confirmar Recebimento
-          </Button>
+          <div className="space-y-2">
+            <Button
+              variant="primary"
+              className="w-full"
+              onClick={confirmarRecebimento}
+              disabled={
+                saving || loadingEsperados || itensEsperados.length === 0 || !conferenciaCompleta
+              }
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+              Confirmar recebimento (tudo escaneado)
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={encerrarComDivergencia}
+              disabled={
+                saving || loadingEsperados || itensEsperados.length === 0 || conferenciaCompleta
+              }
+            >
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Encerrar com divergência…
+            </Button>
+            {!loadingEsperados && itensEsperados.length > 0 && !conferenciaCompleta && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Faltam{' '}
+                {itensEsperados.filter((e) => !idsEscaneados.has(e.id)).length} item(ns) na conferência para
+                liberar a confirmação normal. Se a carga realmente veio incompleta, use o botão acima.
+              </p>
+            )}
+          </div>
         </>
       )}
 

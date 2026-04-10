@@ -245,12 +245,18 @@ export async function despacharTransferencia(id: string, usuarioId: string): Pro
   });
 }
 
+export type ReceberTransferenciaOptions = {
+  /** Só quando faltar produto na entrega ou conferência incompleta de propósito; sem isso o servidor recusa divergência. */
+  encerrarComDivergencia?: boolean;
+};
+
 // Receber transferência - escanear QRs recebidos
 export async function receberTransferencia(
   transferenciaId: string,
   itensRecebidosIds: string[],
   localDestinoId: string,
-  usuarioId: string
+  usuarioId: string,
+  options?: ReceberTransferenciaOptions
 ): Promise<{ divergencias: { tipo: 'FALTANTE' | 'EXCEDENTE'; item_id: string }[] }> {
   const transferencia = await getTransferenciaComItensMinimo(transferenciaId);
   if (transferencia.status !== 'IN_TRANSIT') {
@@ -288,6 +294,12 @@ export async function receberTransferencia(
       divergencias.push({ tipo: 'EXCEDENTE', item_id: id });
     }
   });
+
+  if (divergencias.length > 0 && !options?.encerrarComDivergencia) {
+    throw new Error(
+      'A conferência não está completa. Escanear todos os itens da lista antes de «Confirmar recebimento», ou use «Encerrar com divergência» se faltar produto na entrega.'
+    );
+  }
 
   // Marcar recebidos e mover itens válidos — em lote (evita 2×N round-trips ao Supabase).
   if (itensRecebidosIds.length > 0) {

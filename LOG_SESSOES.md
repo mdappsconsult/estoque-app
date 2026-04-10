@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-10 - Recebimento: não fechar remessa com conferência parcial
+- **Problema:** operador podia tocar em «Confirmar» com apenas 1 item e a remessa ia para `DIVERGENCE` (encerrava sem conferência completa).
+- **Mudança:** `recebimento` — botão principal só com **todos** os itens escaneados; botão **Encerrar com divergência…** com `confirm` explícito (inclui caso zero escaneados). `receberTransferencia` passa a exigir `encerrarComDivergencia: true` quando houver divergência calculada.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-10 - Reabrir remessa Jardim Paraíso 09/04 (divergência indevida)
 - **Contexto:** Silvania precisava receber produtos do dia 9; remessa estava `DIVERGENCE` (confirmado sem escaneio completo / fluxo motorista antigo).
 - **Mudança:** migração **`20260410200000_reabrir_remessa_divergencia_jardim_paraiso_2026_04_09.sql`** — apaga `divergencias`, `recebido=false` em `transferencia_itens`, itens da remessa → `EM_TRANSFERENCIA` na **origem**, `transferencias` → `IN_TRANSIT`. Executada no Supabase do MCP; **produção:** aplicar se o mesmo caso existir.
