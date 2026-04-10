@@ -9,6 +9,7 @@ import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Ca
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
+import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import { PerfilUsuario } from '@/types/database';
 
@@ -189,7 +190,11 @@ export default function Home() {
           const sectionFeatures = section.items
             .map((href) => featuresByHref[href])
             .filter(Boolean)
-            .filter((f) => (usuario ? hasAccessWithMap(usuario.perfil, f.href, permissionsMap) : true));
+            .filter((f) => {
+              if (!usuario) return true;
+              if (f.href === '/estoque' && usuarioIndustriaSemConsultaEstoque(usuario)) return false;
+              return hasAccessWithMap(usuario.perfil, f.href, permissionsMap);
+            });
 
           if (sectionFeatures.length === 0) return null;
 

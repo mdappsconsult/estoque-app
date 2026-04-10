@@ -12,7 +12,10 @@ import { useAuth } from '@/hooks/useAuth';
 import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { errMessage } from '@/lib/errMessage';
 import { receberTransferencia } from '@/lib/services/transferencias';
-import { filtrarRecebimentoPorLoja } from '@/lib/operador-loja-scope';
+import {
+  filtrarRecebimentoPorLoja,
+  filtrarRemessasMatrizAguardandoMotorista,
+} from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
 
 interface TransRow {
@@ -36,14 +39,49 @@ interface ItemEsperado {
 
 export default function RecebimentoPage() {
   const { usuario } = useAuth();
+
+  /** Só a loja: busca no PostgREST já filtrada por destino — evita truncar/paginar o quadro geral e perder remessas novas. */
+  const filtrosDestinoLoja = useMemo(() => {
+    if (usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id) {
+      return [{ column: 'destino_id' as const, value: usuario.local_padrao_id }];
+    }
+    return undefined;
+  }, [usuario?.perfil, usuario?.local_padrao_id]);
+
+  const consultaRecebimentoHabilitada =
+    usuario != null &&
+    (usuario.perfil !== 'OPERATOR_STORE' || Boolean(usuario.local_padrao_id));
+
   const { data: transferencias, loading } = useRealtimeQuery<TransRow>({
     table: 'transferencias',
     select: '*, origem:locais!origem_id(nome), destino:locais!destino_id(nome), transferencia_itens(id)',
     orderBy: { column: 'created_at', ascending: false },
+    filters: filtrosDestinoLoja,
+    enabled: consultaRecebimentoHabilitada,
   });
 
   const emTransito = transferencias.filter((t) => t.status === 'IN_TRANSIT');
   const pendentes = filtrarRecebimentoPorLoja(emTransito, usuario);
+  const aguardandoMotorista = useMemo(
+    () => filtrarRemessasMatrizAguardandoMotorista(transferencias, usuario),
+    [transferencias, usuario]
+  );
+
+  /** Só informativo: encerradas não entram no <Select> (só IN_TRANSIT). Ex.: Silvania — dia 9 em divergência. */
+  const encerradasRecentesNaLoja = useMemo(() => {
+    if (usuario?.perfil !== 'OPERATOR_STORE' || !usuario.local_padrao_id) return [];
+    const dias = 14;
+    const lim = Date.now() - dias * 24 * 60 * 60 * 1000;
+    return transferencias
+      .filter(
+        (t) =>
+          t.destino_id === usuario.local_padrao_id &&
+          (t.status === 'DIVERGENCE' || t.status === 'DELIVERED') &&
+          new Date(t.created_at).getTime() >= lim
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [transferencias, usuario]);
+
   const [selecionada, setSelecionada] = useState<string>('');
   const [tokenInput, setTokenInput] = useState('');
   const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
@@ -269,6 +307,55 @@ export default function RecebimentoPage() {
             <p className="font-semibold">{resultado.divergencias > 0 ? `${resultado.divergencias} divergência(s) registrada(s)` : 'Recebimento concluído!'}</p>
           </div>
           <button onClick={() => setResultado(null)} className="ml-auto"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {aguardandoMotorista.length > 0 && usuario?.perfil === 'OPERATOR_STORE' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-4 text-sm text-amber-950">
+          <p className="font-semibold text-amber-900">Envio a caminho — aguardando motorista</p>
+          <p className="mt-1 text-amber-900/90 leading-relaxed">
+            Há {aguardandoMotorista.length} remessa(s) para a sua loja já aceita(s) pelo motorista, mas ainda{' '}
+            <strong>sem saída registrada</strong> (falta <strong>Iniciar viagem</strong> em Viagem / Aceite). O
+            escaneamento no Recebimento libera quando o status passar a <strong>em trânsito</strong>.
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-amber-900/85">
+            {aguardandoMotorista.slice(0, 5).map((t) => (
+              <li key={t.id}>
+                {t.origem?.nome ?? '?'} → {t.destino?.nome ?? '?'} ·{' '}
+                {new Date(t.created_at).toLocaleString('pt-BR')}
+              </li>
+            ))}
+            {aguardandoMotorista.length > 5 ? (
+              <li className="text-amber-800/80">… e mais {aguardandoMotorista.length - 5}</li>
+            ) : null}
+          </ul>
+        </div>
+      )}
+
+      {encerradasRecentesNaLoja.length > 0 && usuario?.perfil === 'OPERATOR_STORE' && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 mb-4 text-sm text-slate-800">
+          <p className="font-semibold text-slate-900">Remessas já encerradas (últimos 14 dias)</p>
+          <p className="mt-1 text-slate-700 leading-relaxed">
+            O menu <strong>Transferência em trânsito</strong> só lista envios ainda <strong>em trânsito</strong>. Por
+            isso um pedido do dia pode «sumir» da lista se já foi <strong>recebido</strong> ou ficou com{' '}
+            <strong>divergência</strong>.
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-slate-700">
+            {encerradasRecentesNaLoja.slice(0, 8).map((t) => (
+              <li key={t.id}>
+                {new Date(t.created_at).toLocaleString('pt-BR')} · {t.origem?.nome ?? '?'} →{' '}
+                {t.destino?.nome ?? '?'} ·{' '}
+                {t.status === 'DIVERGENCE' ? (
+                  <span className="font-medium text-amber-800">Divergência</span>
+                ) : (
+                  <span className="font-medium text-green-800">Já recebida</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-slate-600">
+            Em divergência, o ajuste costuma ser com o <strong>gestor</strong> (tela administrativa de divergências).
+          </p>
         </div>
       )}
 

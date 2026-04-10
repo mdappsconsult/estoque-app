@@ -228,6 +228,7 @@ export type Database = {
           data_producao: string;
           responsavel: string;
           observacoes: string | null;
+          registrado_por: string | null;
           created_at: string;
         };
         Insert: {
@@ -239,6 +240,7 @@ export type Database = {
           data_producao?: string;
           responsavel: string;
           observacoes?: string | null;
+          registrado_por?: string | null;
           created_at?: string;
         };
         Update: {
@@ -250,6 +252,7 @@ export type Database = {
           data_producao?: string;
           responsavel?: string;
           observacoes?: string | null;
+          registrado_por?: string | null;
         };
       };
       producao_consumo_itens: {
@@ -565,6 +568,7 @@ export type Database = {
           motivo_sem_nota: string | null;
           local_id: string;
           data_validade: string | null;
+          registrado_por: string | null;
           created_at: string;
         };
         Insert: {
@@ -579,6 +583,7 @@ export type Database = {
           motivo_sem_nota?: string | null;
           local_id: string;
           data_validade?: string | null;
+          registrado_por?: string | null;
           created_at?: string;
         };
         Update: {
@@ -593,6 +598,7 @@ export type Database = {
           motivo_sem_nota?: string | null;
           local_id?: string;
           data_validade?: string | null;
+          registrado_por?: string | null;
         };
       };
       itens: {

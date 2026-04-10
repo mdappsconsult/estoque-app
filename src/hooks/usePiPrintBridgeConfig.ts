@@ -7,14 +7,22 @@ import {
 } from '@/lib/printing/pi-print-ws-client';
 import type { ImpressaoPiPapel } from '@/lib/services/config-impressao-pi';
 
-export function usePiPrintBridgeConfig(options?: { papel?: ImpressaoPiPapel }) {
+export function usePiPrintBridgeConfig(options?: { papel?: ImpressaoPiPapel; enabled?: boolean }) {
   const papel = options?.papel ?? 'estoque';
-  const [loading, setLoading] = useState(true);
+  const enabled = options?.enabled ?? true;
+  const [loading, setLoading] = useState(enabled);
   const [connection, setConnection] = useState<PiPrintConnection | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setConnection(null);
+      setError(null);
+      return;
+    }
     let cancelled = false;
+    setLoading(true);
     void (async () => {
       try {
         const c = await resolvePiPrintConnection(papel);
@@ -34,7 +42,7 @@ export function usePiPrintBridgeConfig(options?: { papel?: ImpressaoPiPapel }) {
     return () => {
       cancelled = true;
     };
-  }, [papel]);
+  }, [papel, enabled]);
 
   return {
     loading,

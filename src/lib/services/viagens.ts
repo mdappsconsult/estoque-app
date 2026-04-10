@@ -42,6 +42,39 @@ export async function criarViagem(viagem: ViagemInsert): Promise<Viagem> {
   return data;
 }
 
+/**
+ * Itens → EM_TRANSFERENCIA e remessa → IN_TRANSIT (uso interno).
+ * `aceitoPor` preenche `aceito_por` quando a remessa vinha de AWAITING_ACCEPT.
+ */
+async function colocarRemessaEItensEmTransito(
+  transferId: string,
+  aceitoPor?: string | null
+): Promise<void> {
+  const { data: transItens, error: eTi } = await supabase
+    .from('transferencia_itens')
+    .select('item_id')
+    .eq('transferencia_id', transferId);
+  if (eTi) throw eTi;
+
+  const itemIds = (transItens || []).map((ti) => ti.item_id);
+  if (itemIds.length > 0) {
+    const { error: eIt } = await supabase
+      .from('itens')
+      .update({ estado: 'EM_TRANSFERENCIA' })
+      .in('id', itemIds);
+    if (eIt) throw eIt;
+  }
+
+  const patch: { status: string; aceito_por?: string } = { status: 'IN_TRANSIT' };
+  if (aceitoPor) patch.aceito_por = aceitoPor;
+  const { error: eTr } = await supabase.from('transferencias').update(patch).eq('id', transferId);
+  if (eTr) throw eTr;
+}
+
+/**
+ * Aceitar viagem **e** despachar na hora: viagem e remessas passam a IN_TRANSIT
+ * (a loja vê no Recebimento sem segundo passo «Iniciar viagem»).
+ */
 export async function aceitarViagem(id: string, motoristaId: string): Promise<void> {
   const { data: viagem, error: viagemError } = await supabase
     .from('viagens')
@@ -54,25 +87,34 @@ export async function aceitarViagem(id: string, motoristaId: string): Promise<vo
     throw new Error('Somente viagens pendentes podem ser aceitas');
   }
 
+  const { data: transPend, error: eList } = await supabase
+    .from('transferencias')
+    .select('id, status')
+    .eq('viagem_id', id)
+    .in('status', ['AWAITING_ACCEPT', 'ACCEPTED']);
+  if (eList) throw eList;
+  if (!transPend?.length) {
+    throw new Error('Nenhuma remessa aguardando despacho nesta viagem');
+  }
+
   const { error: upV } = await supabase
     .from('viagens')
-    .update({ status: 'ACCEPTED', motorista_id: motoristaId })
+    .update({ status: 'IN_TRANSIT', motorista_id: motoristaId })
     .eq('id', id);
   if (upV) throw upV;
 
-  // Mantém viagem e transferências coerentes: ao aceitar a viagem,
-  // transferências pendentes da viagem também viram ACCEPTED.
-  const { error: upT } = await supabase
-    .from('transferencias')
-    .update({ status: 'ACCEPTED', aceito_por: motoristaId })
-    .eq('viagem_id', id)
-    .eq('status', 'AWAITING_ACCEPT');
-  if (upT) throw upT;
+  await Promise.all(
+    transPend.map((t) => {
+      const row = t as { id: string; status: string };
+      const definirAceitoPor = row.status === 'AWAITING_ACCEPT' ? motoristaId : null;
+      return colocarRemessaEItensEmTransito(row.id, definirAceitoPor);
+    })
+  );
 
   await registrarAuditoria({
     usuario_id: motoristaId,
     acao: 'ACEITAR_VIAGEM',
-    detalhes: { viagem_id: id },
+    detalhes: { viagem_id: id, despacho_imediato: true },
   });
 }
 
@@ -109,27 +151,7 @@ export async function iniciarViagem(id: string, motoristaId: string): Promise<vo
   if (upViag) throw upViag;
 
   await Promise.all(
-    transferencias.map(async (t) => {
-      const { data: transItens, error: eTi } = await supabase
-        .from('transferencia_itens')
-        .select('item_id')
-        .eq('transferencia_id', t.id);
-      if (eTi) throw eTi;
-
-      const itemIds = (transItens || []).map((ti) => ti.item_id);
-      if (itemIds.length > 0) {
-        const { error: eIt } = await supabase
-          .from('itens')
-          .update({ estado: 'EM_TRANSFERENCIA' })
-          .in('id', itemIds);
-        if (eIt) throw eIt;
-      }
-      const { error: eTr } = await supabase
-        .from('transferencias')
-        .update({ status: 'IN_TRANSIT' })
-        .eq('id', t.id);
-      if (eTr) throw eTr;
-    })
+    transferencias.map((t) => colocarRemessaEItensEmTransito(t.id as string, null))
   );
 
   await registrarAuditoria({

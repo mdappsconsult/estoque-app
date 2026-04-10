@@ -131,6 +131,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
       local_id: input.localId,
       responsavel: input.responsavelNome,
       observacoes: input.observacoes || null,
+      registrado_por: input.usuarioId,
     })
     .select('id')
     .single();

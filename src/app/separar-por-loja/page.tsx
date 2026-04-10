@@ -42,6 +42,7 @@ import {
   type EnvioMatrizLojaResumo,
 } from '@/lib/services/envios-matriz-lojas';
 import { Local } from '@/types/database';
+import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 
 interface ItemEscaneado {
   id: string;
@@ -96,6 +97,16 @@ export default function SepararPorLojaPage() {
   const lojas = locais.filter(l => l.tipo === 'STORE');
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
 
+  /** Login indústria (ex. Leonardo): só o warehouse cadastrado em `local_padrao_id` — não escolher «Estoque» central. */
+  const restricaoOrigemIndustria = usuarioIndustriaSemConsultaEstoque(usuario);
+  const localPadraoIndustriaId = usuario?.local_padrao_id?.trim() ?? '';
+  const warehousesParaOrigemSelect = useMemo(() => {
+    if (!restricaoOrigemIndustria) return warehouses;
+    if (!localPadraoIndustriaId) return [];
+    const hit = warehouses.find((l) => l.id === localPadraoIndustriaId);
+    return hit ? [hit] : [];
+  }, [restricaoOrigemIndustria, localPadraoIndustriaId, warehouses]);
+
   const [origemId, setOrigemId] = useState('');
   const [destinoId, setDestinoId] = useState('');
   const [tokenInput, setTokenInput] = useState('');
@@ -146,6 +157,26 @@ export default function SepararPorLojaPage() {
     [itensEscaneados, limiteListaItensSeparados]
   );
   const temMaisItensSeparados = itensEscaneados.length > itensSeparadosVisiveis.length;
+
+  useEffect(() => {
+    if (!restricaoOrigemIndustria) return;
+    if (warehousesParaOrigemSelect.length === 1) {
+      const onlyId = warehousesParaOrigemSelect[0].id;
+      if (origemId !== onlyId) {
+        setOrigemId(onlyId);
+        setResumoReposicao([]);
+        setMensagemReposicao('');
+        setEnviosRegistrados([]);
+      }
+      return;
+    }
+    if (origemId) {
+      setOrigemId('');
+      setResumoReposicao([]);
+      setMensagemReposicao('');
+      setEnviosRegistrados([]);
+    }
+  }, [restricaoOrigemIndustria, warehousesParaOrigemSelect, origemId]);
 
   const carregarEnviosRegistrados = useCallback(async () => {
     if (!origemId) {
@@ -706,18 +737,49 @@ export default function SepararPorLojaPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mb-6">
+        {restricaoOrigemIndustria && !localPadraoIndustriaId && (
+          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Defina o <strong>local padrão</strong> (warehouse da indústria) em{' '}
+            <Link href="/cadastros/usuarios" className="text-red-700 font-semibold underline underline-offset-2">
+              Cadastros → Usuários
+            </Link>{' '}
+            para travar a origem na indústria e não no armazém central.
+          </p>
+        )}
+        {restricaoOrigemIndustria &&
+          localPadraoIndustriaId &&
+          warehousesParaOrigemSelect.length === 0 &&
+          !loading && (
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              O local padrão deste usuário não é um <strong>Warehouse</strong> cadastrado. Ajuste o vínculo em{' '}
+              <Link href="/cadastros/usuarios" className="text-red-700 font-semibold underline underline-offset-2">
+                Usuários
+              </Link>
+              .
+            </p>
+          )}
         <Select
           label="Origem (Indústria)"
           required
-          options={[{ value: '', label: 'Selecione...' }, ...warehouses.map(l => ({ value: l.id, label: l.nome }))]}
+          options={[
+            { value: '', label: warehousesParaOrigemSelect.length ? 'Selecione...' : '— Indisponível —' },
+            ...warehousesParaOrigemSelect.map((l) => ({ value: l.id, label: l.nome })),
+          ]}
           value={origemId}
+          disabled={restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1}
           onChange={(e) => {
+            if (restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1) return;
             setOrigemId(e.target.value);
             setResumoReposicao([]);
             setMensagemReposicao('');
             setEnviosRegistrados([]);
           }}
         />
+        {restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1 && (
+          <p className="text-xs text-gray-500">
+            Origem fixa no seu local da indústria — remessas do armazém central não aparecem aqui.
+          </p>
+        )}
         <Select
           label="Destino (Loja)"
           required

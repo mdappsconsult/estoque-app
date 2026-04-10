@@ -1,3 +1,6 @@
+import type { Usuario } from '@/types/database';
+import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
+
 // Mapa padrão rota -> perfis permitidos (usado como base e fallback)
 export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
@@ -138,6 +141,18 @@ export function hasAccessWithMap(perfil: string, pathname: string, map: Record<s
   if (!allowed) return true;
   if (allowed.includes('*')) return true;
   return allowed.includes(perfil);
+}
+
+/** Bloqueios por login operacional (ex.: indústria + motorista sem tela Estoque), além do perfil. */
+export function rotaBloqueadaPorEscopoOperacional(usuario: Usuario, pathname: string): boolean {
+  if (pathname !== '/estoque') return false;
+  return usuarioIndustriaSemConsultaEstoque(usuario);
+}
+
+/** Checagem completa para o guard: perfil + matriz + exceções por usuário. */
+export function usuarioPodeAcessarRota(usuario: Usuario, pathname: string, map: Record<string, string[]>): boolean {
+  if (rotaBloqueadaPorEscopoOperacional(usuario, pathname)) return false;
+  return hasAccessWithMap(usuario.perfil, pathname, map);
 }
 
 /** Uso em contexto sem hook (SSR ou código legado); no cliente reflete localStorage. */

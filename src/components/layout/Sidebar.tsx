@@ -24,6 +24,7 @@ import clsx from 'clsx';
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
+import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 
 const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string }[] = [
@@ -82,7 +83,10 @@ export default function Sidebar() {
   const perfil = usuario?.perfil || '';
   const permissionsMap = useEffectivePermissionsMap();
 
-  const filteredMenuItems = menuItems.filter(item => hasAccessWithMap(perfil, item.href, permissionsMap));
+  const filteredMenuItems = menuItems.filter((item) => {
+    if (usuario && item.href === '/estoque' && usuarioIndustriaSemConsultaEstoque(usuario)) return false;
+    return hasAccessWithMap(perfil, item.href, permissionsMap);
+  });
   const filteredMenuExpandable = menuExpandable
     .map(section => ({
       ...section,

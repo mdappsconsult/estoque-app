@@ -4,6 +4,8 @@ import { parseViagemIdDeLoteSep } from '@/lib/separacao/remessa-separacao-ui';
 export type OpcaoRemessaSepEtiquetas = {
   lote: string;
   created_at: string;
+  /** `transferencias.origem_id` quando a meta foi resolvida (filtra remessas «só etiquetas» após enrich). */
+  origemLocalId?: string | null;
   /** Preenchido na mesma leitura de `transferencias` + `locais` (padrão «Estoque → Loja X» no select). */
   origemNome?: string;
   destinoNome?: string;
@@ -23,10 +25,11 @@ const MAX_OPCOES_REMESSA_TOTAL = 200;
 const CHUNK_VIAGEM_ENRICH = 45;
 
 const SELECT_TRANS_COM_LOCAIS =
-  'viagem_id, destino_id, created_at, status, tipo, origem:locais!origem_id(nome), destino:locais!destino_id(nome)';
+  'viagem_id, origem_id, destino_id, created_at, status, tipo, origem:locais!origem_id(nome), destino:locais!destino_id(nome)';
 
 type TransRow = {
   viagem_id: string | null;
+  origem_id: string | null;
   destino_id: string | null;
   created_at: string | null;
   tipo: string | null;
@@ -87,6 +90,7 @@ function opcaoDeGrupoViagem(vid: string, rows: TransRow[]): OpcaoRemessaSepEtiqu
   return {
     lote: loteCanonicoParaViagem(vid),
     created_at: createdMax || String(best.created_at ?? ''),
+    origemLocalId: best.origem_id ?? null,
     origemNome: nomeLoc(best.origem) || 'Origem não informada',
     destinoNome: nomeLoc(best.destino) || 'Destino não informado',
     destinoLocalId: best.destino_id ?? null,
@@ -144,6 +148,7 @@ async function enriquecerOpcoesSemMeta(opcoes: OpcaoRemessaSepEtiquetas[]): Prom
     if (!fill?.origemNome) return o;
     return {
       ...o,
+      origemLocalId: fill.origemLocalId ?? null,
       origemNome: fill.origemNome,
       destinoNome: fill.destinoNome,
       destinoLocalId: fill.destinoLocalId ?? null,
@@ -234,5 +239,14 @@ export async function buscarOpcoesRemessaSepParaEtiquetas(
   }
 
   ordenadas = await enriquecerOpcoesSemMeta(ordenadas);
+
+  /** RPC / scan em `etiquetas` injetavam viagens de qualquer origem mesmo com `origemId` na 1ª query. */
+  if (origem) {
+    const origemNorm = origem.toLowerCase();
+    ordenadas = ordenadas.filter(
+      (o) => (o.origemLocalId || '').trim().toLowerCase() === origemNorm
+    );
+  }
+
   return ordenadas;
 }

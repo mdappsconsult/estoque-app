@@ -1,5 +1,96 @@
 # Log de Sessões
 
+### Sessão - 2026-04-10 - Reabrir remessa Jardim Paraíso 09/04 (divergência indevida)
+- **Contexto:** Silvania precisava receber produtos do dia 9; remessa estava `DIVERGENCE` (confirmado sem escaneio completo / fluxo motorista antigo).
+- **Mudança:** migração **`20260410200000_reabrir_remessa_divergencia_jardim_paraiso_2026_04_09.sql`** — apaga `divergencias`, `recebido=false` em `transferencia_itens`, itens da remessa → `EM_TRANSFERENCIA` na **origem**, `transferencias` → `IN_TRANSIT`. Executada no Supabase do MCP; **produção:** aplicar se o mesmo caso existir.
+- **Validação:** SQL no MCP; 74 itens na origem; status `IN_TRANSIT`.
+
+### Sessão - 2026-04-10 - Recebimento: painel «já encerradas» (divergência / recebida)
+- **Contexto:** Silvania (Jardim Paraíso) no localhost não via «dia 9» — no banco a remessa do 09/04 para essa loja está **`DIVERGENCE`**, fora do select que só mostra **`IN_TRANSIT`**.
+- **Mudança:** bloco informativo listando remessas **`DELIVERED`** / **`DIVERGENCE`** dos últimos **14 dias** para o `destino_id` da operadora, explicando por que não entram no menu.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Recebimento: filtro `destino_id` no Supabase (loja)
+- **Problema:** Paraíso / Santa Cruz não viam remessas do dia 9 na lista (possível truncagem ao paginar `transferencias` inteira ou carga antes de `local_padrao_id` hidratar).
+- **Mudança:** `/recebimento` — `OPERATOR_STORE` usa `useRealtimeQuery` com `filters` `destino_id = local_padrao_id` e `enabled` só com usuário + loja definidos; gerente/dono segue sem filtro de destino.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Backfill: remessas ACCEPTED → IN_TRANSIT (Léo / lojas)
+- **Pedido:** corrigir entregas de ontem presas após só «aceitar» viagem, para as lojas verem no Recebimento.
+- **Mudança:** migração **`20260410180000_backfill_remessas_aceitas_para_em_transito.sql`** — `WAREHOUSE_STORE` + `ACCEPTED` com viagem `ACCEPTED` ou `IN_TRANSIT`: itens `EM_ESTOQUE` → `EM_TRANSFERENCIA`, remessa → `IN_TRANSIT`, viagem `ACCEPTED` → `IN_TRANSIT` se não sobrar remessa `AWAITING_ACCEPT`/`ACCEPTED`. Executada no Supabase ligado ao MCP (projeto local); **produção:** aplicar o mesmo SQL se necessário.
+- **Validação:** SQL no MCP; contagens pós-execução.
+
+### Sessão - 2026-04-10 - Viagem: aceitar já coloca em trânsito (loja vê no Recebimento)
+- **Problema:** só existia um botão «aceitar»; Léo aceitava e remessas ficavam `ACCEPTED` — loja não via no Recebimento até **Iniciar viagem**.
+- **Mudança:** `aceitarViagem` passa viagem para `IN_TRANSIT` e despacha remessas `AWAITING_ACCEPT` ou `ACCEPTED` (loja já tinha aceitado) com itens `EM_TRANSFERENCIA`; helper compartilhado com `iniciarViagem`. UI: botão **Aceitar viagem**, modal sem segunda chamada a `iniciarViagem`; textos de ajuda ajustados.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Recebimento + Viagem / Aceite: fila ACCEPTED e orientação ao motorista
+- **Contexto:** loja não via envio após Léo «aceitar»; em Aceite não havia mais botão — remessa fica `ACCEPTED` até **Iniciar viagem** (`IN_TRANSIT`).
+- **Mudança:** `filtrarRemessasMatrizAguardandoMotorista` + faixa em **Recebimento** listando essas remessas; **Viagem / Aceite** — caixa de ajuda quando não há pendentes (perfil motorista); no **Histórico**, avisos para viagem sem remessa ou remessa com status ≠ trânsito.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Viagem / Aceite: histórico recolhido
+- **Mudança:** `/viagem-aceite` — seção **Histórico** inicia fechada; cabeçalho clicável com chevron expande/recolhe (até 10 itens inalterados).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Remoção de viagens órfãs (UI + MCP + migration pontual)
+- **Pedido:** apagar as viagens «4FC3B3A7», «9BD26EB9», «F623CF69» sem remessa vinculada.
+- **MCP (projeto ligado ao `.env.local`):** bloco `DO` com os três prefixos (nenhuma linha afetada — já ausentes); removidas **2** outras órfãs (`be635a57…`, `bbd6f8d4…`) com `UPDATE etiquetas` + `DELETE viagens`; conferência: **0** viagens sem remessa restantes.
+- **Repo:** migração **`20260410161000_remover_viagens_orfas_prefixos_ui.sql`** para reaplicar nos três prefixos em outro ambiente/produção se ainda existirem.
+- **Validação:** SQL no MCP; `npm run lint` / `npm run build` não obrigatórios para só SQL (sem mudança TS neste passo).
+
+### Sessão - 2026-04-10 - Viagens órfãs: trigger no banco + limpeza + Viagem / Aceite
+- **Problema:** viagens sem `transferencias` vinculadas (remessa apagada sem apagar viagem; ou falha de compensação).
+- **Mudança:** migração **`20260410153000_viagem_orfa_trigger_e_limpeza.sql`** — função `SECURITY DEFINER` + trigger após `DELETE` em `transferencias`: se não sobrar remessa na viagem, `UPDATE etiquetas` (`SEP-{uuid}`) `excluida` e `DELETE` em `viagens`; no mesmo arquivo, **limpeza única** de viagens já órfãs + etiquetas. **`/viagem-aceite`:** `Promise.allSettled` + log em falha parcial (não apaga o mapa inteiro).
+- **Impacto:** consistência automática no futuro; dados legados corrigidos ao aplicar a migration.
+- **Validação:** `npm run lint`, `npm run build`. **Produção:** aplicar a migration no Supabase.
+
+### Sessão - 2026-04-10 - Impressoras: mensagem para HTTP 530 / Cloudflare 1033 (ponte Pi)
+- **Contexto:** «Verificar agora» na ponte estoque mostrava só «Resposta inesperada (HTTP 530)»; `GET https://print…/health` retorna corpo típico `error code: 1033` quando o túnel não tem **cloudflared** conectado.
+- **Mudança:** `/api/impressoras/status` — texto orientando Pi/systemd/Zero Trust; bullet em `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas: seletor Estoque × Indústria (Leonardo fixo)
+- **Pedido:** equipe alternar matriz na lista de remessas; Leonardo só indústria, sem ver estoque central.
+- **Mudança:** `etiquetas-origem-matriz.ts` (resolve UUIDs por nome); `/etiquetas` com `<select>` + `sessionStorage` para quem não é login indústria; Leonardo mantém texto fixo + `local_padrao_id`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Separar por Loja: Leonardo sem escolher «Estoque» central
+- **Pedido:** na separação matriz → loja, login indústria não deve operar como origem o armazém central «Estoque».
+- **Mudança:** `usuarioIndustriaSemConsultaEstoque` — opções de **Origem** limitadas ao `local_padrao_id` (warehouse); select travado quando há um único local; avisos se faltar local padrão ou tipo errado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas: Leonardo só remessas da indústria
+- **Problema:** no select de remessa, login indústria via RPC/`etiquetas` ainda via «Estoque → loja».
+- **Correção:** `OpcaoRemessaSepEtiquetas.origemLocalId` + filtro final por `origemId` após enrich; `/etiquetas` passa `local_padrao_id` também para `usuarioIndustriaSemConsultaEstoque` (não só `OPERATOR_WAREHOUSE*`). Mensagens quando lista vazia / sem local padrão.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Leonardo (login indústria): sem tela Estoque
+- **Pedido:** Leonardo é motorista e responsável pela indústria — não precisa da consulta **Estoque**; acesso alinhado ao que usa no dia a dia.
+- **Mudança:** `usuarioIndustriaSemConsultaEstoque` (mesmo critério de login que Etiquetas Zebra). Bloqueio de `/estoque` em `usuarioPodeAcessarRota` + `AuthGuard` (mensagem específica); card removido na **home**; item oculto na **Sidebar**. Demais rotas do perfil (viagem, compra, produção, separar, etiquetas, validades, etc.) inalteradas.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Leonardo: voltar a ver todos os lançamentos da indústria
+- **Pedido:** funcionário Leonardo deve visualizar **todos** os lançamentos da indústria, não só os dele.
+- **Mudança:** removidos filtros por `registrado_por` / `criado_por` e faixas de aviso em **Registrar Compra**, **Separar por Loja** e **Etiquetas**; removidos `criadoPorUsuarioId`, `somenteCriadoPorUsuarioId` e `usuarioIndustriaVeSomentePropriosLancamentos`. Colunas `registrado_por` no banco e nos inserts **permanecem** (auditoria).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Indústria restrita (Leonardo): só próprios lançamentos
+- **Pedido:** funcionário Leonardo / login indústria vê **apenas** lançamentos da indústria feitos por ele.
+- **Mudança:** colunas `registrado_por` em `lotes_compra` e `producoes` (insert preenchido; backfill `ENTRADA_COMPRA` / `PRODUCAO` na `auditoria`). `usuarioIndustriaVeSomentePropriosLancamentos` (mesmo critério do login Zebra Etiquetas). Filtros: **Registrar Compra** (`useRealtimeQuery`), **Separar por Loja** (`buscarEnviosRecentesMatrizParaLojas` + `criado_por`), **Etiquetas** (`buscarOpcoesRemessaSepParaEtiquetas`). Faixas de aviso nas telas.
+- **Validação:** `npm run lint`, `npm run build`. Aplicar migração no Supabase de produção.
+
+### Sessão - 2026-04-10 - Etiquetas: indústria só Zebra 60×60 (sem navegador)
+- **Pedido:** Leonardo / login indústria com **apenas** impressão Zebra 60×60 em `/etiquetas` (sem opção navegador nem outros formatos).
+- **Mudança:** formato **60×60** fixo + botões só Pi; removidos impressão navegador, ícone por linha e `localStorage` de formato restaurado (evita 60×60 residual no estoque no mesmo aparelho).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas: Zebra 60×60 só indústria (login); estoque só navegador 60×30
+- **Pedido:** Leonardo (indústria) imprime **Zebra 60×60** em `/etiquetas`; equipe estoque só **navegador 60×30**.
+- **Mudança:** `usuarioEtiquetasPodeImprimirZebra6060` + `NEXT_PUBLIC_ETIQUETAS_INDUSTRIA_LOGINS` (CSV); sem env, fallback login **`leonardo`**. Demais logins: seletor travado 60×30, sem botões Pi. Indústria: seletor completo; Pi **60×60** inclusive remessa **SEP-…**. `usePiPrintBridgeConfig` com `enabled` quando formato 60×60 + login permitido.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-10 - Etiquetas 60×30: pouca quantidade ao final da ordem
 - **Mudança:** `ordenarEtiquetasPorProdutoParaImpressao` ordena por **contagem na lista a imprimir** (desc), depois nome e `id` — evita um SKU com 1 etiqueta no meio de um bloco enorme de outro. Grupos na UI por total (desc) e nome. `confirmarImpressao` e `CONTEXTO_ATUAL.md` alinhados.
 - **Validação:** `npm run lint`, `npm run build`.

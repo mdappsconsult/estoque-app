@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS public.producoes (
   data_producao TIMESTAMPTZ NOT NULL DEFAULT now(),
   responsavel TEXT NOT NULL,
   observacoes TEXT,
+  registrado_por UUID REFERENCES public.usuarios(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -212,6 +213,7 @@ CREATE TABLE IF NOT EXISTS public.lotes_compra (
   motivo_sem_nota TEXT,
   local_id UUID NOT NULL REFERENCES public.locais(id),
   data_validade DATE,
+  registrado_por UUID REFERENCES public.usuarios(id),
   CONSTRAINT lotes_compra_nota_fiscal_check CHECK (
     (sem_nota_fiscal = false AND nota_fiscal IS NOT NULL AND btrim(nota_fiscal) <> '')
     OR

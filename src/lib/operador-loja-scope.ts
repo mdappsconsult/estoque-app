@@ -86,6 +86,25 @@ export function filtrarRecebimentoPorLoja<T extends { destino_id: string }>(
 }
 
 /**
+ * Matriz → loja em **ACCEPTED** (viagem aceita pelo motorista) ainda sem **IN_TRANSIT** —
+ * aparece na loja só como aviso até alguém tocar em «Iniciar viagem» em Viagem / Aceite.
+ */
+export function filtrarRemessasMatrizAguardandoMotorista<
+  T extends { destino_id: string; status: string; tipo: string },
+>(transferencias: T[], usuario: Usuario | null): T[] {
+  if (!usuario || usuario.perfil !== 'OPERATOR_STORE' || !usuario.local_padrao_id) {
+    return [];
+  }
+  const L = usuario.local_padrao_id;
+  return transferencias.filter(
+    (t) =>
+      t.tipo === 'WAREHOUSE_STORE' &&
+      t.destino_id === L &&
+      t.status === 'ACCEPTED'
+  );
+}
+
+/**
  * Aceites: operadora da loja vê
  * - AWAITING_ACCEPT em que ela é destino (precisa aceitar);
  * - ACCEPTED em que ela é origem (precisa despachar, ex.: loja → loja).

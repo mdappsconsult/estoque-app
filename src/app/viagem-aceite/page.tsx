@@ -126,6 +126,8 @@ export default function ViagemAceitePage() {
   const [viagemExpandida, setViagemExpandida] = useState<Record<string, boolean>>({});
   /** Por viagem, qual remessa (transferência) está expandida para ver lista unitária */
   const [remessaExpandida, setRemessaExpandida] = useState<Record<string, string | null>>({});
+  /** Bloco «Histórico» (IN_TRANSIT / COMPLETED) recolhido por padrão */
+  const [historicoAberto, setHistoricoAberto] = useState(false);
 
   const carregarTransferencias = useCallback(async () => {
     if (viagens.length === 0) {
@@ -134,7 +136,7 @@ export default function ViagemAceitePage() {
     }
     setLoadingTrans(true);
     try {
-      const entradas = await Promise.all(
+      const settled = await Promise.allSettled(
         viagens.map(async (v) => {
           const { data, error } = await supabase
             .from('transferencias')
@@ -145,11 +147,24 @@ export default function ViagemAceitePage() {
         })
       );
       const map: Record<string, TransRow[]> = {};
-      for (const [id, rows] of entradas) {
-        map[id] = rows;
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        const vid = viagens[i].id;
+        if (r.status === 'fulfilled') {
+          const [id, rows] = r.value;
+          map[id] = rows;
+        } else {
+          map[vid] = [];
+          console.warn(
+            '[viagem-aceite] Falha ao carregar remessas da viagem',
+            vid,
+            errMessage(r.reason, String(r.reason))
+          );
+        }
       }
       setTransMap(map);
-    } catch {
+    } catch (e: unknown) {
+      console.warn('[viagem-aceite] carregarTransferencias:', errMessage(e, String(e)));
       setTransMap({});
     } finally {
       setLoadingTrans(false);
@@ -189,7 +204,6 @@ export default function ViagemAceitePage() {
     try {
       if (modo === 'aceitar_iniciar') {
         await aceitarViagem(viagemId, usuario.id);
-        await iniciarViagem(viagemId, usuario.id);
         showFeedback('success', 'Viagem aceita e já em trânsito. Boa rota!');
       } else {
         await iniciarViagem(viagemId, usuario.id);
@@ -256,6 +270,8 @@ export default function ViagemAceitePage() {
 
   const viagensPendentes = viagens.filter((v) => v.status === 'PENDING' || v.status === 'ACCEPTED');
   const viagensHist = viagens.filter((v) => v.status === 'IN_TRANSIT' || v.status === 'COMPLETED');
+  const perfilMotorista =
+    usuario?.perfil === 'DRIVER' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
 
   return (
     <div className="max-w-lg mx-auto">
@@ -307,14 +323,12 @@ export default function ViagemAceitePage() {
           fecharModalConfirmacao();
         }}
         title={
-          confirmModal?.modo === 'aceitar_iniciar'
-            ? 'Aceitar e iniciar viagem?'
-            : 'Iniciar viagem?'
+          confirmModal?.modo === 'aceitar_iniciar' ? 'Aceitar viagem?' : 'Iniciar viagem?'
         }
         subtitle={
           confirmModal?.modo === 'aceitar_iniciar'
-            ? 'Confirme só se já estiver saindo.'
-            : 'As lojas passam a ver o envio em trânsito.'
+            ? 'As remessas vão direto para em trânsito; a loja vê no Recebimento.'
+            : 'Só use se a viagem ficou aceita sem sair (fluxo antigo). As lojas passam a ver em trânsito.'
         }
         size="sm"
       >
@@ -322,8 +336,8 @@ export default function ViagemAceitePage() {
           <p className="text-sm text-gray-600 leading-relaxed">
             {confirmModal?.modo === 'aceitar_iniciar' ? (
               <>
-                Você será registrado como motorista, a viagem será aceita e as remessas irão para{' '}
-                <strong>em trânsito</strong> na hora. As unidades de destino podem preparar o recebimento.
+                Você será registrado como motorista; a viagem e as remessas passam para{' '}
+                <strong>em trânsito</strong> neste passo. As lojas de destino podem usar o Recebimento na hora.
               </>
             ) : (
               <>
@@ -355,7 +369,7 @@ export default function ViagemAceitePage() {
                   Processando…
                 </>
               ) : confirmModal?.modo === 'aceitar_iniciar' ? (
-                'Confirmar e sair'
+                'Confirmar'
               ) : (
                 'Iniciar agora'
               )}
@@ -365,9 +379,29 @@ export default function ViagemAceitePage() {
       </Modal>
 
       {viagensPendentes.length === 0 && (
-        <div className="text-center py-12 text-gray-400">
+        <div className="text-center py-10 text-gray-400 px-2">
           <Truck className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>Nenhuma viagem pendente</p>
+          <p className="font-medium text-gray-600">Nenhuma viagem pendente</p>
+          {perfilMotorista && (
+            <div className="mt-4 mx-auto max-w-md text-left rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm text-gray-700">
+              <p className="font-medium text-gray-800">Motorista</p>
+              <p className="mt-2 leading-relaxed">
+                Ao <strong>aceitar</strong> uma viagem nova, o sistema já coloca tudo <strong>em trânsito</strong> e a
+                loja vê no <strong>Recebimento</strong>. Envios em andamento ficam no <strong>Histórico</strong> abaixo
+                (toque para abrir).
+              </p>
+              <p className="mt-2 leading-relaxed">
+                Se aparecer <strong>Iniciar viagem</strong>, é remessa antiga que ficou só «aceita»: use esse botão ou
+                peça ao gestor. Só quem aceitou com o mesmo login pode iniciar.
+              </p>
+              {viagensHist.some((v) => v.status === 'IN_TRANSIT') && (
+                <p className="mt-2 text-xs text-gray-600">
+                  Há viagem em trânsito no histórico: confira se a loja já consegue selecionar essa entrega no
+                  Recebimento.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -534,7 +568,7 @@ export default function ViagemAceitePage() {
                     ) : (
                       <Play className="w-4 h-4 mr-2" />
                     )}
-                    Aceitar e iniciar agora
+                    Aceitar viagem
                   </Button>
                 )}
                 {v.status === 'ACCEPTED' && v.motorista_id === usuario?.id && (
@@ -559,36 +593,75 @@ export default function ViagemAceitePage() {
       </div>
 
       {viagensHist.length > 0 && (
-        <>
-          <h2 className="text-lg font-semibold text-gray-700 mt-8 mb-4">Histórico</h2>
-          <div className="space-y-2">
-            {viagensHist.slice(0, 10).map((v) => {
-              const trans = transMap[v.id] || [];
-              const totalItens = trans.reduce((acc, t) => acc + (t.transferencia_itens?.length || 0), 0);
-              const idCurto = v.id.slice(0, 8).toUpperCase();
-              return (
-                <div
-                  key={v.id}
-                  className="bg-white rounded-xl border border-gray-200 p-3 flex items-start justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-700">Viagem · {idCurto}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 truncate">
-                      Lojas: {resumoDestinos(trans)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {trans.length} remessa(s) · {totalItens} unidades ·{' '}
-                      {new Date(v.created_at).toLocaleString('pt-BR')}
-                    </p>
+        <div className="mt-8 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setHistoricoAberto((aberto) => !aberto)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+            aria-expanded={historicoAberto}
+          >
+            <div className="min-w-0">
+              <p className="text-base font-semibold text-gray-800">Histórico</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {viagensHist.length} viagem(ns) em trânsito ou concluídas
+                {!historicoAberto ? ' · toque para abrir' : ''}
+              </p>
+            </div>
+            {historicoAberto ? (
+              <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+            ) : (
+              <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
+            )}
+          </button>
+          {historicoAberto && (
+            <div className="border-t border-gray-100 px-3 pb-3 pt-1 space-y-2">
+              {viagensHist.slice(0, 10).map((v) => {
+                const trans = transMap[v.id] || [];
+                const totalItens = trans.reduce(
+                  (acc, t) => acc + (t.transferencia_itens?.length || 0),
+                  0
+                );
+                const idCurto = v.id.slice(0, 8).toUpperCase();
+                const remessasNaoTransito =
+                  v.status === 'IN_TRANSIT' &&
+                  trans.length > 0 &&
+                  trans.some((t) => t.status !== 'IN_TRANSIT');
+                const viagemSemRemessa = trans.length === 0;
+                return (
+                  <div
+                    key={v.id}
+                    className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-700">Viagem · {idCurto}</p>
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">
+                        Lojas: {resumoDestinos(trans)}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {trans.length} remessa(s) · {totalItens} unidades ·{' '}
+                        {new Date(v.created_at).toLocaleString('pt-BR')}
+                      </p>
+                      {viagemSemRemessa && (
+                        <p className="text-xs text-amber-800 mt-1.5 rounded-md bg-amber-50 border border-amber-100 px-2 py-1">
+                          Sem remessa vinculada — a loja não verá este envio no Recebimento.
+                        </p>
+                      )}
+                      {remessasNaoTransito && (
+                        <p className="text-xs text-amber-800 mt-1.5 rounded-md bg-amber-50 border border-amber-100 px-2 py-1">
+                          Atenção: a viagem está em trânsito, mas há remessa com outro status — a loja pode não ver
+                          tudo no Recebimento. Fale com suporte.
+                        </p>
+                      )}
+                    </div>
+                    <Badge variant={statusBadge(v.status)} size="sm">
+                      {statusLabel(v.status)}
+                    </Badge>
                   </div>
-                  <Badge variant={statusBadge(v.status)} size="sm">
-                    {statusLabel(v.status)}
-                  </Badge>
-                </div>
-              );
-            })}
-          </div>
-        </>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

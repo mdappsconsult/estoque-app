@@ -210,6 +210,7 @@ export async function criarLoteCompra(
       fornecedor: lote.fornecedor.trim(),
       lote_fornecedor: loteFornecedorFinal,
       data_validade: dataValidadeLote,
+      registrado_por: usuarioId,
     })
     .select()
     .single();

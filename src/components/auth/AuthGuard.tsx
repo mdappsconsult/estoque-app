@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-import { hasAccessWithMap } from '@/lib/permissions';
+import { rotaBloqueadaPorEscopoOperacional, usuarioPodeAcessarRota } from '@/lib/permissions';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import MobileHeader from '@/components/layout/MobileHeader';
 import { ValidadeAlertProvider } from '@/components/validade/ValidadeAlertProvider';
@@ -43,7 +43,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   // No access
-  if (!hasAccessWithMap(usuario.perfil, pathname, permissionsMap)) {
+  if (!usuarioPodeAcessarRota(usuario, pathname, permissionsMap)) {
+    const msgEstoqueIndustria =
+      rotaBloqueadaPorEscopoOperacional(usuario, pathname) &&
+      'Esta conta não usa a tela Estoque. No início você encontra compra, produção, separação, etiquetas e viagem.';
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="text-center max-w-sm">
@@ -51,7 +54,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
             <ShieldX className="w-8 h-8 text-red-500" />
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-2">Acesso negado</h1>
-          <p className="text-gray-500 mb-6">Você não tem permissão para acessar esta página.</p>
+          <p className="text-gray-500 mb-6">
+            {msgEstoqueIndustria || 'Você não tem permissão para acessar esta página.'}
+          </p>
           <button
             onClick={() => router.replace('/')}
             className="px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors"

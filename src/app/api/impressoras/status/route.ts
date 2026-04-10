@@ -28,6 +28,23 @@ function wssToHealthUrl(wss: string): string | null {
   return `https://${rest}/health`;
 }
 
+/** Corpo típico da edge: `error code: 1033` — túnel sem cloudflared conectado. */
+function mensagemHealthInesperada(status: number, body: string): string {
+  const b = body.trim();
+  if (status === 530) {
+    if (/1033/i.test(b)) {
+      return (
+        'Cloudflare Tunnel sem conector ativo (HTTP 530, código 1033): a URL resolve na Cloudflare, mas nenhum cloudflared saudável está ligado ao túnel. ' +
+        'No Raspberry: conferir `systemctl status` do serviço cloudflared do túnel nomeado, reiniciar se estiver parado; internet de saída; credenciais/token no painel Zero Trust → Tunnels.'
+      );
+    }
+    return (
+      'Cloudflare não encaminhou para a origem (HTTP 530). Confira CNAME do túnel (*.cfargotunnel.com), proxy ativo e se cloudflared + pi-print-ws estão em execução no Pi.'
+    );
+  }
+  return `Resposta inesperada (HTTP ${status}).`;
+}
+
 /** Alguns hosts (ex. Railway) usam resolver interno com NXDOMAIN atrasado; 1.1.1.1/8.8.8.8 já resolvem o nome. */
 function isLikelyDnsFailure(e: unknown): boolean {
   const code = (e as { cause?: { code?: string } })?.cause?.code;
@@ -221,7 +238,7 @@ export async function GET(req: NextRequest) {
       urlSource,
       message: online
         ? 'Bridge respondeu (pi-print-ws).'
-        : `Resposta inesperada (HTTP ${res.status}).`,
+        : mensagemHealthInesperada(res.status, text),
     });
   } catch (e) {
     clearTimeout(timer);
