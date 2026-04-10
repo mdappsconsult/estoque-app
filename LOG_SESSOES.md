@@ -1,5 +1,89 @@
 # Log de Sessões
 
+### Sessão - 2026-04-10 - Etiquetas 60×30: pouca quantidade ao final da ordem
+- **Mudança:** `ordenarEtiquetasPorProdutoParaImpressao` ordena por **contagem na lista a imprimir** (desc), depois nome e `id` — evita um SKU com 1 etiqueta no meio de um bloco enorme de outro. Grupos na UI por total (desc) e nome. `confirmarImpressao` e `CONTEXTO_ATUAL.md` alinhados.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas 60×30: colunas por produto após corte na tesoura
+- **Pedido:** após cortar no pontilhado, uma pilha com as meias de **um lado** deve seguir a sequência por produto (amendoim, flanela, 473…) até «terminar a primeira lista»; a outra pilha = restantes.
+- **Mudança:** mantém `ordenarEtiquetasPorProdutoParaImpressao` + reativa `preparar60x30PilhasPorLado` na impressão **60×30** só em `/etiquetas` via terceiro argumento de `imprimirEtiquetasEmJobUnico`; `confirmarImpressao` e `CONTEXTO_ATUAL.md` alinhados.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas 60×30: sequência por produto após corte
+- **Objetivo:** após cortar no pontilhado, percorrer meias na ordem natural (folha a folha, esq→dir) com o **mesmo produto em sequência** (ex.: flanelas, depois copos).
+- **Mudança:** `gerarDocumentoHtmlEtiquetas` só aplica `prepararEtiquetas60x30ParaPilhasEsquerdaDireita` se `preparar60x30PilhasPorLado === true` (default off). `enviarEtiquetasParaPiEmMultiplosJobs` com `preparar60x30PilhasPorLado` opcional; corrigido delay com `lista.length`. `/etiquetas`: `ordenarEtiquetasPorProdutoParaImpressao` antes do upsert/impressão em `imprimirLista` e `imprimirRemessaInteiraNavegador`; grupos na UI ordenados por produto e linhas por balde/`id`. `confirmarImpressao` 60×30 alinhado. `CONTEXTO_ATUAL.md`.
+- **Impacto:** desliga por padrão o pareamento «1ª metade | 2ª metade»; quem precisar pode passar `preparar60x30PilhasPorLado` no código/Pi.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiquetas 60×30: ordem para pilhas esquerda/direita
+- **Problema:** duas meias por folha com pareamento consecutivo (1|2, 3|4) fazia quem junta **todas as esquerdas** e **todas as direitas** perder a sequência (1,3,5 / 2,4,6).
+- **Mudança:** `prepararEtiquetas60x30ParaPilhasEsquerdaDireita` em `label-print.ts`; `gerarDocumentoHtmlEtiquetas` aplica no 60×30 (opção `preparacao60x30JaAplicada` para evitar dupla preparação); `enviarEtiquetasParaPiEmMultiplosJobs` prepara o lote inteiro antes de fatiar quando `formato === '60x30'`. `confirmarImpressao` 60×30 com linha explicando a ordem. Indústria 60×60 inalterada.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Etiquetas: copy enxuta na UI
+- **Mudança:** removidos faixas e parágrafos longos (SEP vs indústria, carregamento por remessa, lista de opções); rótulos `FORMATO_CONFIG` curtos (`60×30 mm`, `60×60 mm`); botão **Imprimir pendentes** sem sufixo; estado vazio e painel remessa simplificados; `alert` Pi mais curtos; import não usado `ETIQUETAS_UI_LIMITES_REMESA`.
+- **Impacto:** mesma lógica de impressão; menos ruído visual.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Etiquetas: SEP = 60×30 navegador; Zebra 60×60 só indústria
+- **Regra:** com remessa **SEP-…** o formato fica **60×30**, impressão **só navegador** (seletor travado); **Zebra/Pi** e **60×60** só sem lote SEP (uso indústria). `useLayoutEffect` força 60×30 ao escolher SEP; `imprimirListaNoPi` bloqueia lote `SEP-`.
+- **UI:** faixa informativa, rótulos **Zebra 60×60 (indústria)**; `FORMATO_CONFIG` em `label-print` com texto estoque/indústria.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Separar por Loja: impressão só em Etiquetas
+- **Mudança:** removidos painel «última remessa», **Guia PDF + imprimir** e **Só imprimir etiquetas**; lista vazia sem texto extra; após **Criar separação** só `persistirUltimaRemessa` + aviso com link **Etiquetas**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Separar por Loja: UX mais enxuta
+- **Mudança:** removidos/encurtados blocos de texto explicativo (última remessa, guia PDF, modais, envios, reposição/manual, rodapé da tabela); painel pós-separação virou uma linha + botões **Imprimir** / **Esquecer**.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-09 - Impressão: estoque só navegador; Zebra só indústria (60×60)
+- **Objetivo:** em fluxo matriz→loja (**Separar por Loja** / remessas **60×30**), não oferecer envio para Pi/Zebra; térmica fica na **indústria** (ex.: **Produção** e **Etiquetas** em **60×60**).
+- **Separar por Loja:** removidos hook Pi, botões e fallback pós-**Criar separação**; painel **Imprimir pedido completo** e textos falam só em **navegador** (60×30).
+- **Etiquetas:** `usePiPrintBridgeConfig` só **indústria**; botões **Zebra/Pi** e envio WebSocket aparecem **apenas** com formato **60×60**; **60×30** e outros = só navegador; removido fallback «ponte estoque» para 60×60.
+- **Docs:** `CONTEXTO_ATUAL.md` alinhado (Pi multi-job, bullets Etiquetas / label-print).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Dados: correção divergência Estoque → Delivery (481 faltantes)
+- **Contexto:** remessa com destino **Delivery** ficou `DIVERGENCE` após recebimento parcial; **Loja JK** sem transferência `DIVERGENCE` no mesmo projeto.
+- **Ação (Supabase, MCP `execute_sql`):** transação — `transferencia_itens.recebido` para os 481 faltantes; `itens` → `local_atual_id` Delivery, `EM_ESTOQUE` (estavam `EM_TRANSFERENCIA` no Estoque); `divergencias` marcadas resolvidas (`resolvido_por` Marco); `transferencias.status` → `DELIVERED`; `estoque` upsert por `produto_id` afetado; auditoria `CORRECAO_DIVERGENCIA_ENTREGUE`.
+- **Transferência:** `ccff554b-82e3-4200-956f-85af6cd7b346` — 485/485 recebidos após correção.
+- **Registro:** `docs/consultas-sql/correcao-divergencia-estoque-delivery-2026-04-09.sql` (não reexecutar sem revisar IDs).
+- **Validação:** consultas pós-SQL (status, contagens, 0 itens da remessa fora do Delivery/`EM_ESTOQUE`).
+
+### Sessão - 2026-04-09 - Recebimento: aviso com dois telefones na mesma conta
+- **Problema:** operação usou dois celulares logados na mesma conta para escanear mais rápido; um confirmou (ou gerou divergência) e o outro mostrou «não está mais em trânsito» com contagem de escaneados diferente — lista local por aparelho, sem sincronização.
+- **Mudança:** `/recebimento` — texto de ajuda sob os totais; `useEffect` com dados em realtime: se a remessa selecionada sair de `IN_TRANSIT`, limpa seleção e exibe faixa âmbar explicando (incl. outro aparelho / `DELIVERED` / `DIVERGENCE`); mensagens de erro no confirm alinhadas.
+- **Impacto:** menos confusão operacional; fluxo correto continua sendo **um dispositivo** até confirmar (sincronização entre aparelhos exigiria evolução de produto/API).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Divergências: filtros e agrupamento por remessa
+- **Objetivo:** administrador localizar rápido o que não foi conferido (faltante) ou QR fora da remessa (excedente), por loja/remessa.
+- **Código:** `listarDivergenciasAdmin` em `divergencias.ts` (filtros no servidor: situação, destino, tipo, UUID remessa; fatias `.in` por loja; busca client-side); página `/divergencias` com selects, busca com debounce, checkbox agrupar por remessa, cartões expansíveis (origem→destino, id transferência, viagem curta, contadores); realtime `postgres_changes` com ref via ref; resolver sem `alert`.
+- **Ajuste:** `listarRemessasParaFiltroDivergencias` + `<select>` de remessa (rótulo origem→destino, data, id curto, status, viagem); UUID completo exibido abaixo ao escolher; opções recarregam com loja/Realtime/Atualizar.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Separar por Loja: gravação atômica no servidor + performance
+- **Problema:** três chamadas no browser (viagem → etiquetas → transferência) sem transação deixavam **viagem + etiquetas sem `transferencias`** se o último passo falhasse; listas grandes deixavam a tela e «Envios já registrados» lentos.
+- **Mudança:** `POST /api/operacional/criar-separacao-matriz-loja` valida login operacional + perfis; `criarSeparacaoMatrizLojaAtomica` (service role) com **`compensarSeparacaoMatrizLojaIncompleta`** em falha; `criarTransferencia` e `registrarAuditoria` aceitam `SupabaseClient` opcional; chunk insert **200**. `buscarEnviosRecentesMatrizParaLojas` refeita com queries leves + chunks (**40** remessas no UI). Página: modal de senha após confirm, lista de itens com **Mostrar mais**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Etiquetas: meta no serviço + aviso 37 vs 134 unidades
+- **Problema:** «Separar por Loja» mostrava 134 unidades e lote SEP-…, mas em `/etiquetas` o painel dizia «origem/destino não carregaram» e só **37** linhas — meta vinha de um efeito separado na página (falhava para remessas fora do top 200 de transferências ou só vindas da RPC); a lista reflete só linhas em `etiquetas`, não o total da transferência.
+- **Mudança:** `buscarOpcoesRemessaSepParaEtiquetas` passa a trazer **`origemNome` / `destinoNome` / `status` / `destinoLocalId`** com `transferencias` + embed `locais`; `enriquecerOpcoesSemMeta` busca por `viagem_id` para opções vindas só de RPC/etiquetas. Página monta `metaPorViagemId` com `useMemo` a partir das opções (remove efeito e `carregandoMetaRemessas`). `contarUnidadesTransferenciaPorLoteSep` + faixa âmbar quando transferência tem mais unidades do que linhas em `etiquetas`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Etiquetas: remessa ainda sem «origem → destino» no select
+- **Causa:** algumas viagens tinham meta só em `transferencias` com **tipo ≠ WAREHOUSE_STORE** (ou a linha matriz→loja não batia no 1º filtro); a meta ficava vazia e o rótulo caía em `SEP-xxxx`.
+- **Mudança:** após carregar só `WAREHOUSE_STORE`, **2ª passagem** só para `viagem_id` ainda sem meta, **sem** filtrar `tipo`; entre várias linhas da mesma viagem prioriza `WAREHOUSE_STORE` e depois a mais recente. Helpers `metaPorViagemFromLinhasTransferencia` / `escolherLinhaTransferenciaPreferida`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-09 - Etiquetas: select mostrava UUID em vez de «… → Loja JK»
+- **Causa:** o lote continua **`SEP-{id da viagem}`** (UUID); o texto legível (**matriz → nome da loja**, ex. JK) vem da meta em `transferencias`. Se o UUID em `etiquetas.lote` e o retorno de `viagem_id` diferiam em **maiúsculas/minúsculas**, o `Map` não achava a meta e caía no fallback com o UUID longo. Além disso, falha em **um** chunk da busca de meta apagava toda a meta (catch global).
+- **Mudança:** `parseViagemIdDeLoteSep` normaliza em **minúsculas**; chaves da meta idem; chunk com erro só registra `warn` e segue; fallback do `<option>` usa **`loteSepResumidoParaUi`** (SEP + 1º bloco do UUID), não o UUID inteiro.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-09 - Etiquetas: lista de remessas lenta / «pesquisando» sem fim
 - **Causa:** `buscarOpcoesRemessaSepParaEtiquetas` lia até **10 mil linhas** de `etiquetas` só para montar o select (cada remessa tem N linhas → poucos lotes distintos, payload enorme). Meta das remessas: um `.in('viagem_id', …)` com até **200 UUID** podia estourar URL ou demorar. Com `maxRows`, o hook buscava páginas **só em série**.
 - **Mudança:** migração **`20260409120000_etiquetas_lotes_sep_recentes_rpc.sql`** — função `etiquetas_lotes_sep_recentes` (GROUP BY lote) + índice parcial; serviço chama a RPC e cai em fallback **2000** linhas se a RPC falhar. **Pula** o complemento por etiquetas quando já há **200** opções só de transferências. **`/etiquetas`:** meta em chunks de **45** `viagem_id` + `try/finally` no loading. **`useRealtimeQuery`:** faixas com `maxRows` em paralelo (4).

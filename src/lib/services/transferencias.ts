@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { Transferencia, TransferenciaInsert } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
@@ -107,11 +108,12 @@ export async function getTransferenciaById(id: string): Promise<TransferenciaCom
 
 /** PostgREST empilha `in.(…)` na query-string; listas grandes estouram URL e travam o browser. */
 const IN_CLAUSE_CHUNK = 100;
-const INSERT_TRANSFERENCIA_ITENS_CHUNK = 150;
+const INSERT_TRANSFERENCIA_ITENS_CHUNK = 200;
 
 export async function criarTransferencia(
   transferencia: TransferenciaInsert,
-  itemIds: string[]
+  itemIds: string[],
+  client: SupabaseClient = supabase
 ): Promise<Transferencia> {
   if (itemIds.length === 0) {
     throw new Error('A transferência precisa de pelo menos 1 item');
@@ -127,7 +129,7 @@ export async function criarTransferencia(
   const itensValidos: ItemLinha[] = [];
   for (let i = 0; i < idsOrd.length; i += IN_CLAUSE_CHUNK) {
     const slice = idsOrd.slice(i, i + IN_CLAUSE_CHUNK);
-    const { data: chunk, error: itensError } = await supabase
+    const { data: chunk, error: itensError } = await client
       .from('itens')
       .select('id, local_atual_id, estado')
       .in('id', slice);
@@ -146,11 +148,7 @@ export async function criarTransferencia(
     throw new Error('Todos os itens devem estar em estoque no local de origem');
   }
 
-  const { data, error } = await supabase
-    .from('transferencias')
-    .insert(transferencia)
-    .select()
-    .single();
+  const { data, error } = await client.from('transferencias').insert(transferencia).select().single();
   if (error) throw error;
 
   // Vincular itens em lotes (corpo JSON; evita payload único gigante e falhas silenciosas).
@@ -162,23 +160,26 @@ export async function criarTransferencia(
           transferencia_id: data.id,
           item_id: itemId,
         }));
-        const { error: insErr } = await supabase.from('transferencia_itens').insert(transItens);
+        const { error: insErr } = await client.from('transferencia_itens').insert(transItens);
         if (insErr) throw insErr;
       }
     } catch (e) {
-      await supabase.from('transferencias').delete().eq('id', data.id);
+      await client.from('transferencias').delete().eq('id', data.id);
       throw e;
     }
   }
 
-  await registrarAuditoria({
-    usuario_id: transferencia.criado_por,
-    local_id: transferencia.origem_id,
-    acao: 'CRIAR_TRANSFERENCIA',
-    origem_id: transferencia.origem_id,
-    destino_id: transferencia.destino_id,
-    detalhes: { transferencia_id: data.id, qtd_itens: idsOrd.length },
-  });
+  await registrarAuditoria(
+    {
+      usuario_id: transferencia.criado_por,
+      local_id: transferencia.origem_id,
+      acao: 'CRIAR_TRANSFERENCIA',
+      origem_id: transferencia.origem_id,
+      destino_id: transferencia.destino_id,
+      detalhes: { transferencia_id: data.id, qtd_itens: idsOrd.length },
+    },
+    client
+  );
 
   return data;
 }

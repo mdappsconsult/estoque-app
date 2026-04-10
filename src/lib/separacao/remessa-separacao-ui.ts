@@ -1,8 +1,12 @@
 /** UI legível para remessas «Separar por Loja» (lote SEP-{viagem_id}). */
 
+/**
+ * Extrai o id da viagem do lote e normaliza em minúsculas para bater com `transferencias.viagem_id`
+ * no PostgREST (evita `Map.get` falhar por diferença de casing entre `etiquetas.lote` e o UUID do banco).
+ */
 export function parseViagemIdDeLoteSep(lote: string | null | undefined): string | null {
   if (!lote || !lote.startsWith('SEP-')) return null;
-  const id = lote.slice(4).trim();
+  const id = lote.slice(4).trim().toLowerCase();
   return id.length > 0 ? id : null;
 }
 
@@ -73,6 +77,16 @@ export function truncarTexto(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+/** Quando ainda não há meta de transferência: mostrar SEP-{1º bloco do UUID}, como na térmica 60×60. */
+export function loteSepResumidoParaUi(lote: string): string {
+  const t = String(lote || '').trim();
+  if (!t.startsWith('SEP-')) return truncarTexto(t, 28);
+  const rest = t.slice(4).trim();
+  const primeiro = rest.split('-')[0]?.trim().toLowerCase() || '';
+  if (primeiro.length >= 6) return `SEP-${primeiro}`;
+  return truncarTexto(t, 28);
 }
 
 export function dataReferenciaRemessa(

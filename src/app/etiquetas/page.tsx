@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { QrCode, Loader2, Printer, RefreshCw, Server, Trash2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
@@ -12,9 +12,9 @@ import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { supabase } from '@/lib/supabase';
 import {
   buscarOpcoesRemessaSepParaEtiquetas,
-  ETIQUETAS_UI_LIMITES_REMESA,
+  type OpcaoRemessaSepEtiquetas,
 } from '@/lib/services/etiquetas-opcoes-remessa';
-import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
+import { contarUnidadesTransferenciaPorLoteSep, upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   confirmarImpressao,
   FORMATO_CONFIG,
@@ -29,6 +29,7 @@ import {
   type MetaTransferenciaRemessa,
   dataReferenciaRemessa,
   formatarDataHoraRemessaPt,
+  loteSepResumidoParaUi,
   parseViagemIdDeLoteSep,
   resumoProdutosRemessa,
   statusTransferenciaLegivel,
@@ -82,8 +83,6 @@ const MAX_ETIQUETAS_POR_REMESSA = 6000;
 const ETIQUETAS_VISIVEIS_POR_GRUPO = 50;
 const REFETCH_DEBOUNCE_ETIQUETAS_MS = 600;
 const CHUNK_ITENS_TOKENS_ETIQUETAS = 400;
-/** PostgREST: `.in('viagem_id', …)` com centenas de UUID estoura URL ou demora no gateway. */
-const CHUNK_VIAGEM_IDS_META_REMESSA = 45;
 
 async function carregarItensTokensPorIds(
   ids: string[]
@@ -102,11 +101,6 @@ async function carregarItensTokensPorIds(
     }
   }
   return map;
-}
-
-interface OpcaoRemessaTopo {
-  lote: string;
-  created_at: string;
 }
 
 function normalizarJoinUm<T>(valor: unknown): T | null {
@@ -141,6 +135,39 @@ function normalizarLinhaEtiquetaApi(row: Record<string, unknown>): EtiquetaRow {
     produto,
     item: null,
   };
+}
+
+/**
+ * Ordem de impressão 60×30: produtos com **mais unidades nesta lista** primeiro (blocos grandes);
+ * SKUs com poucas etiquetas vão ao **final**, para não “cortar” um volume enorme no meio com um item solto.
+ * Desempate: nome (pt-BR), depois `id`.
+ */
+function ordenarEtiquetasPorProdutoParaImpressao(lista: EtiquetaRow[]): EtiquetaRow[] {
+  const porProdutoId = new Map<string, number>();
+  for (const e of lista) {
+    porProdutoId.set(e.produto_id, (porProdutoId.get(e.produto_id) ?? 0) + 1);
+  }
+  return [...lista].sort((a, b) => {
+    const ca = porProdutoId.get(a.produto_id) ?? 0;
+    const cb = porProdutoId.get(b.produto_id) ?? 0;
+    if (ca !== cb) return cb - ca;
+    const na = (a.produto?.nome || 'Produto').trim();
+    const nb = (b.produto?.nome || 'Produto').trim();
+    const c = na.localeCompare(nb, 'pt-BR', { sensitivity: 'base' });
+    if (c !== 0) return c;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function compararEtiquetasNoGrupoUi(a: EtiquetaRow, b: EtiquetaRow): number {
+  const na = a.numero_sequencia_loja;
+  const nb = b.numero_sequencia_loja;
+  const aOk = na != null && Number.isFinite(Number(na));
+  const bOk = nb != null && Number.isFinite(Number(nb));
+  if (aOk && bOk && Number(na) !== Number(nb)) return Number(na) - Number(nb);
+  if (aOk && !bOk) return -1;
+  if (!aOk && bOk) return 1;
+  return a.id.localeCompare(b.id);
 }
 
 function rowsParaEtiquetasImpressao(
@@ -208,14 +235,27 @@ export default function EtiquetasPage() {
     });
   }, []);
 
-  const [opcoesRemessa, setOpcoesRemessa] = useState<OpcaoRemessaTopo[]>([]);
+  const [opcoesRemessa, setOpcoesRemessa] = useState<OpcaoRemessaSepEtiquetas[]>([]);
   const [carregandoOpcoesRemessa, setCarregandoOpcoesRemessa] = useState(true);
   const [erroOpcoesRemessa, setErroOpcoesRemessa] = useState('');
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
-  const [metaPorViagemId, setMetaPorViagemId] = useState<Map<string, MetaTransferenciaRemessa>>(
-    () => new Map()
-  );
-  const [carregandoMetaRemessas, setCarregandoMetaRemessas] = useState(false);
+  const [unidadesNaTransferencia, setUnidadesNaTransferencia] = useState<number | null>(null);
+
+  const metaPorViagemId = useMemo(() => {
+    const m = new Map<string, MetaTransferenciaRemessa>();
+    for (const o of opcoesRemessa) {
+      const vid = parseViagemIdDeLoteSep(o.lote);
+      if (!vid || !o.origemNome || !o.destinoNome) continue;
+      m.set(vid, {
+        origemNome: o.origemNome,
+        destinoNome: o.destinoNome,
+        destinoLocalId: o.destinoLocalId ?? null,
+        createdAt: String(o.transferenciaCreatedAt || o.created_at),
+        status: o.status ?? '',
+      });
+    }
+    return m;
+  }, [opcoesRemessa]);
 
   /** Remessa SEP-…: loja de destino (ou origem) para não sair «—» no 60×30 e no bloco local do 60×60. */
   const nomeLojaOuLocalRemessa = useMemo(() => {
@@ -253,26 +293,14 @@ export default function EtiquetasPage() {
   });
 
   const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'impressas'>('pendentes');
-  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x60');
-  /** 60×60 prefere ponte indústria; se não houver URL/linha no banco, usa a ponte estoque (um único Pi). */
-  const papelPiEtiquetas = formatoImpressao === '60x60' ? 'industria' : 'estoque';
-  const piEstoque = usePiPrintBridgeConfig({ papel: 'estoque' });
+  const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x30');
+  /** Remessa matriz→loja (`SEP-…`) = estoque: só 60×30 pelo navegador. Zebra 60×60 = indústria (outros lotes / uso avançado). */
+  const remessaSeparacaoLoja = Boolean(loteSelecionado?.startsWith('SEP-'));
+  const zebraSomenteIndustria = formatoImpressao === '60x60' && !remessaSeparacaoLoja;
   const piIndustria = usePiPrintBridgeConfig({ papel: 'industria' });
-  const piCfgLoading =
-    formatoImpressao === '60x60'
-      ? piIndustria.loading || (!piIndustria.available && piEstoque.loading)
-      : piEstoque.loading;
-  const piConnection =
-    formatoImpressao === '60x60'
-      ? piIndustria.connection ?? piEstoque.connection
-      : piEstoque.connection;
+  const piCfgLoading = zebraSomenteIndustria ? piIndustria.loading : false;
+  const piConnection = zebraSomenteIndustria ? piIndustria.connection : null;
   const piPrintAvailable = Boolean(piConnection);
-  const piUsaPonteEstoqueFallback6060 =
-    formatoImpressao === '60x60' &&
-    !piIndustria.loading &&
-    !piIndustria.available &&
-    Boolean(piEstoque.connection) &&
-    Boolean(piConnection);
   const [printing, setPrinting] = useState(false);
   const [erroImpressao, setErroImpressao] = useState('');
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
@@ -299,6 +327,12 @@ export default function EtiquetasPage() {
       setFormatoImpressao(salvo);
     }
   }, []);
+
+  /** Remessa SEP = estoque matriz→loja: só 60×30 (navegador), antes da pintura (evita `<select>` com value inválido). */
+  useLayoutEffect(() => {
+    if (!loteSelecionado?.startsWith('SEP-')) return;
+    setFormatoImpressao((f) => (f === '60x30' ? f : '60x30'));
+  }, [loteSelecionado]);
 
   useEffect(() => {
     window.localStorage.setItem(FORMATO_IMPRESSAO_STORAGE_KEY, formatoImpressao);
@@ -367,6 +401,8 @@ export default function EtiquetasPage() {
       const n = typeof payload.n === 'number' ? payload.n : 0;
       setSenhaParaSyncRemessa('');
       await refetchEtiquetasRemessa();
+      const nTr = await contarUnidadesTransferenciaPorLoteSep(loteSelecionado);
+      setUnidadesNaTransferencia(nTr);
       setSucessoSincEtiquetasRemessa(
         n > 0
           ? `${n} etiqueta(s) gravadas. A lista abaixo deve atualizar em instantes.`
@@ -399,83 +435,19 @@ export default function EtiquetasPage() {
   }, [opcoesRemessa]);
 
   useEffect(() => {
-    if (opcoesRemessa.length === 0) {
-      setMetaPorViagemId(new Map());
-      return;
-    }
-    const ids = [
-      ...new Set(
-        opcoesRemessa
-          .map((o) => parseViagemIdDeLoteSep(o.lote))
-          .filter((x): x is string => Boolean(x))
-      ),
-    ];
-    if (ids.length === 0) {
-      setMetaPorViagemId(new Map());
+    if (!loteSelecionado) {
+      setUnidadesNaTransferencia(null);
       return;
     }
     let cancelled = false;
-    setCarregandoMetaRemessas(true);
     void (async () => {
-      type RowMeta = {
-        viagem_id: string | null | undefined;
-        destino_id: string | null | undefined;
-        created_at: string | null | undefined;
-        status: string | null | undefined;
-        origem: { nome?: string } | null;
-        destino: { nome?: string } | null;
-      };
-      const todasLinhas: RowMeta[] = [];
-      try {
-        for (let i = 0; i < ids.length; i += CHUNK_VIAGEM_IDS_META_REMESSA) {
-          const slice = ids.slice(i, i + CHUNK_VIAGEM_IDS_META_REMESSA);
-          const { data, error } = await supabase
-            .from('transferencias')
-            .select(
-              'viagem_id, destino_id, created_at, status, origem:locais!origem_id(nome), destino:locais!destino_id(nome)'
-            )
-            .eq('tipo', 'WAREHOUSE_STORE')
-            .in('viagem_id', slice);
-          if (error) throw error;
-          if (data?.length) todasLinhas.push(...(data as RowMeta[]));
-        }
-      } catch {
-        if (!cancelled) {
-          setMetaPorViagemId(new Map());
-        }
-        return;
-      } finally {
-        setCarregandoMetaRemessas(false);
-      }
-      if (cancelled) return;
-      const porViagem = new Map<string, RowMeta[]>();
-      for (const row of todasLinhas) {
-        const vid = row.viagem_id as string | null | undefined;
-        if (!vid) continue;
-        const arr = porViagem.get(vid) ?? [];
-        arr.push(row);
-        porViagem.set(vid, arr);
-      }
-      const m = new Map<string, MetaTransferenciaRemessa>();
-      for (const [vid, rows] of porViagem) {
-        rows.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
-        const row = rows[0];
-        const o = row.origem as { nome?: string } | null;
-        const d = row.destino as { nome?: string } | null;
-        m.set(vid, {
-          origemNome: o?.nome?.trim() || 'Origem não informada',
-          destinoNome: d?.nome?.trim() || 'Destino não informado',
-          destinoLocalId: (row.destino_id as string | null | undefined) ?? null,
-          createdAt: String(row.created_at ?? ''),
-          status: String(row.status ?? ''),
-        });
-      }
-      setMetaPorViagemId(m);
+      const n = await contarUnidadesTransferenciaPorLoteSep(loteSelecionado);
+      if (!cancelled) setUnidadesNaTransferencia(n);
     })();
     return () => {
       cancelled = true;
     };
-  }, [opcoesRemessa]);
+  }, [loteSelecionado]);
 
   const remessaBulkContexto = useMemo(() => {
     if (!loteSelecionado) return null;
@@ -498,14 +470,12 @@ export default function EtiquetasPage() {
     [linhasRemessaBulk]
   );
 
-  function rotuloOpcaoRemessaNoTopo(o: OpcaoRemessaTopo): string {
-    const vid = parseViagemIdDeLoteSep(o.lote);
-    const meta = vid ? metaPorViagemId.get(vid) : undefined;
-    if (meta) {
-      const dataIso = dataReferenciaRemessa([], meta);
-      return `${formatarDataHoraRemessaPt(dataIso)} · ${truncarTexto(meta.origemNome, 18)} → ${truncarTexto(meta.destinoNome, 18)}`;
+  function rotuloOpcaoRemessaNoTopo(o: OpcaoRemessaSepEtiquetas): string {
+    if (o.origemNome && o.destinoNome) {
+      const dataIso = o.transferenciaCreatedAt || o.created_at;
+      return `${formatarDataHoraRemessaPt(dataIso)} · ${truncarTexto(o.origemNome, 18)} → ${truncarTexto(o.destinoNome, 18)}`;
     }
-    return `${formatarDataHoraRemessaPt(o.created_at)} · ${truncarTexto(o.lote, 36)}`;
+    return `${formatarDataHoraRemessaPt(o.created_at)} · ${loteSepResumidoParaUi(o.lote)}`;
   }
 
   const filtradas = useMemo(
@@ -543,7 +513,15 @@ export default function EtiquetasPage() {
       if (etiqueta.impressa) g.impressas += 1;
       else g.pendentes += 1;
     }
-    return Array.from(map.values());
+    return Array.from(map.values())
+      .map((g) => ({
+        ...g,
+        etiquetas: [...g.etiquetas].sort(compararEtiquetasNoGrupoUi),
+      }))
+      .sort((a, b) => {
+        if (b.total !== a.total) return b.total - a.total;
+        return a.produtoNome.localeCompare(b.produtoNome, 'pt-BR', { sensitivity: 'base' });
+      });
   }, [filtradas]);
 
   const marcarImpressa = async (ids: string[]) => {
@@ -566,25 +544,27 @@ export default function EtiquetasPage() {
     setErroImpressao('');
 
     try {
-      const vid = parseViagemIdDeLoteSep(lista[0]?.lote);
+      const ordenada = ordenarEtiquetasPorProdutoParaImpressao(lista);
+      const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
       const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
-      const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(lista, destinoLocalId);
+      const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
 
       const sucesso = await imprimirEtiquetasEmJobUnico(
         rowsParaEtiquetasImpressao(
-          lista,
+          ordenada,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
           numerosMap
         ),
-        formatoImpressao
+        formatoImpressao,
+        formatoImpressao === '60x30' ? { preparar60x30PilhasPorLado: true } : undefined
       );
 
       if (!sucesso) {
         throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
       }
 
-      await marcarImpressa(lista.map((e) => e.id));
+      await marcarImpressa(ordenada.map((e) => e.id));
     } catch (err: unknown) {
       setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
     } finally {
@@ -594,11 +574,18 @@ export default function EtiquetasPage() {
 
   const imprimirListaNoPi = async (lista: EtiquetaRow[]) => {
     if (lista.length === 0) return;
+    const loteLista = lista[0]?.lote?.trim() ?? '';
+    if (loteLista.startsWith('SEP-')) {
+      alert('Remessa SEP: use a impressão pelo navegador.');
+      return;
+    }
+    if (formatoImpressao !== '60x60') {
+      alert('Zebra/Pi: selecione o formato 60×60 mm.');
+      return;
+    }
     if (!piPrintAvailable || !piConnection) {
       alert(
-        formatoImpressao === '60x60'
-          ? 'Impressão 60×60: nenhuma ponte Pi resolvida. Configure indústria ou estoque em Configurações → Impressoras, ou NEXT_PUBLIC_PI_PRINT_WS_URL / _ESTOQUE / _INDUSTRIA. Veja docs/RASPBERRY_INDUSTRIA_NOVO_PI.md.'
-          : 'Impressão na estação indisponível. Configure em Configurações → Impressoras (Pi) ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
+        'Impressão 60×60 na estação: configure a ponte indústria em Configurações → Impressoras ou NEXT_PUBLIC_PI_PRINT_WS_URL_INDUSTRIA. Veja docs/RASPBERRY_INDUSTRIA_NOVO_PI.md.'
       );
       return;
     }
@@ -622,7 +609,7 @@ export default function EtiquetasPage() {
       await enviarEtiquetasParaPiEmMultiplosJobs(etiquetas, formatoImpressao, {
         jobNameBase: jobName,
         connection: piConnection,
-        papel: papelPiEtiquetas,
+        papel: 'industria',
       });
       await marcarImpressa(lista.map((e) => e.id));
     } catch (err: unknown) {
@@ -663,23 +650,25 @@ export default function EtiquetasPage() {
     setPrinting(true);
     setErroImpressao('');
     try {
-      const vid = parseViagemIdDeLoteSep(lista[0]?.lote);
+      const ordenada = ordenarEtiquetasPorProdutoParaImpressao(lista);
+      const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
       const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
-      const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(lista, destinoLocalId);
+      const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
 
       const ok = await imprimirEtiquetasEmJobUnico(
         rowsParaEtiquetasImpressao(
-          lista,
+          ordenada,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
           numerosMap
         ),
-        formatoImpressao
+        formatoImpressao,
+        formatoImpressao === '60x30' ? { preparar60x30PilhasPorLado: true } : undefined
       );
       if (!ok) {
         throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
       }
-      await marcarImpressa(lista.map((e) => e.id));
+      await marcarImpressa(ordenada.map((e) => e.id));
     } catch (err: unknown) {
       setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir remessa no navegador');
     } finally {
@@ -695,10 +684,15 @@ export default function EtiquetasPage() {
           <select
             value={formatoImpressao}
             onChange={(event) => setFormatoImpressao(event.target.value as FormatoEtiqueta)}
-            className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+            disabled={remessaSeparacaoLoja}
+            className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white disabled:bg-gray-100 disabled:text-gray-700"
             aria-label="Formato de impressão"
+            title={remessaSeparacaoLoja ? 'Formato fixo 60×30 para remessa SEP' : undefined}
           >
-            {(Object.keys(FORMATO_CONFIG) as FormatoEtiqueta[]).map((formato) => (
+            {(remessaSeparacaoLoja
+              ? (['60x30'] as const)
+              : (Object.keys(FORMATO_CONFIG) as FormatoEtiqueta[])
+            ).map((formato) => (
               <option key={formato} value={formato}>
                 {FORMATO_CONFIG[formato].label}
               </option>
@@ -710,56 +704,34 @@ export default function EtiquetasPage() {
             <>
               <Button variant="primary" onClick={() => void imprimirPendentes()} disabled={printing} className="w-full sm:w-auto">
                 {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
-                Imprimir pendentes (navegador)
+                Imprimir pendentes
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => void imprimirPendentesNoPi()}
-                disabled={printing || piCfgLoading || !piPrintAvailable}
-                title={
-                  !piPrintAvailable && !piCfgLoading
-                    ? 'Configure a ponte Pi em Configurações → Impressoras'
-                    : formatoImpressao === '60x60'
-                      ? piUsaPonteEstoqueFallback6060
-                        ? '60×60 via ponte estoque (indústria não configurada); confira papel 60×60 no CUPS'
-                        : 'Envia 60×60 para Pi indústria (ou estoque se for o único Pi)'
-                      : 'Envia 60×30 para Pi estoque (2 QR por folha)'
-                }
-                className="w-full sm:w-auto border-emerald-300 text-emerald-900 hover:bg-emerald-50"
-              >
-                {printing ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Server className="w-4 h-4 mr-2" />
-                )}
-                Zebra / Pi
-              </Button>
+              {zebraSomenteIndustria && (
+                <Button
+                  variant="outline"
+                  onClick={() => void imprimirPendentesNoPi()}
+                  disabled={printing || piCfgLoading || !piPrintAvailable}
+                  title={
+                    !piPrintAvailable && !piCfgLoading
+                      ? 'Configure em Configurações → Impressoras'
+                      : 'Pi indústria — não disponível para lote SEP'
+                  }
+                  className="w-full sm:w-auto border-emerald-300 text-emerald-900 hover:bg-emerald-50"
+                >
+                  {printing ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Server className="w-4 h-4 mr-2" />
+                  )}
+                  Zebra 60×60 (indústria)
+                </Button>
+              )}
             </>
           )}
         </div>
       </div>
 
-      {loteSelecionado?.startsWith('SEP-') && formatoImpressao === '60x30' && (
-        <div className="mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-          <strong>Atenção:</strong> o formato <strong>60×30</strong> gera PDF com folha <strong>60 mm de largura × 30 mm
-          de altura</strong> e <strong>duas meias etiquetas</strong> lado a lado. Em adesivo <strong>60×60</strong> a
-          Zebra costuma imprimir só uma faixa (metade vazia ou torta). Para <strong>uma etiqueta por adesivo
-          quadrado</strong>, selecione <strong>60×60 mm</strong> no menu acima.
-        </div>
-      )}
-      <p className="mb-2 text-xs text-gray-500">
-        O <strong>formato</strong> escolhido vale para <strong>navegador</strong> e para <strong>Zebra / Pi</strong>:
-        <strong> 60×30</strong> = folha baixa com <strong>2 QR</strong> (separação / meia etiqueta); <strong> 60×60</strong>{' '}
-        = <strong>uma etiqueta por folha</strong> (adesivo quadrado). A ponte <strong>60×60</strong> tenta{' '}
-        <strong>indústria</strong> e pode <strong>cair na estoque</strong> (confira mídia na Zebra). Remessas{' '}
-        <code className="text-[10px]">SEP-…</code> preenchem o <strong>nome da loja de destino</strong>. O padrão fica
-        salvo neste aparelho.{' '}
-        <Link href="/teste-impressao-etiqueta" className="text-red-600 font-medium underline underline-offset-2">
-          Teste de impressão
-        </Link>{' '}
-        (amostra fictícia).
-      </p>
-      {avisoHttpsPi && (
+      {zebraSomenteIndustria && avisoHttpsPi && (
         <p className="mb-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           Esta página está em <strong>HTTPS</strong> e a URL do Pi usa <strong>ws://</strong> — o navegador pode bloquear
           a ponte. Use <strong>wss://</strong> no túnel ou teste em <code className="text-[11px]">http://localhost</code>{' '}
@@ -768,7 +740,7 @@ export default function EtiquetasPage() {
       )}
       <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 space-y-3">
         <label className="block text-sm font-semibold text-gray-800">
-          Remessa (Separar por Loja — lote SEP-…)
+          Remessa
           <div className="mt-1 flex flex-col sm:flex-row gap-2">
             <select
               value={loteSelecionado ?? ''}
@@ -816,13 +788,6 @@ export default function EtiquetasPage() {
             separação em <Link href="/separar-por-loja" className="text-red-600 underline">Separar por Loja</Link>.
           </p>
         )}
-        <p className="text-xs text-gray-500">
-          As etiquetas <strong>só são carregadas</strong> depois que você escolhe a remessa (até{' '}
-          <strong>{MAX_ETIQUETAS_POR_REMESSA.toLocaleString('pt-BR')}</strong> unidades por lote). Lista de remessas:{' '}
-          <strong>transferências</strong> matriz→loja (como «Envios já registrados»; na indústria, filtradas pela sua
-          origem), até <strong>{ETIQUETAS_UI_LIMITES_REMESA.maxOpcoesNoSelect.toLocaleString('pt-BR')}</strong> opções,
-          completando com lotes <code className="text-[10px]">SEP-…</code> distintos (RPC no banco quando a migração estiver aplicada; senão leitura limitada em etiquetas).
-        </p>
       </div>
 
       {erroQueryEtiquetas && (
@@ -844,9 +809,9 @@ export default function EtiquetasPage() {
       {loteSelecionado && remessaBulkContexto && (
         <div className="mb-5 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm space-y-3">
           <div className="flex flex-col gap-2">
-            <p className="text-lg font-bold text-emerald-950">Remessa selecionada — imprimir tudo na Zebra</p>
-            {(carregandoMetaRemessas || carregandoEtiquetasRemessa) && (
-              <p className="text-xs text-emerald-800">Carregando dados da remessa ou etiquetas…</p>
+            <p className="text-lg font-bold text-emerald-950">Remessa selecionada</p>
+            {carregandoEtiquetasRemessa && (
+              <p className="text-xs text-emerald-800">Carregando etiquetas desta remessa…</p>
             )}
             <div className="text-sm text-emerald-950 space-y-1.5 rounded-lg bg-white/70 border border-emerald-100 px-3 py-2.5">
               <p className="font-semibold">
@@ -873,10 +838,18 @@ export default function EtiquetasPage() {
                 </p>
               )}
               <p className="text-xs text-emerald-900">
-                <strong>{linhasRemessaBulk.length}</strong> etiqueta(s) nesta remessa —{' '}
-                <strong>{pendentesRemessaBulk}</strong> ainda sem impressão,{' '}
+                <strong>{linhasRemessaBulk.length}</strong> linha(s) em <code className="text-[10px]">etiquetas</code> para
+                este lote — <strong>{pendentesRemessaBulk}</strong> ainda sem impressão,{' '}
                 <strong>{linhasRemessaBulk.length - pendentesRemessaBulk}</strong> já impressas.
               </p>
+              {unidadesNaTransferencia != null && unidadesNaTransferencia > linhasRemessaBulk.length && (
+                <p className="text-xs text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2">
+                  Na <strong>transferência</strong> (matriz → loja) há <strong>{unidadesNaTransferencia}</strong> unidade(s)
+                  distintas; aqui só aparecem as que já têm linha em <code className="text-[10px]">etiquetas</code>. Para
+                  gerar as que faltam, use <strong>Gravar etiquetas a partir da transferência</strong> abaixo (login +
+                  senha operacional).
+                </p>
+              )}
               {parseViagemIdDeLoteSep(loteSelecionado) &&
                 !carregandoEtiquetasRemessa &&
                 !erroQueryEtiquetas && (
@@ -972,36 +945,31 @@ export default function EtiquetasPage() {
                 })()}
             </div>
             <p className="text-xs text-emerald-900">
-              Troque a remessa no campo <strong>acima</strong>. A lista por produto fica abaixo; estes botões enviam a{' '}
-              <strong>sequência inteira</strong> no formato do seletor no topo da página ({formatoImpressao}).
+              Troque a remessa no campo acima. A lista por produto fica abaixo.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
+            {zebraSomenteIndustria && (
+              <Button
+                variant="primary"
+                className="border-emerald-600 bg-emerald-700 hover:bg-emerald-800"
+                disabled={
+                  printing || piCfgLoading || !piPrintAvailable || carregandoEtiquetasRemessa || linhasRemessaBulk.length === 0
+                }
+                onClick={() => void imprimirListaNoPi(linhasRemessaBulk)}
+                title="Zebra 60×60 — Pi indústria (não disponível para lote SEP)"
+              >
+                {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
+                Zebra 60×60 — remessa ({linhasRemessaBulk.length})
+              </Button>
+            )}
             <Button
-              variant="primary"
-              className="border-emerald-600 bg-emerald-700 hover:bg-emerald-800"
-              disabled={
-                printing ||
-                piCfgLoading ||
-                !piPrintAvailable ||
-                carregandoEtiquetasRemessa ||
-                linhasRemessaBulk.length === 0
+              variant={zebraSomenteIndustria ? 'outline' : 'primary'}
+              className={
+                zebraSomenteIndustria
+                  ? 'border-emerald-300 text-emerald-900 hover:bg-emerald-100 bg-white'
+                  : 'border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white'
               }
-              onClick={() => void imprimirListaNoPi(linhasRemessaBulk)}
-              title={
-                formatoImpressao === '60x60'
-                  ? piUsaPonteEstoqueFallback6060
-                    ? 'Um job 60×60 na ponte estoque (fallback): confira mídia na Zebra'
-                    : 'Um job na Pi: todas as etiquetas 60×60 desta remessa'
-                  : 'Um job na Pi estoque: todas as etiquetas 60×30 desta remessa'
-              }
-            >
-              {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
-              Zebra / Pi — remessa inteira ({linhasRemessaBulk.length})
-            </Button>
-            <Button
-              variant="outline"
-              className="border-emerald-300 text-emerald-900 hover:bg-emerald-100 bg-white"
               disabled={printing || carregandoEtiquetasRemessa || linhasRemessaBulk.length === 0}
               onClick={() => void imprimirRemessaInteiraNavegador(linhasRemessaBulk)}
             >
@@ -1009,16 +977,9 @@ export default function EtiquetasPage() {
               Navegador — remessa inteira ({formatoImpressao})
             </Button>
           </div>
-          {piUsaPonteEstoqueFallback6060 && (
-            <p className="text-xs text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2">
-              <strong>Ponte indústria não configurada</strong> — o envio 60×60 usa a <strong>mesma ponte estoque</strong>{' '}
-              (Separar por Loja). Confira se a Zebra/CUPS está com <strong>mídia 60×60 mm</strong>; caso contrário use{' '}
-              <strong>60×30</strong> no seletor ou configure o segundo Pi em Configurações → Impressoras.
-            </p>
-          )}
-          {!piCfgLoading && !piPrintAvailable && (
+          {zebraSomenteIndustria && !piCfgLoading && !piPrintAvailable && (
             <p className="text-xs text-amber-900">
-              Pi indisponível: use o botão do navegador ou Configurações → Impressoras.
+              Pi indústria indisponível: use o botão do navegador ou configure em Configurações → Impressoras.
             </p>
           )}
         </div>
@@ -1027,11 +988,7 @@ export default function EtiquetasPage() {
       {!loteSelecionado && (
         <div className="text-center py-16 px-4 text-gray-500 border border-dashed border-gray-200 rounded-xl bg-gray-50/80">
           <QrCode className="w-14 h-14 mx-auto mb-4 opacity-40" />
-          <p className="font-medium text-gray-800">Escolha uma remessa no campo acima</p>
-          <p className="text-sm mt-2 max-w-md mx-auto leading-relaxed">
-            As etiquetas <strong>não são baixadas</strong> até você selecionar o lote <code className="text-xs">SEP-…</code>.
-            Isso evita travar o navegador e a página «cair» no carregamento.
-          </p>
+          <p className="font-medium text-gray-800">Escolha uma remessa acima</p>
         </div>
       )}
 
@@ -1079,9 +1036,6 @@ export default function EtiquetasPage() {
                         </span>
                       );
                     }
-                    if (carregandoMetaRemessas) {
-                      return <span className="text-xs text-gray-500">Carregando dados da remessa…</span>;
-                    }
                     return (
                       <span className="text-xs text-amber-800">
                         Remessa sem dados de transferência neste aparelho (código {grupo.lote}).
@@ -1115,15 +1069,17 @@ export default function EtiquetasPage() {
                     {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
                     Navegador ({grupo.pendentes})
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => void imprimirGrupoNoPi(grupo)}
-                    disabled={printing || piCfgLoading || !piPrintAvailable}
-                    className="border-emerald-300 text-emerald-900 hover:bg-emerald-50"
-                  >
-                    {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
-                    Zebra / Pi ({grupo.pendentes})
-                  </Button>
+                  {zebraSomenteIndustria && (
+                    <Button
+                      variant="outline"
+                      onClick={() => void imprimirGrupoNoPi(grupo)}
+                      disabled={printing || piCfgLoading || !piPrintAvailable}
+                      className="border-emerald-300 text-emerald-900 hover:bg-emerald-50"
+                    >
+                      {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
+                      Zebra 60×60 ({grupo.pendentes})
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -1172,27 +1128,29 @@ export default function EtiquetasPage() {
                     >
                       <Printer className="w-4 h-4" />
                     </button>
-                    <button
-                      type="button"
-                      aria-label="Imprimir etiqueta na Zebra via Pi"
-                      disabled={printing || piCfgLoading || !piPrintAvailable}
-                      title={
-                        !piPrintAvailable
-                          ? 'Configure a ponte Pi'
-                          : 'Enviar esta etiqueta 60×30 para Raspberry / Zebra (reimpressão permitida)'
-                      }
-                      onClick={async () => {
-                        setErroImpressao('');
-                        try {
-                          await imprimirListaNoPi([e]);
-                        } catch (err: unknown) {
-                          setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir na Pi');
+                    {zebraSomenteIndustria && (
+                      <button
+                        type="button"
+                        aria-label="Imprimir etiqueta na Zebra 60×60 (indústria)"
+                        disabled={printing || piCfgLoading || !piPrintAvailable}
+                        title={
+                          !piPrintAvailable
+                            ? 'Configure a ponte Pi indústria'
+                            : 'Zebra 60×60 via Pi indústria (não para lote SEP)'
                         }
-                      }}
-                      className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-40 disabled:pointer-events-none"
-                    >
-                      <Server className="w-4 h-4" />
-                    </button>
+                        onClick={async () => {
+                          setErroImpressao('');
+                          try {
+                            await imprimirListaNoPi([e]);
+                          } catch (err: unknown) {
+                            setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir na Pi');
+                          }
+                        }}
+                        className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-40 disabled:pointer-events-none"
+                      >
+                        <Server className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => excluir(e.id)}

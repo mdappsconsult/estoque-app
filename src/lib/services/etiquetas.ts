@@ -357,6 +357,31 @@ export async function sincronizarEtiquetasRemessaPorLoteSep(
   return payload.length;
 }
 
+/**
+ * Itens distintos em `transferencia_itens` para as transferências WAREHOUSE_STORE da viagem do lote SEP-…
+ * (mesma base do resumo «N unidade(s)» em Separar por Loja / envios).
+ */
+export async function contarUnidadesTransferenciaPorLoteSep(
+  loteSep: string,
+  client: SupabaseClient = supabase
+): Promise<number | null> {
+  const viagemId = parseViagemIdDeLoteSep(loteSep);
+  if (!viagemId) return null;
+  const { data: trs, error } = await client
+    .from('transferencias')
+    .select('id')
+    .eq('tipo', 'WAREHOUSE_STORE')
+    .eq('viagem_id', viagemId);
+  if (error || !trs?.length) return null;
+  const idsTr = trs.map((t) => t.id as string);
+  const { data: titens, error: e2 } = await client
+    .from('transferencia_itens')
+    .select('item_id')
+    .in('transferencia_id', idsTr);
+  if (e2 || !titens) return null;
+  return new Set(titens.map((r) => String((r as { item_id?: string }).item_id || '').trim()).filter(Boolean)).size;
+}
+
 export interface EtiquetaCompleta extends Etiqueta {
   produto: {
     id: string;

@@ -22,6 +22,7 @@ import {
 import {
   FORMATO_CONFIG,
   gerarDocumentoHtmlEtiquetas,
+  prepararEtiquetas60x30ParaPilhasEsquerdaDireita,
   type EtiquetaParaImpressao,
   type FormatoEtiqueta,
 } from '@/lib/printing/label-print';
@@ -125,16 +126,28 @@ export async function enviarEtiquetasParaPiEmMultiplosJobs(
     papel?: ImpressaoPiPapel;
     /** Pausa entre jobs para o CUPS “respirar” (ms). Default 350. */
     delayEntreJobsMs?: number;
+    /**
+     * 60×30: quando true, prepara o lote inteiro antes de fatiar (pilhas esq/dir por número).
+     * Omitido/false = pares consecutivos em cada fatia (alinha com impressão por produto no estoque).
+     */
+    preparar60x30PilhasPorLado?: boolean;
   }
 ): Promise<void> {
   if (etiquetas.length === 0) return;
   const porJob = Math.max(5, Math.min(150, options.porJob ?? ETIQUETAS_POR_JOB_PI_PADRAO));
   const base = options.jobNameBase.trim().slice(0, 72) || 'etiquetas';
-  const totalJobs = Math.ceil(etiquetas.length / porJob);
+  const aplicarPilhas60 =
+    formato === '60x30' && options.preparar60x30PilhasPorLado === true;
+  const lista = aplicarPilhas60
+    ? prepararEtiquetas60x30ParaPilhasEsquerdaDireita(etiquetas)
+    : etiquetas;
+  const totalJobs = Math.ceil(lista.length / porJob);
 
-  for (let i = 0; i < etiquetas.length; i += porJob) {
-    const slice = etiquetas.slice(i, i + porJob);
-    const html = await gerarDocumentoHtmlEtiquetas(slice, formato);
+  for (let i = 0; i < lista.length; i += porJob) {
+    const slice = lista.slice(i, i + porJob);
+    const html = await gerarDocumentoHtmlEtiquetas(slice, formato, {
+      preparacao60x30JaAplicada: aplicarPilhas60,
+    });
     const idx = Math.floor(i / porJob) + 1;
     const jobName =
       totalJobs > 1 ? `${base} ${idx}/${totalJobs}`.slice(0, 120) : base.slice(0, 120);
@@ -147,7 +160,7 @@ export async function enviarEtiquetasParaPiEmMultiplosJobs(
       timeoutMs,
     });
     const delay = options.delayEntreJobsMs ?? 350;
-    if (i + porJob < etiquetas.length && delay > 0) {
+    if (i + porJob < lista.length && delay > 0) {
       await new Promise((r) => setTimeout(r, delay));
     }
   }

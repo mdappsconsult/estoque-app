@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { Auditoria, AuditoriaInsert } from '@/types/database';
 
@@ -7,8 +8,11 @@ export interface AuditoriaCompleta extends Auditoria {
   item?: { id: string; token_qr: string; produto?: { nome: string } } | null;
 }
 
-export async function registrarAuditoria(registro: AuditoriaInsert): Promise<void> {
-  const { error } = await supabase.from('auditoria').insert(registro);
+export async function registrarAuditoria(
+  registro: AuditoriaInsert,
+  client: SupabaseClient = supabase
+): Promise<void> {
+  const { error } = await client.from('auditoria').insert(registro);
   if (error) console.error('Erro ao registrar auditoria:', error);
 }
 

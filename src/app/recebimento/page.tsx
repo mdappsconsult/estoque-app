@@ -53,7 +53,35 @@ export default function RecebimentoPage() {
   const [erro, setErro] = useState('');
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ divergencias: number } | null>(null);
+  /** Aviso quando a remessa selecionada deixa de estar em trânsito (ex.: outro aparelho confirmou antes). */
+  const [avisoRemessaEncerrada, setAvisoRemessaEncerrada] = useState<string | null>(null);
   const scanEmAndamentoRef = useRef(false);
+
+  useEffect(() => {
+    if (!selecionada || loading) return;
+    const t = transferencias.find((x) => x.id === selecionada);
+    if (!t) {
+      setAvisoRemessaEncerrada(
+        'Não encontramos esta remessa na lista atual. Atualize a página ou selecione outra entrega.'
+      );
+      setSelecionada('');
+      setItensRecebidos([]);
+      setErro('');
+      return;
+    }
+    if (t.status !== 'IN_TRANSIT') {
+      const msg =
+        t.status === 'DELIVERED'
+          ? 'Esta entrega já foi concluída nesta conta em outro aparelho (ou por outro operador). Os QRs escaneados neste telefone não foram enviados ao servidor — use um único aparelho por remessa até confirmar, ou confira o estoque da loja.'
+          : t.status === 'DIVERGENCE'
+            ? 'Esta remessa foi encerrada com divergência (faltante ou excedente). Não é possível continuar o recebimento aqui. Veja a tela Divergências ou fale com o gestor.'
+            : `Esta transferência não está mais em trânsito (status: ${t.status}).`;
+      setAvisoRemessaEncerrada(msg);
+      setSelecionada('');
+      setItensRecebidos([]);
+      setErro('');
+    }
+  }, [selecionada, transferencias, loading]);
 
   useEffect(() => {
     const carregarItensEsperados = async () => {
@@ -167,7 +195,13 @@ export default function RecebimentoPage() {
       return;
     }
     if (transSelecionada.status !== 'IN_TRANSIT') {
-      setErro('Esta transferência não está mais em trânsito.');
+      setErro(
+        transSelecionada.status === 'DELIVERED'
+          ? 'Esta entrega já foi concluída. Se havia outro telefone escaneando a mesma conta, só um aparelho pode confirmar — a lista de escaneados é local até você tocar em «Confirmar recebimento».'
+          : transSelecionada.status === 'DIVERGENCE'
+            ? 'Esta remessa já foi encerrada com divergência. Não é possível confirmar de novo por aqui.'
+            : 'Esta transferência não está mais em trânsito.'
+      );
       return;
     }
     if (!pendentes.some((t) => t.id === selecionada)) {
@@ -210,6 +244,24 @@ export default function RecebimentoPage() {
         </div>
       </div>
 
+      {avisoRemessaEncerrada && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+          <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="font-semibold text-amber-900">Remessa atualizada</p>
+            <p className="text-sm text-amber-800 mt-1">{avisoRemessaEncerrada}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAvisoRemessaEncerrada(null)}
+            className="ml-auto shrink-0"
+            aria-label="Fechar aviso"
+          >
+            <X className="w-4 h-4 text-amber-700" />
+          </button>
+        </div>
+      )}
+
       {resultado && (
         <div className={`${resultado.divergencias > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200'} border rounded-xl p-4 mb-6 flex items-center gap-3`}>
           {resultado.divergencias > 0 ? <AlertTriangle className="w-6 h-6 text-yellow-500" /> : <CheckCircle className="w-6 h-6 text-green-500" />}
@@ -242,6 +294,7 @@ export default function RecebimentoPage() {
           ]}
           value={selecionada}
           onChange={(e) => {
+            setAvisoRemessaEncerrada(null);
             setSelecionada(e.target.value);
             setItensRecebidos([]);
             setErro('');
@@ -261,6 +314,9 @@ export default function RecebimentoPage() {
                 <Badge variant="warning" size="sm">Faltando: {Math.max(itensEsperados.length - itensRecebidos.length, 0)}</Badge>
               </div>
             </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro).
+            </p>
             {loadingEsperados ? (
               <div className="py-6 flex items-center justify-center text-gray-400">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />

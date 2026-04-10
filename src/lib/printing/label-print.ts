@@ -28,7 +28,7 @@ export const FORMATO_CONFIG: Record<
   }
 > = {
   '60x30': {
-    label: '60×30 mm — 2 meias etiquetas por folha (não usar em adesivo 60×60 inteiro)',
+    label: '60×30 mm',
     widthMm: 60,
     heightMm: 30,
     paddingMm: 0.5,
@@ -37,7 +37,7 @@ export const FORMATO_CONFIG: Record<
     dualPorFolha: true,
   },
   '60x60': {
-    label: '60×60 mm — indústria / produção (uma etiqueta por folha)',
+    label: '60×60 mm',
     widthMm: 60,
     heightMm: 60,
     paddingMm: 2.5,
@@ -78,6 +78,40 @@ export interface EtiquetaParaImpressao {
   /** Balde indústria → loja: sequência contínua por loja de destino (Separar por Loja). */
   numeroSequenciaLoja?: number | null;
 }
+
+/**
+ * Reordena etiquetas 60×30 para quem junta **todas as metades esquerdas** numa pilha e **todas as direitas** noutra após cortar no pontilhado.
+ * Só aplicada quando `preparar60x30PilhasPorLado` / Pi equivalente está ativo (não é o default).
+ * Sem isso, folhas 1|2, 3|4 geram pilhas 1,3,5 e 2,4,6; com a preparação, folhas 1|⌈n/2⌉+1, … mantêm sequência numérica em cada pilha.
+ */
+export function prepararEtiquetas60x30ParaPilhasEsquerdaDireita(
+  etiquetas: EtiquetaParaImpressao[]
+): EtiquetaParaImpressao[] {
+  const n = etiquetas.length;
+  if (n <= 1) return [...etiquetas];
+  const half = Math.ceil(n / 2);
+  const out: EtiquetaParaImpressao[] = [];
+  for (let i = 0; i < half; i++) {
+    out.push(etiquetas[i]);
+    const j = i + half;
+    if (j < n) out.push(etiquetas[j]);
+  }
+  return out;
+}
+
+export type OpcoesGerarDocumentoHtmlEtiquetas = {
+  /**
+   * Quando true, `etiquetas` já passou por {@link prepararEtiquetas60x30ParaPilhasEsquerdaDireita}
+   * (ex.: envio Pi fatiou após preparar o lote inteiro).
+   */
+  preparacao60x30JaAplicada?: boolean;
+  /**
+   * Só com efeito em 60×30 e quando `preparacao60x30JaAplicada` não está true.
+   * `true` = ordem para quem junta só metades esquerdas e só direitas em duas pilhas (pareamento 1|⌈n/2⌉+1…).
+   * Default / omitido = pares consecutivos (0|1, 2|3…), adequado à sequência por produto após corte folha a folha.
+   */
+  preparar60x30PilhasPorLado?: boolean;
+};
 
 function normalizarFormatoImpressao(valor: string | null): FormatoEtiqueta {
   if (valor === '60x30' || valor === '60x60' || valor === '58x40' || valor === '50x30') {
@@ -384,7 +418,7 @@ export function confirmarImpressao(totalEtiquetas: number, formato?: FormatoEtiq
   if (formato === '60x30') {
     const folhas = Math.ceil(totalEtiquetas / 2);
     return window.confirm(
-      `Imprimir ${totalEtiquetas} etiqueta(s) em ${folhas} folha(s) física(s) 60×30 mm (2 QR por folha, recorte no pontilhado)?`
+      `Imprimir ${totalEtiquetas} etiqueta(s) em ${folhas} folha(s) física(s) 60×30 mm (2 QR por folha, recorte no pontilhado)?\n\nOrdem: produtos com mais unidades nesta impressão primeiro; os de pouca quantidade vão ao final. Ao cortar, junte as metades de um mesmo lado da folha — primeira «coluna» = primeira metade dessa lista; a outra = restante.`
     );
   }
   if (formato === '60x60') {
@@ -789,15 +823,22 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
  */
 export async function gerarDocumentoHtmlEtiquetas(
   etiquetas: EtiquetaParaImpressao[],
-  formato: FormatoEtiqueta
+  formato: FormatoEtiqueta,
+  opcoes?: OpcoesGerarDocumentoHtmlEtiquetas
 ): Promise<string> {
   if (etiquetas.length === 0) return '';
 
   const agoraIso = new Date().toISOString();
-  const itens = etiquetas.map((e) => ({
+  const comData = etiquetas.map((e) => ({
     ...e,
     dataGeracaoIso: e.dataGeracaoIso || agoraIso,
   }));
+  const itens =
+    formato === '60x30' &&
+    !opcoes?.preparacao60x30JaAplicada &&
+    opcoes?.preparar60x30PilhasPorLado === true
+      ? prepararEtiquetas60x30ParaPilhasEsquerdaDireita(comData)
+      : comData;
 
   const cfg = FORMATO_CONFIG[formato];
   let htmlCorpo: string;
@@ -893,11 +934,12 @@ export async function gerarDocumentoHtmlEtiquetas(
 
 export async function imprimirEtiquetasEmJobUnico(
   etiquetas: EtiquetaParaImpressao[],
-  formato: FormatoEtiqueta
+  formato: FormatoEtiqueta,
+  opcoesHtml?: OpcoesGerarDocumentoHtmlEtiquetas
 ): Promise<boolean> {
   if (typeof window === 'undefined' || etiquetas.length === 0) return false;
 
-  const doc = await gerarDocumentoHtmlEtiquetas(etiquetas, formato);
+  const doc = await gerarDocumentoHtmlEtiquetas(etiquetas, formato, opcoesHtml);
   if (!doc) return false;
 
   const comPrint = doc.replace(

@@ -9,9 +9,6 @@ import {
   CheckCircle,
   X,
   Wand2,
-  Printer,
-  FileDown,
-  Server,
   Plus,
   RefreshCw,
   Package,
@@ -25,7 +22,6 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
-import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { useAuth } from '@/hooks/useAuth';
 import {
   contarItensComQrPorProdutosNoLocal,
@@ -34,32 +30,12 @@ import {
 import {
   alterarDestinoRemessaMatrizParaLoja,
   cancelarRemessaMatrizParaLoja,
-  criarTransferencia,
 } from '@/lib/services/transferencias';
-import { criarViagem } from '@/lib/services/viagens';
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
 import { emitirUnidadesCompraFifo } from '@/lib/services/lotes-compra';
 import { getResumoEstoqueAgrupado, type ResumoEstoqueRow } from '@/lib/services/estoque-resumo';
-import { upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
-import {
-  confirmarImpressao,
-  FORMATO_CONFIG,
-  FORMATO_ETIQUETA_FLUXO_OPERACIONAL,
-  imprimirEtiquetasEmJobUnico,
-  type EtiquetaParaImpressao,
-  type FormatoEtiqueta,
-} from '@/lib/printing/label-print';
-import {
-  enviarEtiquetasParaPiEmMultiplosJobs,
-  type PiPrintConnection,
-} from '@/lib/printing/pi-print-ws-client';
-import { baixarGuiaSeparacaoPdf } from '@/lib/printing/separacao-guia-pdf';
-import {
-  limparUltimaRemessaPersistida,
-  persistirUltimaRemessa,
-  lerUltimaRemessaPersistida,
-  type UltimaRemessaImpressao,
-} from '@/lib/separacao/ultima-remessa-storage';
+import { MAX_ITENS_SEPARACAO } from '@/lib/services/separacao-matriz-loja-atomic';
+import { persistirUltimaRemessa, type UltimaRemessaImpressao } from '@/lib/separacao/ultima-remessa-storage';
 import { supabase } from '@/lib/supabase';
 import {
   buscarEnviosRecentesMatrizParaLojas,
@@ -114,55 +90,8 @@ function remessaPermiteEditarOuExcluir(status: string): boolean {
   return status === 'AWAITING_ACCEPT' || status === 'ACCEPTED';
 }
 
-/** Impressão / guia antes de «Criar separação» pode gerar QR que não bate com `transferencia_itens`. */
-const AVISO_IMPRESSAO_ANTES_DA_SEPARACAO =
-  'No recebimento da loja, o QR só é aceito se a unidade estiver na transferência. O fluxo recomendado é confirmar «Criar separação» e imprimir quando o sistema oferecer (mesma lista da remessa).\n\n' +
-  'Se você imprimir ou gerar a guia agora sem registrar a separação em seguida com exatamente estes itens — ou se a lista mudar depois — a leitura na loja pode falhar.\n\n' +
-  'Deseja continuar mesmo assim?';
-
-function montarEtiquetasSeparacaoParaImpressao(
-  itens: ItemEscaneado[],
-  ctx: { lote: string; nomeLoja: string; responsavel: string; agoraIso: string },
-  numerosPorItemId?: Map<string, number | null> | null
-): EtiquetaParaImpressao[] {
-  return itens.map((item) => ({
-    id: item.id,
-    produtoNome: item.produto_nome,
-    dataManipulacao: ctx.agoraIso,
-    dataValidade: item.data_validade || ctx.agoraIso,
-    lote: ctx.lote,
-    tokenQr: item.token_qr,
-    tokenShort: item.token_short || item.id.slice(0, 8).toUpperCase(),
-    responsavel: ctx.responsavel,
-    nomeLoja: ctx.nomeLoja,
-    dataGeracaoIso: ctx.agoraIso,
-    numeroSequenciaLoja: numerosPorItemId?.get(item.id) ?? null,
-  }));
-}
-
-function mensagemConfirmarGuiaPdfEetiquetas(total: number, formato: FormatoEtiqueta): string {
-  const cfg = FORMATO_CONFIG[formato];
-  if (cfg.dualPorFolha) {
-    const folhas = Math.ceil(total / 2);
-    return (
-      `Será baixado o PDF da guia de separação e aberta a janela de impressão de ${total} etiqueta(s) ` +
-      `(${folhas} folha(s) física(s) 60×30 mm, 2 QR por folha). ` +
-      `Formato de etiqueta: 60×30 mm (fluxo operacional). Deseja continuar?`
-    );
-  }
-  return (
-    `Será baixado o PDF da guia e aberta a impressão de ${total} etiqueta(s) (${cfg.label}). ` +
-    `Na separação indústria → loja o padrão é 60×30 mm. Deseja continuar?`
-  );
-}
-
 export default function SepararPorLojaPage() {
   const { usuario } = useAuth();
-  const {
-    loading: piCfgLoading,
-    available: piPrintAvailable,
-    connection: piConnection,
-  } = usePiPrintBridgeConfig({ papel: 'estoque' });
   const { data: locais, loading } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const lojas = locais.filter(l => l.tipo === 'STORE');
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
@@ -176,17 +105,12 @@ export default function SepararPorLojaPage() {
   const [resumoReposicao, setResumoReposicao] = useState<ResumoReposicaoTela[]>([]);
   const [carregandoReposicao, setCarregandoReposicao] = useState(false);
   const [aplicandoSugestao, setAplicandoSugestao] = useState(false);
-  const [imprimindoEtiquetas, setImprimindoEtiquetas] = useState(false);
   const [mensagemReposicao, setMensagemReposicao] = useState('');
   const [saving, setSaving] = useState(false);
   /** Feedback em remessas grandes (centenas de unidades). */
   const [savingEtapa, setSavingEtapa] = useState('');
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
-  /** HTTPS + ws:// bloqueado pelo navegador (conteúdo misto). */
-  const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
-  const [ultimaRemessa, setUltimaRemessa] = useState<UltimaRemessaImpressao | null>(null);
-  const focarUltimaRemessaAposCriar = useRef(false);
   const reposicaoSyncEpoch = useRef(0);
   const [linhasEstoqueOrigemManual, setLinhasEstoqueOrigemManual] = useState<LinhaEstoqueOrigemManual[]>([]);
   /** Insumos de fornecedor (origem COMPRA) ficam ocultos no manual até marcar isto — foco em acabados (PRODUCAO/AMBOS). */
@@ -205,6 +129,24 @@ export default function SepararPorLojaPage() {
   const [destinoModalRemessa, setDestinoModalRemessa] = useState('');
   const [remessaEmAcaoId, setRemessaEmAcaoId] = useState<string | null>(null);
 
+  /** Registro atômico no servidor: pede senha após o confirm. */
+  const [modalSenhaSeparacaoAberto, setModalSenhaSeparacaoAberto] = useState(false);
+  const [senhaSeparacao, setSenhaSeparacao] = useState('');
+  const [erroModalSeparacao, setErroModalSeparacao] = useState('');
+  const [pendingSeparacao, setPendingSeparacao] = useState<{
+    snapshotItens: ItemEscaneado[];
+    nomeLojaDestino: string;
+  } | null>(null);
+
+  /** Lista longa: renderiza em fatias para não travar o browser. */
+  const [limiteListaItensSeparados, setLimiteListaItensSeparados] = useState(100);
+
+  const itensSeparadosVisiveis = useMemo(
+    () => itensEscaneados.slice(0, limiteListaItensSeparados),
+    [itensEscaneados, limiteListaItensSeparados]
+  );
+  const temMaisItensSeparados = itensEscaneados.length > itensSeparadosVisiveis.length;
+
   const carregarEnviosRegistrados = useCallback(async () => {
     if (!origemId) {
       setEnviosRegistrados([]);
@@ -217,7 +159,7 @@ export default function SepararPorLojaPage() {
       const lista = await buscarEnviosRecentesMatrizParaLojas({
         origemId,
         destinoId: destinoId.trim() || undefined,
-        limiteTransferencias: 28,
+        limiteTransferencias: 40,
       });
       setEnviosRegistrados(lista);
     } catch (err: unknown) {
@@ -478,29 +420,6 @@ export default function SepararPorLojaPage() {
     void carregarEstoqueOrigemManual();
   }, [modoSeparacao, origemId, carregarEstoqueOrigemManual]);
 
-  useEffect(() => {
-    if (!piConnection?.wsUrl) {
-      setAvisoHttpsPi(false);
-      return;
-    }
-    const u = piConnection.wsUrl.toLowerCase();
-    setAvisoHttpsPi(window.location.protocol === 'https:' && u.startsWith('ws:'));
-  }, [piConnection]);
-
-  useEffect(() => {
-    const carregada = lerUltimaRemessaPersistida();
-    if (carregada) setUltimaRemessa(carregada);
-  }, []);
-
-  useEffect(() => {
-    if (!ultimaRemessa || !focarUltimaRemessaAposCriar.current) return;
-    focarUltimaRemessaAposCriar.current = false;
-    const id = window.setTimeout(() => {
-      document.getElementById('painel-ultima-remessa')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 150);
-    return () => window.clearTimeout(id);
-  }, [ultimaRemessa]);
-
   const adicionarUnidadesPorProduto = async (
     produtoId: string,
     produtoNome: string,
@@ -640,325 +559,115 @@ export default function SepararPorLojaPage() {
     setItensEscaneados(prev => prev.filter(i => i.id !== id));
   };
 
-  const upsertEMontarEtiquetasImpressaoSeparacao = async (
-    itens: ItemEscaneado[],
-    lote: string,
-    nomeLojaDestino: string,
-    destinoLocalId: string | null | undefined
-  ): Promise<EtiquetaParaImpressao[]> => {
-    const numeros = await upsertEtiquetasSeparacaoLoja(
-      itens.map((item) => ({
-        id: item.id,
-        produto_id: item.produto_id,
-        data_validade: item.data_validade,
-      })),
-      {
-        lote,
-        mode: 'impresso_agora',
-        local_destino_id: destinoLocalId?.trim() || null,
-      }
-    );
-    const agora = new Date().toISOString();
-    return montarEtiquetasSeparacaoParaImpressao(
-      itens,
-      {
-        lote,
-        nomeLoja: nomeLojaDestino,
-        responsavel: usuario?.nome || 'OPERADOR',
-        agoraIso: agora,
-      },
-      numeros
-    );
-  };
-
-  const executarUpsertEAbrirJanelaEtiquetas = async (
-    itens: ItemEscaneado[],
-    lote: string,
-    nomeLojaDestino: string,
-    destinoLocalId: string | null | undefined
+  const finalizarUiAposSeparacaoServidor = async (
+    snapshotItens: ItemEscaneado[],
+    loteEtiqueta: string,
+    nomeLojaDestino: string
   ) => {
-    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(
-      itens,
-      lote,
-      nomeLojaDestino,
-      destinoLocalId
-    );
-    const abriu = await imprimirEtiquetasEmJobUnico(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
-    if (!abriu) {
-      throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
-    }
+    const payloadRemessa: UltimaRemessaImpressao = {
+      lote: loteEtiqueta,
+      nomeLoja: nomeLojaDestino,
+      destinoLocalId: destinoId,
+      itens: snapshotItens,
+    };
+    persistirUltimaRemessa(payloadRemessa);
+
+    setSucesso(true);
+    setItensEscaneados([]);
+    setLimiteListaItensSeparados(100);
+    setDestinoId('');
+    setResumoReposicao([]);
+    setMensagemReposicao('');
+    setMostrarEntradaManual(false);
+    void carregarEnviosRegistrados();
   };
 
-  const executarUpsertEImprimirPi = async (
-    itens: ItemEscaneado[],
-    lote: string,
-    nomeLojaDestino: string,
-    destinoLocalId: string | null | undefined,
-    conn: PiPrintConnection
-  ) => {
-    const etiquetas = await upsertEMontarEtiquetasImpressaoSeparacao(
-      itens,
-      lote,
-      nomeLojaDestino,
-      destinoLocalId
-    );
-    await enviarEtiquetasParaPiEmMultiplosJobs(etiquetas, FORMATO_ETIQUETA_FLUXO_OPERACIONAL, {
-      jobNameBase: lote,
-      connection: conn,
-    });
-  };
-
-  const imprimirEtiquetasSeparacao = async () => {
-    if (itensEscaneados.length === 0) return;
-    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
-    if (!confirmarImpressao(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
-
-    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
-    setImprimindoEtiquetas(true);
-    try {
-      await executarUpsertEAbrirJanelaEtiquetas(
-        itensEscaneados,
-        'SEPARACAO-LOJA',
-        nomeLojaDestino,
-        destinoId || null
-      );
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
-    } finally {
-      setImprimindoEtiquetas(false);
-    }
-  };
-
-  const imprimirEtiquetasSeparacaoNoPi = async () => {
-    if (itensEscaneados.length === 0) return;
-    if (!piPrintAvailable || !piConnection) {
-      alert(
-        'Impressão na estação indisponível. Preencha a tabela config_impressao_pi no Supabase (URL wss:// do túnel) ou defina NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
-      );
-      return;
-    }
-    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
-    if (!confirmarImpressao(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
-
-    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
-    setImprimindoEtiquetas(true);
-    try {
-      await executarUpsertEImprimirPi(
-        itensEscaneados,
-        'SEPARACAO-LOJA',
-        nomeLojaDestino,
-        destinoId || null,
-        piConnection
-      );
-      alert('Etiquetas enviadas para impressão na estação (Raspberry / Zebra).');
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
-    } finally {
-      setImprimindoEtiquetas(false);
-    }
-  };
-
-  const descartarUltimaRemessa = () => {
-    setUltimaRemessa(null);
-    limparUltimaRemessaPersistida();
-  };
-
-  const imprimirUltimaRemessaInteiraNoPi = async () => {
-    if (!ultimaRemessa || ultimaRemessa.itens.length === 0) return;
-    if (!piPrintAvailable || !piConnection) {
-      alert(
-        'Impressão na estação indisponível. Preencha config_impressao_pi no Supabase ou NEXT_PUBLIC_PI_PRINT_WS_URL. Veja docs/IMPRESSAO_PI_ACESSO_REMOTO.md.'
-      );
-      return;
-    }
-    if (!confirmarImpressao(ultimaRemessa.itens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
-
-    setImprimindoEtiquetas(true);
-    try {
-      await executarUpsertEImprimirPi(
-        ultimaRemessa.itens,
-        ultimaRemessa.lote,
-        ultimaRemessa.nomeLoja,
-        ultimaRemessa.destinoLocalId ?? null,
-        piConnection
-      );
-      alert(
-        `${ultimaRemessa.itens.length} etiqueta(s) da remessa ${ultimaRemessa.lote} enviadas para a Zebra (Pi).`
-      );
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Falha ao imprimir a remessa na estação Pi');
-    } finally {
-      setImprimindoEtiquetas(false);
-    }
-  };
-
-  const imprimirUltimaRemessaInteiraNavegador = async () => {
-    if (!ultimaRemessa || ultimaRemessa.itens.length === 0) return;
-    if (!confirmarImpressao(ultimaRemessa.itens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) return;
-
-    setImprimindoEtiquetas(true);
-    try {
-      await executarUpsertEAbrirJanelaEtiquetas(
-        ultimaRemessa.itens,
-        ultimaRemessa.lote,
-        ultimaRemessa.nomeLoja,
-        ultimaRemessa.destinoLocalId ?? null
-      );
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Falha ao abrir impressão da remessa');
-    } finally {
-      setImprimindoEtiquetas(false);
-    }
-  };
-
-  const guiaPdfEImprimirEtiquetas = async () => {
-    if (itensEscaneados.length === 0) return;
-    if (!window.confirm(AVISO_IMPRESSAO_ANTES_DA_SEPARACAO)) return;
-    if (
-      !window.confirm(
-        mensagemConfirmarGuiaPdfEetiquetas(itensEscaneados.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)
-      )
-    )
-      return;
-
-    const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
-    setImprimindoEtiquetas(true);
-    try {
-      const emitidoEm = new Date().toISOString();
-      const nomeOrigem = warehouses.find((l) => l.id === origemId)?.nome || '—';
-      const nomeDestino = nomeLojaDestino;
-      baixarGuiaSeparacaoPdf({
-        nomeOrigem,
-        nomeDestino,
-        responsavel: usuario?.nome || 'OPERADOR',
-        modoSeparacaoLabel:
-          modoSeparacao === 'reposicao'
-            ? 'Reposição (mínimo × contagem na loja)'
-            : 'Manual (estoque na origem + QR opcional)',
-        itens: itensEscaneados,
-        emitidoEmIso: emitidoEm,
-      });
-      await new Promise((r) => setTimeout(r, 400));
-      await executarUpsertEAbrirJanelaEtiquetas(
-        itensEscaneados,
-        'SEPARACAO-LOJA',
-        nomeLojaDestino,
-        destinoId || null
-      );
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Falha ao gerar guia ou imprimir etiquetas');
-    } finally {
-      setImprimindoEtiquetas(false);
-    }
-  };
-
-  const criarSeparacao = async () => {
+  const criarSeparacao = () => {
     if (!usuario) return alert('Faça login');
+    if (!origemId || !destinoId) {
+      alert('Selecione origem (indústria) e destino (loja).');
+      return;
+    }
+    const loginOp = usuario.login_operacional?.trim();
+    if (!loginOp) {
+      alert(
+        'Seu usuário não tem login operacional cadastrado. Um administrador deve preencher em Cadastros → Usuários (necessário para gravar a remessa com segurança no servidor).'
+      );
+      return;
+    }
     const n = itensEscaneados.length;
+    if (n > MAX_ITENS_SEPARACAO) {
+      alert(
+        `Limite de ${MAX_ITENS_SEPARACAO} unidades por separação. Reduza a lista ou divida em duas remessas.`
+      );
+      return;
+    }
     const msgBase = `Confirmar criação da separação com ${n} item(ns)?`;
     const msgGrande =
       n > 150
-        ? `${msgBase}\n\nRemessas muitos grandes podem levar até cerca de um minuto (várias gravações no servidor). Mantenha a aba aberta.`
-        : msgBase;
+        ? `${msgBase}\n\nRemessas grandes podem levar até cerca de um minuto. Na próxima tela, informe sua senha para gravar tudo de uma vez no servidor (viagem + etiquetas + transferência). Mantenha a aba aberta.`
+        : `${msgBase}\n\nNa próxima tela, informe sua senha de acesso para concluir o registro no servidor.`;
     const confirmou = window.confirm(msgGrande);
     if (!confirmou) return;
 
-    const snapshotItens = [...itensEscaneados];
     const nomeLojaDestino = lojas.find((l) => l.id === destinoId)?.nome || '—';
+    setPendingSeparacao({ snapshotItens: [...itensEscaneados], nomeLojaDestino });
+    setSenhaSeparacao('');
+    setErroModalSeparacao('');
+    setModalSenhaSeparacaoAberto(true);
+  };
+
+  const confirmarSeparacaoComSenhaNoServidor = async () => {
+    if (!usuario || !pendingSeparacao) return;
+    const loginOp = usuario.login_operacional?.trim();
+    if (!loginOp) {
+      setErroModalSeparacao('Login operacional não configurado para este usuário.');
+      return;
+    }
+    if (!senhaSeparacao) {
+      setErroModalSeparacao('Digite sua senha.');
+      return;
+    }
+    const { snapshotItens, nomeLojaDestino } = pendingSeparacao;
 
     setSaving(true);
-    setSavingEtapa('Criando viagem…');
+    setSavingEtapa(`Gravando remessa no servidor (${snapshotItens.length} unidades)…`);
+    setErroModalSeparacao('');
     try {
-      const viagem = await criarViagem({ status: 'PENDING' });
-      const loteEtiqueta = `SEP-${viagem.id}`;
-
-      setSavingEtapa(`Registrando ${snapshotItens.length} etiqueta(s)…`);
-      const numerosAposUpsert = await upsertEtiquetasSeparacaoLoja(
-        snapshotItens.map((item) => ({
-          id: item.id,
-          produto_id: item.produto_id,
-          data_validade: item.data_validade,
-        })),
-        { lote: loteEtiqueta, mode: 'manter_impressa_se_existir', local_destino_id: destinoId }
-      );
-
-      setSavingEtapa(`Gravando transferência (${snapshotItens.length} unidades)…`);
-      await criarTransferencia(
-        {
-          tipo: 'WAREHOUSE_STORE',
+      const res = await fetch('/api/operacional/criar-separacao-matriz-loja', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          login: loginOp,
+          senha: senhaSeparacao,
           origem_id: origemId,
           destino_id: destinoId,
-          viagem_id: viagem.id,
-          criado_por: usuario.id,
-          status: 'AWAITING_ACCEPT',
-        },
-        snapshotItens.map((i) => i.id)
-      );
-
-      const payloadRemessa: UltimaRemessaImpressao = {
-        lote: loteEtiqueta,
-        nomeLoja: nomeLojaDestino,
-        destinoLocalId: destinoId,
-        itens: snapshotItens,
+          itens: snapshotItens.map((item) => ({
+            id: item.id,
+            produto_id: item.produto_id,
+            data_validade: item.data_validade ?? null,
+          })),
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        lote?: string;
       };
-      focarUltimaRemessaAposCriar.current = true;
-      setUltimaRemessa(payloadRemessa);
-      persistirUltimaRemessa(payloadRemessa);
-
-      setSucesso(true);
-      setItensEscaneados([]);
-      setDestinoId('');
-      setResumoReposicao([]);
-      setMensagemReposicao('');
-      setMostrarEntradaManual(false);
-
-      setSavingEtapa('');
-      if (confirmarImpressao(snapshotItens.length, FORMATO_ETIQUETA_FLUXO_OPERACIONAL)) {
-        setImprimindoEtiquetas(true);
-        try {
-          if (piPrintAvailable && piConnection) {
-            try {
-              await executarUpsertEImprimirPi(
-                snapshotItens,
-                loteEtiqueta,
-                nomeLojaDestino,
-                destinoId,
-                piConnection
-              );
-            } catch (piErr: unknown) {
-              const agora = new Date().toISOString();
-              const etiquetasFallback = montarEtiquetasSeparacaoParaImpressao(
-                snapshotItens,
-                {
-                  lote: loteEtiqueta,
-                  nomeLoja: nomeLojaDestino,
-                  responsavel: usuario?.nome || 'OPERADOR',
-                  agoraIso: agora,
-                },
-                numerosAposUpsert
-              );
-              const abriu = await imprimirEtiquetasEmJobUnico(etiquetasFallback, FORMATO_ETIQUETA_FLUXO_OPERACIONAL);
-              if (!abriu) throw piErr;
-              alert(
-                `A estação Pi não respondeu; abrimos a impressão no navegador.\n${piErr instanceof Error ? piErr.message : String(piErr)}`
-              );
-            }
-          } else {
-            await executarUpsertEAbrirJanelaEtiquetas(
-              snapshotItens,
-              loteEtiqueta,
-              nomeLojaDestino,
-              destinoId
-            );
-          }
-        } catch (err: unknown) {
-          alert(err instanceof Error ? err.message : 'Falha ao abrir impressão das etiquetas da remessa');
-        } finally {
-          setImprimindoEtiquetas(false);
-        }
+      if (!res.ok) {
+        throw new Error(payload.error || 'Falha ao registrar separação');
       }
+      const loteEtiqueta = payload.lote?.trim();
+      if (!loteEtiqueta) {
+        throw new Error('Resposta do servidor sem lote.');
+      }
+
+      setSenhaSeparacao('');
+      setModalSenhaSeparacaoAberto(false);
+      setPendingSeparacao(null);
+      setSavingEtapa('');
+      await finalizarUiAposSeparacaoServidor(snapshotItens, loteEtiqueta, nomeLojaDestino);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Erro');
+      setErroModalSeparacao(err instanceof Error ? err.message : 'Erro ao registrar separação');
     } finally {
       setSavingEtapa('');
       setSaving(false);
@@ -974,89 +683,20 @@ export default function SepararPorLojaPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Separar por Loja</h1>
           <p className="text-sm text-gray-500">Warehouse → Store</p>
-          {!ultimaRemessa && (
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-md">
-              Depois de tocar em <strong>Criar Separação</strong>, aparece aqui em cima o painel{' '}
-              <strong>Imprimir pedido completo</strong> (todas as etiquetas da remessa na Zebra ou no navegador). Se não
-              aparecer, confira se o deploy tem a versão nova ou crie uma separação de teste.
-            </p>
-          )}
         </div>
       </div>
-
-      {ultimaRemessa && (
-        <div
-          id="painel-ultima-remessa"
-          className="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 mb-6 space-y-3 shadow-md ring-2 ring-emerald-100"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <p className="text-lg font-bold text-emerald-950">Imprimir pedido completo</p>
-              <p className="text-xs font-medium text-emerald-800 uppercase tracking-wide">Última remessa registrada</p>
-              <p className="text-sm text-emerald-900 mt-2">
-                Lote <code className="text-[11px] bg-white px-1.5 py-0.5 rounded border border-emerald-200">{ultimaRemessa.lote}</code>{' '}
-                → <strong>{ultimaRemessa.nomeLoja}</strong> — <strong>{ultimaRemessa.itens.length}</strong> unidade(s). Um clique
-                manda <strong>toda a sequência</strong> (60×30).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={descartarUltimaRemessa}
-              className="text-xs text-emerald-800 underline underline-offset-2 shrink-0"
-            >
-              Esquecer esta remessa
-            </button>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="primary"
-              className="flex-1 border-emerald-600 bg-emerald-700 hover:bg-emerald-800"
-              disabled={imprimindoEtiquetas || piCfgLoading || !piPrintAvailable}
-              onClick={() => void imprimirUltimaRemessaInteiraNoPi()}
-              title={
-                !piPrintAvailable
-                  ? 'Configure a ponte Pi / Zebra'
-                  : 'Envia todas as etiquetas desta remessa em um único job para o Raspberry'
-              }
-            >
-              {imprimindoEtiquetas ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <Server className="w-4 h-4 mr-2" />
-              )}
-              Imprimir remessa inteira na Zebra (Pi)
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1 border-emerald-300 bg-white"
-              disabled={imprimindoEtiquetas}
-              onClick={() => void imprimirUltimaRemessaInteiraNavegador()}
-            >
-              {imprimindoEtiquetas ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <Printer className="w-4 h-4 mr-2" />
-              )}
-              Remessa inteira no navegador
-            </Button>
-          </div>
-          {!piCfgLoading && !piPrintAvailable && (
-            <p className="text-xs text-amber-900">
-              Pi indisponível: use <strong>Remessa inteira no navegador</strong> ou configure a estação em Configurações →
-              Impressoras.
-            </p>
-          )}
-        </div>
-      )}
 
       {sucesso && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
           <CheckCircle className="w-6 h-6 text-green-500 shrink-0" />
           <div>
-            <p className="font-semibold text-green-800">Separação criada!</p>
+            <p className="font-semibold text-green-800">Separação criada</p>
             <p className="text-sm text-green-600">
-              Aguardando aceite do motorista. Se cancelou a impressão no aviso anterior, use o painel{' '}
-              <strong>Imprimir pedido completo</strong> acima. Evite usar folhas antigas na loja.
+              Aguardando aceite do motorista. Imprima em{' '}
+              <Link href="/etiquetas" className="font-medium text-green-800 underline underline-offset-2">
+                Etiquetas
+              </Link>
+              .
             </p>
           </div>
           <button type="button" onClick={() => setSucesso(false)} className="ml-auto shrink-0" aria-label="Fechar aviso">
@@ -1091,33 +731,19 @@ export default function SepararPorLojaPage() {
         />
       </div>
 
-      {!origemId && (
-        <p className="text-xs text-gray-600 mb-4 leading-relaxed px-1">
-          Depois de escolher a <strong>origem (indústria)</strong>, aparece abaixo o histórico do que já foi{' '}
-          <strong>enviado para as lojas</strong> (ex.: baldes de açaí para a JK) — produtos e quantidades por remessa.
-        </p>
-      )}
-
       {origemId && (
         <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-4 mb-6 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="flex items-start gap-2 min-w-0">
               <Package className="w-5 h-5 text-sky-700 shrink-0 mt-0.5" aria-hidden />
               <div className="min-w-0">
-                <p className="text-sm font-bold text-sky-950">Envios já registrados (indústria → loja)</p>
-                <p className="text-xs text-sky-900/90 mt-0.5 leading-relaxed">
-                  Lista do Supabase: separações criadas a partir desta <strong>origem</strong>
+                <p className="text-sm font-bold text-sky-950">Envios já registrados</p>
+                <p className="text-xs text-sky-800 mt-0.5">
+                  Origem selecionada
                   {destinoId ? (
-                    <>
-                      {' '}
-                      para <strong>{lojas.find((l) => l.id === destinoId)?.nome ?? 'loja selecionada'}</strong>
-                    </>
-                  ) : (
-                    <> para qualquer loja</>
-                  )}
-                  . Cada linha é uma remessa com produtos (unidades) enviados.{' '}
-                  <strong>Editar destino</strong> e <strong>Excluir</strong> só aparecem em «Aguardando aceite» ou «Aceita»
-                  (antes do despacho).
+                    <> · filtro: {lojas.find((l) => l.id === destinoId)?.nome ?? 'loja'}</>
+                  ) : null}
+                  . Editar / excluir só antes do despacho.
                 </p>
               </div>
             </div>
@@ -1260,6 +886,57 @@ export default function SepararPorLojaPage() {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={modalSenhaSeparacaoAberto}
+        onClose={() => {
+          if (saving) return;
+          setModalSenhaSeparacaoAberto(false);
+          setPendingSeparacao(null);
+          setSenhaSeparacao('');
+          setErroModalSeparacao('');
+        }}
+        title="Senha para gravar remessa"
+        subtitle={
+          pendingSeparacao ? `${pendingSeparacao.snapshotItens.length} unidade(s)` : undefined
+        }
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-600">Mesma senha do login.</p>
+          <Input
+            label="Senha"
+            type="password"
+            autoComplete="current-password"
+            value={senhaSeparacao}
+            onChange={(e) => setSenhaSeparacao(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void confirmarSeparacaoComSenhaNoServidor()}
+            disabled={saving}
+          />
+          {erroModalSeparacao ? (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{erroModalSeparacao}</p>
+          ) : null}
+          <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => {
+                setModalSenhaSeparacaoAberto(false);
+                setPendingSeparacao(null);
+                setSenhaSeparacao('');
+                setErroModalSeparacao('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="button" variant="primary" disabled={saving || !senhaSeparacao.trim()} onClick={() => void confirmarSeparacaoComSenhaNoServidor()}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Registrar remessa
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {origemId && destinoId && (
         <>
           <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
@@ -1286,18 +963,16 @@ export default function SepararPorLojaPage() {
             </div>
             {modoSeparacao === 'reposicao' && (
               <div className="space-y-3">
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  O <strong>mínimo</strong> vem de{' '}
+                <p className="text-xs text-gray-600">
+                  Faltantes a partir de{' '}
                   <Link href="/cadastros/reposicao-loja" className="text-blue-600 underline underline-offset-2">
-                    Reposição de estoque por loja
-                  </Link>
-                  . A <strong>quantidade contada</strong> vem de{' '}
+                    Reposição
+                  </Link>{' '}
+                  e{' '}
                   <Link href="/contagem-loja" className="text-blue-600 underline underline-offset-2">
-                    Declarar estoque na loja
+                    Contagem na loja
                   </Link>
-                  . Ao escolher <strong>origem</strong> e <strong>destino</strong>, o sistema carrega os faltantes e
-                  pré-seleciona as unidades disponíveis na indústria (com pequeno atraso ao trocar a loja). Use o botão
-                  abaixo para forçar uma nova leitura.
+                  .
                 </p>
                 {(carregandoReposicao || aplicandoSugestao) && (
                   <p className="text-xs text-blue-700 flex items-center gap-2">
@@ -1359,14 +1034,6 @@ export default function SepararPorLojaPage() {
           {modoSeparacao === 'manual' && (
             <div className="space-y-4 mb-4">
               <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  No fluxo atual, cada <strong>unidade</strong> já tem token no sistema (ex.: após compra), mas as{' '}
-                  <strong>etiquetas com QR</strong> costumam ser impressas na <strong>separação</strong> e coladas no
-                  pacote antes do envio à loja. Por isso o caminho usual aqui é escolher o <strong>produto</strong> e a{' '}
-                  <strong>quantidade</strong> no estoque da origem; depois de <strong>Criar separação</strong>, imprima os
-                  QR quando o sistema oferecer. Scanner e digitação servem quando a unidade <strong>já</strong> tiver QR
-                  legível (reimpressão, conferência, outro cenário).
-                </p>
                 <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -1374,10 +1041,7 @@ export default function SepararPorLojaPage() {
                     checked={incluirCompraNoManual}
                     onChange={(e) => setIncluirCompraNoManual(e.target.checked)}
                   />
-                  <span>
-                    Mostrar também produtos <strong>só de compra</strong> (fornecedor) — polpas e outros insumos
-                    costumam ficar ocultos aqui; use quando for enviar à loja mercadoria comprada, não só acabado.
-                  </span>
+                  <span>Incluir produtos só de compra (fornecedor)</span>
                 </label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <div className="flex-1 min-w-0">
@@ -1516,12 +1180,8 @@ export default function SepararPorLojaPage() {
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-xs text-gray-600 px-1 pt-2 leading-relaxed border-t border-gray-100">
-                      <strong>Total</strong> inclui compra ainda sem etiqueta. <strong>Com QR</strong> são unidades já
-                      existentes no estoque com etiqueta. O botão{' '}
-                      <strong>+</strong> usa primeiro o que já tem QR; se faltar, <strong>emite</strong> do lote (FIFO),
-                      grava etiquetas e coloca na lista — imprima na tela <strong>Etiquetas</strong> ou após criar a
-                      separação.
+                    <p className="text-xs text-gray-500 px-1 pt-2 border-t border-gray-100">
+                      <strong>+</strong> adiciona por QR existente ou emite do lote se faltar.
                     </p>
                   </div>
                 )}
@@ -1568,121 +1228,44 @@ export default function SepararPorLojaPage() {
 
           {erro && <p className="text-sm text-red-500 mb-4">{erro}</p>}
 
-          {itensEscaneados.length > 0 ? (
+          {itensEscaneados.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="font-semibold text-gray-900">Itens separados</p>
                 <Badge variant="info">{itensEscaneados.length} itens</Badge>
               </div>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {itensEscaneados.map(item => (
+              <div className="space-y-2 max-h-[min(24rem,50vh)] overflow-y-auto">
+                {itensSeparadosVisiveis.map((item) => (
                   <div key={item.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
                     <div>
                       <p className="text-sm font-medium text-gray-900">{item.produto_nome}</p>
                       <p className="text-xs text-gray-400 font-mono">{item.token_qr}</p>
                     </div>
-                    <button onClick={() => removerItem(item.id)} className="text-gray-400 hover:text-red-500"><X className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => removerItem(item.id)} className="text-gray-400 hover:text-red-500">
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm text-amber-950">
-              <p className="font-medium text-amber-900 mb-1">Guia PDF e etiquetas ainda desativados</p>
-              <p className="text-amber-900/90 leading-relaxed">
-                Eles só liberam quando existir pelo menos <strong>uma unidade</strong> na lista <strong>Itens separados</strong>{' '}
-                (cada uma com QR no estoque da origem). No <strong>modo reposição</strong>, a lista é preenchida
-                automaticamente ao escolher origem e destino (ou em <strong>Recarregar faltantes e sugestão</strong>). No{' '}
-                <strong>modo manual</strong>, use a tabela ou scanner/digitação. O <strong>+</strong> pode emitir QR do
-                lote quando só houver saldo em compra sem etiqueta.
-              </p>
+              {temMaisItensSeparados ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full mt-2 text-xs"
+                  onClick={() => setLimiteListaItensSeparados((n) => n + 100)}
+                >
+                  Mostrar mais ({itensEscaneados.length - itensSeparadosVisiveis.length} oculto(s))
+                </Button>
+              ) : null}
             </div>
           )}
 
           <Button
             variant="primary"
-            className="w-full mb-2"
-            onClick={() => void guiaPdfEImprimirEtiquetas()}
-            disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
-            title={
-              itensEscaneados.length === 0
-                ? 'Inclua itens em Itens separados (reposição, estoque por produto ou QR)'
-                : undefined
-            }
+            className="w-full"
+            onClick={criarSeparacao}
+            disabled={saving || itensEscaneados.length === 0 || modalSenhaSeparacaoAberto}
           >
-            {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <FileDown className="w-4 h-4 mr-2" />}
-            Guia PDF + imprimir etiquetas
-          </Button>
-          <p className="text-xs text-gray-600 mb-3">
-            Baixa o PDF da guia (resumo por produto + lista por unidade com tokens) e, em seguida, abre a impressão das etiquetas
-            em <strong>60×30 mm</strong> (fluxo operacional). O caminho recomendado para o QR bater no recebimento é{' '}
-            <strong>Criar separação</strong> primeiro e imprimir quando o sistema perguntar. Na térmica, use o diálogo do sistema;
-            na guia, A4 ou &quot;Salvar como PDF&quot;.
-          </p>
-
-          <Button
-            variant="outline"
-            className="w-full mb-3"
-            onClick={() => void imprimirEtiquetasSeparacao()}
-            disabled={imprimindoEtiquetas || itensEscaneados.length === 0}
-            title={
-              itensEscaneados.length === 0
-                ? 'Inclua itens em Itens separados (reposição, estoque por produto ou QR)'
-                : undefined
-            }
-          >
-            {imprimindoEtiquetas ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
-            Só imprimir etiquetas
-          </Button>
-
-          <Button
-            variant="outline"
-            className="w-full mb-3 border-emerald-200 bg-emerald-50/80 text-emerald-900 hover:bg-emerald-100"
-            onClick={() => void imprimirEtiquetasSeparacaoNoPi()}
-            disabled={imprimindoEtiquetas || itensEscaneados.length === 0 || piCfgLoading || !piPrintAvailable}
-            title={
-              piCfgLoading
-                ? 'Carregando configuração da estação…'
-                : !piPrintAvailable
-                  ? 'Configure config_impressao_pi no Supabase ou NEXT_PUBLIC_PI_PRINT_WS_URL'
-                  : itensEscaneados.length === 0
-                    ? 'Inclua itens em Itens separados'
-                    : 'Envia as etiquetas 60×30 para o Raspberry Pi (WebSocket → Zebra)'
-            }
-          >
-            {imprimindoEtiquetas ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            ) : (
-              <Server className="w-4 h-4 mr-2" />
-            )}
-            Imprimir na estação (Pi / Zebra)
-          </Button>
-          {!piCfgLoading && !piPrintAvailable && (
-            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-              Para imprimir na estação <strong>de qualquer lugar</strong>, use um <strong>túnel</strong> no Raspberry até a
-              porta do <code className="text-[11px]">pi-print-ws</code> e grave a URL <code className="text-[11px]">wss://…</code>{' '}
-              na tabela <code className="text-[11px]">config_impressao_pi</code> no Supabase (migração{' '}
-              <code className="text-[11px]">20260404140000_config_impressao_pi.sql</code>). Em dev na mesma LAN, pode usar{' '}
-              <code className="text-[11px]">NEXT_PUBLIC_PI_PRINT_WS_URL</code> no <code className="text-[11px]">.env.local</code>.
-              Guia: <code className="text-[11px]">docs/IMPRESSAO_PI_ACESSO_REMOTO.md</code>.
-            </p>
-          )}
-          {avisoHttpsPi && (
-            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 mb-3">
-              Esta página está em <strong>HTTPS</strong> e a URL do Pi usa <strong>ws://</strong> — o navegador costuma
-              bloquear (conteúdo misto). Use o app em <strong>http://localhost</strong> na mesma rede do Pi ou configure{' '}
-              <strong>wss://</strong> no Raspberry.
-            </p>
-          )}
-          <p className="text-xs text-gray-500 -mt-2 mb-3">
-            O sistema grava <strong>etiquetas</strong> por item: lote <code className="text-[11px]">SEP-…</code> após criar a
-            remessa (etiquetas alinhadas ao recebimento) ou <code className="text-[11px]">SEPARACAO-LOJA</code> se imprimir antes
-            (somente se depois registrar a separação com a mesma lista). Itens sem validade usam data sentinela, como na compra.
-            Com Pi configurado, após <strong>Criar separação</strong> a impressão tenta a <strong>estação</strong> primeiro; se
-            falhar, abre o navegador.
-          </p>
-
-          <Button variant="primary" className="w-full" onClick={criarSeparacao} disabled={saving || itensEscaneados.length === 0}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Truck className="w-4 h-4 mr-2" />}
             Criar Separação ({itensEscaneados.length} itens)
           </Button>

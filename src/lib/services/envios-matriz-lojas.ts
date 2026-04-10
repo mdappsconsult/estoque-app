@@ -21,19 +21,12 @@ function nomeJoin(v: unknown): string {
   return (n && String(n).trim()) || '—';
 }
 
-function nomeProdutoDoItem(item: unknown): string {
-  if (!item || typeof item !== 'object') return 'Produto';
-  const it = item as { produto?: unknown };
-  const p = it.produto;
-  if (!p || typeof p !== 'object') return 'Produto';
-  const o = Array.isArray(p) ? p[0] : p;
-  if (!o || typeof o !== 'object') return 'Produto';
-  const n = (o as { nome?: string }).nome;
-  return (n && String(n).trim()) || 'Produto';
-}
+const CHUNK_TRANSF_IDS = 24;
+const CHUNK_ITEM_IDS = 250;
 
 /**
  * Separações registradas (transferências matriz → loja): o que já foi enviado para as filiais.
+ * Evita embed profundo `transferencia_itens → itens → produtos` (PostgREST fica pesado com muitas linhas).
  */
 export async function buscarEnviosRecentesMatrizParaLojas(opts: {
   origemId?: string;
@@ -67,30 +60,58 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
   if (error) throw error;
   if (!trans?.length) return [];
 
-  const ids = trans.map((t) => t.id);
+  const transIds = trans.map((t) => t.id as string);
+  const linhas: { transferencia_id: string; item_id: string }[] = [];
 
-  const { data: linhas, error: e2 } = await supabase
-    .from('transferencia_itens')
-    .select(
-      `
-      transferencia_id,
-      item_id,
-      item:itens!transferencia_itens_item_id_fkey(
-        produto_id,
-        produto:produtos(nome)
-      )
-    `
-    )
-    .in('transferencia_id', ids);
-  if (e2) throw e2;
+  for (let i = 0; i < transIds.length; i += CHUNK_TRANSF_IDS) {
+    const slice = transIds.slice(i, i + CHUNK_TRANSF_IDS);
+    const { data: chunk, error: e2 } = await supabase
+      .from('transferencia_itens')
+      .select('transferencia_id, item_id')
+      .in('transferencia_id', slice);
+    if (e2) throw e2;
+    for (const row of chunk || []) {
+      const tid = row.transferencia_id as string;
+      const itemId = String((row as { item_id?: string }).item_id || '').trim();
+      if (tid && itemId) linhas.push({ transferencia_id: tid, item_id: itemId });
+    }
+  }
 
-  /** Por transferência: agregação por produto só com `item_id` distintos (evita contar linha duplicada duas vezes). */
+  const itemIds = [...new Set(linhas.map((l) => l.item_id))];
+  const produtoPorItem = new Map<string, string>();
+  for (let i = 0; i < itemIds.length; i += CHUNK_ITEM_IDS) {
+    const slice = itemIds.slice(i, i + CHUNK_ITEM_IDS);
+    const { data: itRows, error: e3 } = await supabase
+      .from('itens')
+      .select('id, produto_id')
+      .in('id', slice);
+    if (e3) throw e3;
+    for (const r of itRows || []) {
+      const pid = String((r as { produto_id?: string }).produto_id || '').trim();
+      if (pid) produtoPorItem.set(r.id as string, pid);
+    }
+  }
+
+  const produtoIds = [...new Set([...produtoPorItem.values()])];
+  const nomePorProduto = new Map<string, string>();
+  for (let i = 0; i < produtoIds.length; i += CHUNK_ITEM_IDS) {
+    const slice = produtoIds.slice(i, i + CHUNK_ITEM_IDS);
+    const { data: prows, error: e4 } = await supabase.from('produtos').select('id, nome').in('id', slice);
+    if (e4) throw e4;
+    for (const r of prows || []) {
+      nomePorProduto.set(
+        r.id as string,
+        String((r as { nome?: string }).nome || 'Produto').trim() || 'Produto'
+      );
+    }
+  }
+
+  /** Por transferência: agregação por produto só com `item_id` distintos. */
   const porTransf = new Map<string, { agg: Map<string, { nome: string; qtd: number }>; vistos: Set<string> }>();
 
-  for (const row of linhas || []) {
-    const tid = row.transferencia_id as string;
-    const itemId = String((row as { item_id?: string }).item_id || '').trim();
-    if (!itemId) continue;
+  for (const row of linhas) {
+    const tid = row.transferencia_id;
+    const itemId = row.item_id;
     let bucket = porTransf.get(tid);
     if (!bucket) {
       bucket = { agg: new Map(), vistos: new Set() };
@@ -98,10 +119,9 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
     }
     if (bucket.vistos.has(itemId)) continue;
     bucket.vistos.add(itemId);
-    const it = row.item as { produto_id?: string } | null;
-    const pid = it?.produto_id;
+    const pid = produtoPorItem.get(itemId);
     if (!pid) continue;
-    const pnom = nomeProdutoDoItem(row.item);
+    const pnom = nomePorProduto.get(pid) ?? 'Produto';
     const cur = bucket.agg.get(pid);
     if (cur) cur.qtd += 1;
     else bucket.agg.set(pid, { nome: pnom, qtd: 1 });
