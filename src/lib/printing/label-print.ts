@@ -41,7 +41,8 @@ export const FORMATO_CONFIG: Record<
     widthMm: 60,
     heightMm: 60,
     paddingMm: 2.5,
-    qrSizeMm: 22,
+    /** Ligeiramente menor que 22 mm para caber faixa meta + tokens + legal sem sobrepor no flex de impressão */
+    qrSizeMm: 19,
     dualPorFolha: false,
   },
   '58x40': {
@@ -84,13 +85,11 @@ export interface EtiquetaParaImpressao {
  * Só aplicada quando `preparar60x30PilhasPorLado` / Pi equivalente está ativo (não é o default).
  * Sem isso, folhas 1|2, 3|4 geram pilhas 1,3,5 e 2,4,6; com a preparação, folhas 1|⌈n/2⌉+1, … mantêm sequência numérica em cada pilha.
  */
-export function prepararEtiquetas60x30ParaPilhasEsquerdaDireita(
-  etiquetas: EtiquetaParaImpressao[]
-): EtiquetaParaImpressao[] {
+export function prepararEtiquetas60x30ParaPilhasEsquerdaDireita<T>(etiquetas: T[]): T[] {
   const n = etiquetas.length;
   if (n <= 1) return [...etiquetas];
   const half = Math.ceil(n / 2);
-  const out: EtiquetaParaImpressao[] = [];
+  const out: T[] = [];
   for (let i = 0; i < half; i++) {
     out.push(etiquetas[i]);
     const j = i + half;
@@ -111,6 +110,11 @@ export type OpcoesGerarDocumentoHtmlEtiquetas = {
    * Default / omitido = pares consecutivos (0|1, 2|3…), adequado à sequência por produto após corte folha a folha.
    */
   preparar60x30PilhasPorLado?: boolean;
+};
+
+/** Opções do HTML + texto opcional na faixa fixa da prévia (só texto puro; sem HTML arbitrário). */
+export type OpcoesPreviaEtiquetasJanela = OpcoesGerarDocumentoHtmlEtiquetas & {
+  mensagemBarra?: string;
 };
 
 function normalizarFormatoImpressao(valor: string | null): FormatoEtiqueta {
@@ -258,6 +262,8 @@ function gerarFolha60x30Par(
  * (curto) → rodapé legal. Evita bloco legal no topo e loja duplicada ao lado do QR.
  */
 function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: string): string {
+  const qrMm = FORMATO_CONFIG['60x60'].qrSizeMm;
+  const qrPx = pixelsQrParaImpressao(qrMm);
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
   const lote = escaparHtml(formatarLoteExibicao6060(item.lote || ''));
@@ -285,18 +291,18 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
       </div>
       <div class="e6060-rule"></div>
       <div class="e6060-mid">
-        <div class="e6060-meta">
-          <div class="e6060-qm">
+        <div class="e6060-meta-row">
+          <div class="e6060-meta-block">
             <span class="e6060-ql">Validade</span>
             <span class="e6060-qv e6060-qv-val">${validade}</span>
           </div>
-          <div class="e6060-qm">
+          <div class="e6060-meta-block e6060-meta-block-gerou">
             <span class="e6060-ql">Gerou</span>
             <span class="e6060-qv">${responsavel}</span>
           </div>
         </div>
         <div class="e6060-qr-wrap">
-          <img class="qr" src="${qrDataUrl}" alt="" width="512" height="512" />
+          <img class="qr qr-6060" src="${qrDataUrl}" alt="" width="${qrPx}" height="${qrPx}" />
         </div>
       </div>
       <div class="e6060-ids">
@@ -304,6 +310,7 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
         <div class="e6060-tokqr">${tokenQr}</div>
         <div class="e6060-lote">LOTE: ${lote}</div>
       </div>
+      <div class="e6060-spacer" aria-hidden="true"></div>
       <div class="e6060-legal">
         <div class="e6060-emp">ACAI DO KIM - CENTRAL DE PRODUCAO</div>
         <div class="e6060-emp">CNPJ: 24.880.097/0001-02</div>
@@ -603,7 +610,8 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
     }
     .etiqueta.fmt-6060 {
       justify-content: flex-start;
-      gap: 0.35mm;
+      gap: 0.3mm;
+      min-height: 100%;
     }
     .e6060-head {
       flex-shrink: 0;
@@ -651,31 +659,37 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       border-top: 0.45mm solid #000;
       width: 100%;
     }
+    /* Coluna fixa: meta em linha + QR central — sem flex:1 (evita QR sobrepor tokens/legal em drivers térmicos) */
     .e6060-mid {
-      flex: 1;
-      min-height: 0;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.65mm;
+      width: 100%;
+    }
+    .e6060-meta-row {
       display: flex;
       flex-direction: row;
       justify-content: space-between;
-      align-items: flex-end;
-      gap: 1mm;
+      align-items: flex-start;
+      gap: 2mm;
       width: 100%;
     }
-    .e6060-meta {
+    .e6060-meta-block {
       display: flex;
       flex-direction: column;
-      justify-content: flex-end;
+      gap: 0.12mm;
+      min-width: 0;
+    }
+    .e6060-meta-block:first-child {
+      align-items: flex-start;
+      text-align: left;
+    }
+    .e6060-meta-block-gerou {
       align-items: flex-end;
       text-align: right;
-      gap: 0.45mm;
-      min-width: 0;
-      max-width: 22mm;
-    }
-    .e6060-qm {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 0.05mm;
+      max-width: 28mm;
     }
     .e6060-ql {
       font-size: 4.8pt;
@@ -689,7 +703,7 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       font-weight: 700;
       line-height: 1.08;
       word-break: break-word;
-      max-width: 22mm;
+      max-width: 26mm;
     }
     .e6060-qv-val {
       font-size: 9.5pt;
@@ -700,13 +714,21 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
     .e6060-qr-wrap {
       flex-shrink: 0;
       display: flex;
-      align-items: flex-end;
+      align-items: center;
       justify-content: center;
     }
+    /* Raster mais «seco» ao reduzir bitmap → mm (Chromium/CUPS → Zebra) */
+    .fmt-6060 .qr-6060 {
+      image-rendering: pixelated;
+    }
     .e6060-ids {
-      flex-shrink: 0;
+      flex: 0 0 auto;
       width: 100%;
       text-align: left;
+    }
+    .e6060-spacer {
+      flex: 1 1 auto;
+      min-height: 0.4mm;
     }
     .e6060-tok {
       margin-top: 0.35mm;
@@ -730,10 +752,9 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       color: #222;
     }
     .e6060-legal {
-      margin-top: auto;
-      flex-shrink: 0;
+      flex: 0 0 auto;
       width: 100%;
-      padding-top: 0.35mm;
+      padding-top: 0.2mm;
     }
     .e6060-emp {
       font-size: 4.8pt;
@@ -952,6 +973,42 @@ export async function imprimirEtiquetasEmJobUnico(
 
   janela.document.open();
   janela.document.write(comPrint);
+  janela.document.close();
+  return true;
+}
+
+/**
+ * Abre nova aba com o mesmo HTML da impressão/Pi, **sem** `window.print` — para conferir layout antes de enviar à fila.
+ */
+export async function abrirPreviaEtiquetasEmJanela(
+  etiquetas: EtiquetaParaImpressao[],
+  formato: FormatoEtiqueta,
+  opcoes?: OpcoesPreviaEtiquetasJanela
+): Promise<boolean> {
+  if (typeof window === 'undefined' || etiquetas.length === 0) return false;
+
+  const { mensagemBarra, ...opcoesGerador } = opcoes ?? {};
+  const doc = await gerarDocumentoHtmlEtiquetas(
+    etiquetas,
+    formato,
+    Object.keys(opcoesGerador).length > 0 ? opcoesGerador : undefined
+  );
+  if (!doc) return false;
+
+  const n = etiquetas.length;
+  const labelFmt = FORMATO_CONFIG[formato].label;
+  const extraLinha = mensagemBarra
+    ? `<div style="margin-top:6px;font-size:12px;opacity:0.92;font-weight:500;max-width:42rem;margin-left:auto;margin-right:auto;">${escaparHtml(mensagemBarra)}</div>`
+    : '';
+  const faixa = `<div id="previa-etiquetas-faixa" role="status" style="position:sticky;top:0;left:0;right:0;z-index:2147483647;background:#0f172a;color:#f8fafc;padding:10px 14px;font:13px/1.35 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.25);"><strong>Prévia</strong> — ${n} etiqueta(s) · ${escaparHtml(labelFmt)}. Confira texto, validade e QR antes de imprimir.${extraLinha}</div>`;
+
+  const comFaixa = doc.replace('<body>', `<body>${faixa}`);
+
+  const janela = window.open('', '_blank', 'width=520,height=720');
+  if (!janela) return false;
+
+  janela.document.open();
+  janela.document.write(comFaixa);
   janela.document.close();
   return true;
 }

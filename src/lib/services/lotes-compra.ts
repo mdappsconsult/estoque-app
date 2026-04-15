@@ -203,17 +203,19 @@ export async function criarLoteCompra(
 
   const dataValidadeLote = dataValidadeParaColunaLote(dataValidade);
 
+  const baseLote = {
+    ...lote,
+    fornecedor: lote.fornecedor.trim(),
+    lote_fornecedor: loteFornecedorFinal,
+    data_validade: dataValidadeLote,
+  };
+
   const { data: loteCompra, error } = await supabase
     .from('lotes_compra')
-    .insert({
-      ...lote,
-      fornecedor: lote.fornecedor.trim(),
-      lote_fornecedor: loteFornecedorFinal,
-      data_validade: dataValidadeLote,
-      registrado_por: usuarioId,
-    })
+    .insert({ ...baseLote, registrado_por: usuarioId })
     .select()
     .single();
+
   if (error) throw error;
 
   await recalcularEstoqueProduto(lote.produto_id);

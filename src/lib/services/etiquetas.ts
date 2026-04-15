@@ -29,21 +29,105 @@ function validadeItemParaEtiqueta(item: UpsertEtiquetaSeparacaoItem): string {
     : DATA_SENTINELA_SEM_VALIDADE;
 }
 
+const CHUNK_TRANSF_SEP_DESTINO = 200;
+
+async function destinoPorItemIdViagemSep(
+  client: SupabaseClient,
+  viagemId: string,
+  itemIds: string[]
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const want = new Set(itemIds.filter(Boolean));
+  if (!viagemId || want.size === 0) return map;
+
+  const { data: trs, error: e1 } = await client
+    .from('transferencias')
+    .select('id, destino_id')
+    .eq('tipo', 'WAREHOUSE_STORE')
+    .eq('viagem_id', viagemId);
+  if (e1) throw e1;
+
+  const tidToDest = new Map<string, string>();
+  for (const t of (trs ?? []) as { id: string; destino_id: string | null }[]) {
+    const d = t.destino_id != null ? String(t.destino_id).trim() : '';
+    if (d) tidToDest.set(String(t.id), d);
+  }
+  if (tidToDest.size === 0) return map;
+
+  const transIds = [...tidToDest.keys()];
+  for (let i = 0; i < transIds.length; i += CHUNK_TRANSF_SEP_DESTINO) {
+    const slice = transIds.slice(i, i + CHUNK_TRANSF_SEP_DESTINO);
+    const { data: ti, error: e2 } = await client
+      .from('transferencia_itens')
+      .select('item_id, transferencia_id')
+      .in('transferencia_id', slice);
+    if (e2) throw e2;
+    for (const row of ti || []) {
+      const r = row as { item_id?: string; transferencia_id?: string };
+      const iid = String(r.item_id || '').trim();
+      const tid = String(r.transferencia_id || '').trim();
+      if (!iid || !want.has(iid)) continue;
+      const d = tidToDest.get(tid);
+      if (d) map.set(iid, d);
+    }
+  }
+  return map;
+}
+
+function destinoBaldeSepParaItem(
+  itemId: string,
+  destinoPorItem: Map<string, string>,
+  fallbackDestino: string | null
+): string | null {
+  const d = destinoPorItem.get(itemId)?.trim();
+  if (d) return d;
+  const fb = fallbackDestino?.trim();
+  return fb || null;
+}
+
+async function reservarBlocoSequenciaBaldePorLoja(
+  client: SupabaseClient,
+  localDestinoId: string,
+  quantidade: number
+): Promise<number> {
+  const { error: eAdj } = await client.rpc('ajustar_sequencia_balde_loja_ao_max_etiquetas', {
+    p_local_destino_id: localDestinoId,
+  });
+  if (eAdj) throw eAdj;
+
+  const { data: primeiroRaw, error: rpcErr } = await client.rpc('reservar_sequencia_balde_loja', {
+    p_local_destino_id: localDestinoId,
+    p_quantidade: quantidade,
+  });
+  if (rpcErr) throw rpcErr;
+  const primeiro =
+    typeof primeiroRaw === 'number'
+      ? primeiroRaw
+      : typeof primeiroRaw === 'string'
+        ? parseInt(primeiroRaw, 10)
+        : NaN;
+  if (!Number.isFinite(primeiro)) {
+    throw new Error('Falha ao reservar sequência de balde para a loja (RPC inválida).');
+  }
+  return primeiro;
+}
+
 type LinhaMergeSep = {
   produto_id: string;
   data_validade: string;
   data_producao: string;
   impressa: boolean;
   lote: string;
+  numero_sequencia_loja: number | null;
 };
 
 /**
  * Garante linhas em `etiquetas` (id = id do item) para itens da separação indústria → loja.
  * - `impresso_agora`: marca impressa (fluxo "Imprimir etiquetas").
  * - `manter_impressa_se_existir`: novo registro sai impressa=false; se já existir, não zera impressa=true.
- * - `local_destino_id`: loja de destino; em lotes **não-SEP** é obrigatória para novos números via RPC. Em **SEP-…** é opcional (numerar remessa não depende dela).
- * - Lotes **SEP-…** (remessa por viagem): **BALDE Nº 1..N** por remessa, ordenado por `item_id` (UUID), usando **todas** as etiquetas ativas do lote + o payload — evita 1,1,2,2 quando houve dois upserts que reservaram o mesmo bloco no RPC global.
- * - Lotes **SEPARACAO-LOJA** (ou outros): sequência **global** por loja via `reservar_sequencia_balde_loja`.
+ * - `local_destino_id`: loja de destino; em lotes **não-SEP** é obrigatória para novos números. Em **SEP-…** é usada como fallback quando a viagem ainda não tem `transferencias` (ex.: upsert antes da remessa) ou para itens sem vínculo na transferência.
+ * - Lotes **SEP-…**: `numero_sequencia_loja` por **loja de destino**, contínua entre remessas (`reservar_sequencia_balde_loja` + alinhamento ao máximo já gravado). Destino por item vem da transferência `WAREHOUSE_STORE` da viagem; ordem estável por `item_id`. Números já gravados são preservados.
+ * - Lotes **SEPARACAO-LOJA** (ou outros): mesma sequência por loja via RPC (sem o ajuste por máximo de etiquetas, fluxo legado).
  * Retorna mapa id do item → número exibido na etiqueta (ou null).
  */
 export async function upsertEtiquetasSeparacaoLoja(
@@ -71,11 +155,12 @@ export async function upsertEtiquetasSeparacaoLoja(
     data_validade: string;
     data_producao: string;
     impressa: boolean;
+    numero_sequencia_loja: number | null;
   }[] = [];
   if (isLoteSep) {
     const { data, error } = await client
       .from('etiquetas')
-      .select('id, produto_id, data_validade, data_producao, impressa')
+      .select('id, produto_id, data_validade, data_producao, impressa, numero_sequencia_loja')
       .eq('lote', loteNorm)
       .eq('excluida', false);
     if (error) throw error;
@@ -127,12 +212,16 @@ export async function upsertEtiquetasSeparacaoLoja(
   if (isLoteSep) {
     const merge = new Map<string, LinhaMergeSep>();
     for (const r of etiquetasExistentesNoLote) {
+      const nRaw = r.numero_sequencia_loja;
+      const nSeq =
+        nRaw != null && Number.isFinite(Number(nRaw)) ? Number(nRaw) : null;
       merge.set(String(r.id), {
         produto_id: String(r.produto_id),
         data_validade: String(r.data_validade),
         data_producao: String(r.data_producao),
         impressa: Boolean(r.impressa),
         lote: loteNorm,
+        numero_sequencia_loja: nSeq,
       });
     }
     for (const item of itensUnicos) {
@@ -145,14 +234,47 @@ export async function upsertEtiquetasSeparacaoLoja(
         data_producao: prev?.data_producao ?? agora,
         impressa,
         lote: loteNorm,
+        numero_sequencia_loja: prev?.numero_sequencia_loja ?? null,
       });
     }
+
+    const vid = parseViagemIdDeLoteSep(loteNorm);
+    const destinoPorItem = vid
+      ? await destinoPorItemIdViagemSep(client, vid, [...merge.keys()])
+      : new Map<string, string>();
 
     const baldeIds = [...merge.keys()]
       .filter((id) => itemEhBalde(merge.get(id)!.produto_id))
       .sort((a, b) => a.localeCompare(b));
+
     const seqPorId = new Map<string, number>();
-    baldeIds.forEach((id, idx) => seqPorId.set(id, idx + 1));
+    const idsSemNumeroPorDestino = new Map<string, string[]>();
+
+    for (const id of baldeIds) {
+      const m = merge.get(id)!;
+      const existente = m.numero_sequencia_loja;
+      if (existente != null && Number.isFinite(existente)) {
+        seqPorId.set(id, existente);
+        continue;
+      }
+      const lojaDest = destinoBaldeSepParaItem(id, destinoPorItem, destino);
+      if (!lojaDest) continue;
+      const arr = idsSemNumeroPorDestino.get(lojaDest) ?? [];
+      arr.push(id);
+      idsSemNumeroPorDestino.set(lojaDest, arr);
+    }
+
+    const destinosOrdenados = [...idsSemNumeroPorDestino.keys()].sort((a, b) =>
+      a.localeCompare(b)
+    );
+    for (const lojaDest of destinosOrdenados) {
+      const idsSem = (idsSemNumeroPorDestino.get(lojaDest) ?? []).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      if (idsSem.length === 0) continue;
+      const primeiro = await reservarBlocoSequenciaBaldePorLoja(client, lojaDest, idsSem.length);
+      idsSem.forEach((id, idx) => seqPorId.set(id, primeiro + idx));
+    }
 
     const rows: EtiquetaInsert[] = [...merge.entries()].map(([id, m]) => ({
       id,

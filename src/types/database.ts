@@ -826,6 +826,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      ajustar_sequencia_balde_loja_ao_max_etiquetas: {
+        Args: { p_local_destino_id: string };
+        Returns: undefined;
+      };
       reservar_sequencia_balde_loja: {
         Args: { p_local_destino_id: string; p_quantidade: number };
         Returns: number;

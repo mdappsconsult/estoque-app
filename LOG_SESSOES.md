@@ -1,5 +1,36 @@
 # Log de Sessões
 
+### Sessão - 2026-04-15 - `registrado_por`: código alinhado ao banco (sem fallback)
+- **Pedido:** alinhar perfeitamente — sem retry sem a coluna.
+- **Mudança:** removidos `postgrestColunaAusenteNoSchemaCache` e o segundo insert em **`producoes`** (`producao.ts`) e **`lotes_compra`** (`lotes-compra.ts`); removido `src/lib/supabase/postgrest-coluna-schema-cache.ts`. Inserts **sempre** enviam `registrado_por`; exige migração **`20260410140000_lotes_producoes_registrado_por.sql`** no Supabase do ambiente.
+- **Impacto:** deploy sem essa migração continua falhando com mensagem PostgREST (comportamento explícito até o banco alinhar).
+- **Validação:** `npm run lint`, `npm run build`. **Supabase (ref do `.env.local`):** mesma SQL aplicada via MCP (`apply_migration` `lotes_producoes_registrado_por`, idempotente). **Produção Railway:** confirmar o mesmo ref e rodar a migração se ainda faltar.
+
+### Sessão - 2026-04-10 - SEP: numeração de balde contínua por loja (entre remessas)
+- **Pedido:** após remessa Delivery terminar no balde 28, a próxima remessa para a mesma loja deve seguir 29, 30…; cada loja com contador próprio.
+- **Mudança:** `upsertEtiquetasSeparacaoLoja` (lote `SEP-…`) passa a usar `reservar_sequencia_balde_loja` por **loja de destino** (mapa item→destino via `transferencias`/`transferencia_itens` da viagem; fallback `local_destino_id` no fluxo atômico antes da transferência existir). Preserva `numero_sequencia_loja` já gravado; novos baldes em ordem estável por `item_id`. Nova RPC **`ajustar_sequencia_balde_loja_ao_max_etiquetas`** (`20260410203000_…`) alinha o contador ao máximo já presente em `etiquetas` (evita recomeçar em 1 se o contador estava defasado). **`/etiquetas`:** removida renumerção 1..N pela ordem de impressão; PDF/prévia/Pi usam o número do banco/upsert.
+- **Validação:** `npm run lint`, `npm run build`. **Deploy DB:** migração aplicada no Supabase via **MCP** (`apply_migration` / `ajustar_sequencia_balde_loja_ao_max_etiquetas`).
+
+### Sessão - 2026-04-10 - Etiquetas indústria: só remessas criadas pelo próprio login
+- **Problema:** operador da indústria via no select remessas/impressões ligadas a outros usuários ou contextos.
+- **Mudança:** `buscarOpcoesRemessaSepParaEtiquetas` — opção `apenasCriadorUsuarioId`; select de `transferencias` inclui `criado_por`; `criadoresTransferencia` por viagem; `enriquecerCriadoresTransferencia` quando falta meta; filtro após origem. Página **Etiquetas** passa `usuario.id` para logins indústria (`usuarioIndustriaSemConsultaEstoque`). Texto de lista vazia ajustado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Produção: `registrado_por` ausente no Supabase + prévia no modal
+- **Problema:** PostgREST «Could not find the 'registrado_por' column of 'producoes' in the schema cache» quando a migração `20260410140000_lotes_producoes_registrado_por.sql` não foi aplicada no projeto.
+- **Mudança:** `postgrestColunaAusenteNoSchemaCache` + retry do insert em **`producoes`** e **`lotes_compra`** sem `registrado_por` (console.warn pedindo migração). Modal **Confirmar registro de produção:** botão **Ver modelo 60×60** (até 3 amostras com dados do formulário; tokens/lote fictícios até confirmar).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Prévia de etiquetas antes de imprimir
+- **Pedido:** conferir layout/dados antes de enviar à impressora ou à Zebra.
+- **Mudança:** `abrirPreviaEtiquetasEmJanela` em `label-print` (nova aba, mesmo HTML do job, faixa «Prévia» + texto auxiliar; `mensagemBarra` escapada). **Etiquetas:** «Ver prévia» (pendentes no topo), «Ver prévia — remessa», «Prévia» por grupo, ícone olho por linha. **Produção:** «Ver prévia» antes dos botões de impressão 60×60.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-10 - Etiqueta 60×60 indústria (Zebra): QR central e raster mais nítido
+- **Problema:** QR na borda da área média parecia borrado na Zebra.
+- **Mudança:** `label-print` — faixa `.e6060-mid` em **grid** (`1fr` / coluna do QR / `1fr`), QR na coluna central, meta validade/gerou à direita; `<img>` 60×60 com pixels iguais a `pixelsQrParaImpressao`; classe `.qr-6060` com `image-rendering: pixelated`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-10 - Recebimento: não fechar remessa com conferência parcial
 - **Problema:** operador podia tocar em «Confirmar» com apenas 1 item e a remessa ia para `DIVERGENCE` (encerrava sem conferência completa).
 - **Mudança:** `recebimento` — botão principal só com **todos** os itens escaneados; botão **Encerrar com divergência…** com `confirm` explícito (inclui caso zero escaneados). `receberTransferencia` passa a exigir `encerrarComDivergencia: true` quando houver divergência calculada.

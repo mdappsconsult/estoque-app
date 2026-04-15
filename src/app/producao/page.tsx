@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server } from 'lucide-react';
+import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server, Eye } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -15,9 +15,11 @@ import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import {
+  abrirPreviaEtiquetasEmJanela,
   confirmarImpressao,
   FORMATO_ETIQUETA_INDUSTRIA,
   imprimirEtiquetasEmJobUnico,
+  type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
 
@@ -72,6 +74,8 @@ export default function ProducaoPage() {
   const [localParaImpressao, setLocalParaImpressao] = useState('Indústria');
   const [imprimindo, setImprimindo] = useState(false);
   const [imprimindoPi, setImprimindoPi] = useState(false);
+  const [previsualizando, setPrevisualizando] = useState(false);
+  const [previsualizandoModal, setPrevisualizandoModal] = useState(false);
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const [confirmacaoAberta, setConfirmacaoAberta] = useState(false);
   const [erroConfirmacao, setErroConfirmacao] = useState('');
@@ -249,6 +253,56 @@ export default function ProducaoPage() {
     }
   };
 
+  /** Prévia no modal antes de gravar: amostra (até 3) com produto/local/validade do formulário. */
+  const abrirPreviaEtiquetasModalProducao = async () => {
+    if (!formularioValido || !dataValidadePrevista) return;
+    setPrevisualizandoModal(true);
+    setErroConfirmacao('');
+    try {
+      const amostras = Math.min(numBaldesInt, 3);
+      const agora = new Date().toISOString();
+      const valIso = `${dataValidadePrevista}T12:00:00.000Z`;
+      const payload: EtiquetaParaImpressao[] = Array.from({ length: amostras }, (_, i) => ({
+        id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+        produtoNome: produtoSelecionadoNome,
+        dataManipulacao: agora,
+        dataValidade: valIso,
+        lote: 'Após confirmar — lote gerado no registro',
+        tokenQr: `PREVIA-PRODUCAO-${i + 1}`,
+        tokenShort: `PREV${i + 1}`,
+        responsavel: usuario?.nome?.trim() || 'OPERADOR',
+        nomeLoja: localSelecionadoNome,
+        dataGeracaoIso: agora,
+        numeroSequenciaLoja: i + 1,
+      }));
+      const ok = await abrirPreviaEtiquetasEmJanela(payload, FORMATO_ETIQUETA_INDUSTRIA, {
+        mensagemBarra: `Amostra de ${amostras} etiqueta(s) com estes dados. Total ao registrar: ${numBaldesInt}. Tokens e lote reais só após confirmar o registro.`,
+      });
+      if (!ok) throw new Error('Não foi possível abrir a prévia. Libere pop-ups.');
+    } catch (e: unknown) {
+      setErroConfirmacao(e instanceof Error ? e.message : 'Falha ao gerar prévia');
+    } finally {
+      setPrevisualizandoModal(false);
+    }
+  };
+
+  const previsualizarEtiquetasProducao = async () => {
+    if (etiquetasPendentesImpressao.length === 0) return;
+    setPrevisualizando(true);
+    try {
+      const ok = await abrirPreviaEtiquetasEmJanela(montarPayloadImpressao(), FORMATO_ETIQUETA_INDUSTRIA, {
+        mensagemBarra: 'Mesmo layout enviado à Zebra/Pi. Feche a aba e use os botões de impressão quando estiver certo.',
+      });
+      if (!ok) {
+        throw new Error('Não foi possível abrir a prévia. Libere pop-ups e tente novamente.');
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Falha ao gerar prévia');
+    } finally {
+      setPrevisualizando(false);
+    }
+  };
+
   const imprimirEtiquetasNoPi = async () => {
     if (etiquetasPendentesImpressao.length === 0) return;
     if (!piPrintAvailable || !piConnection) {
@@ -331,15 +385,29 @@ export default function ProducaoPage() {
               Use <code className="text-[11px]">wss://</code> (túnel) na configuração da ponte indústria.
             </p>
           )}
-          <div className="flex flex-col sm:flex-row gap-2 mb-3">
-            <Button variant="primary" onClick={imprimirEtiquetasGeradas} disabled={imprimindo || imprimindoPi}>
+          <div className="flex flex-col sm:flex-row flex-wrap gap-2 mb-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void previsualizarEtiquetasProducao()}
+              disabled={previsualizando || imprimindo || imprimindoPi}
+              title="Abre nova aba com o layout exato antes de imprimir"
+            >
+              {previsualizando ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <Eye className="w-4 h-4 mr-2" />
+              )}
+              Ver prévia
+            </Button>
+            <Button variant="primary" onClick={imprimirEtiquetasGeradas} disabled={imprimindo || imprimindoPi || previsualizando}>
               {imprimindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Navegador — {etiquetasPendentesImpressao.length} etiqueta(s) 60×60
             </Button>
             <Button
               variant="outline"
               onClick={() => void imprimirEtiquetasNoPi()}
-              disabled={imprimindo || imprimindoPi || piCfgLoading || !piPrintAvailable}
+              disabled={imprimindo || imprimindoPi || piCfgLoading || !piPrintAvailable || previsualizando}
               title={
                 piPrintAvailable
                   ? 'Envia HTML 60×60 para o Raspberry (WebSocket → CUPS → Zebra)'
@@ -587,9 +655,23 @@ export default function ProducaoPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={() => setConfirmacaoAberta(false)} disabled={saving}>
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setConfirmacaoAberta(false)} disabled={saving || previsualizandoModal}>
               Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void abrirPreviaEtiquetasModalProducao()}
+              disabled={saving || previsualizandoModal || !formularioValido}
+              title="Abre nova aba com modelo 60×60 (amostra; QR/tokens fictícios até registrar)"
+            >
+              {previsualizandoModal ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <Eye className="w-4 h-4 mr-2" />
+              )}
+              Ver modelo 60×60
             </Button>
             <Button
               variant="primary"
@@ -597,7 +679,7 @@ export default function ProducaoPage() {
                 const ok = await handleSubmit();
                 if (ok) setConfirmacaoAberta(false);
               }}
-              disabled={saving}
+              disabled={saving || previsualizandoModal}
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {saving ? 'Registrando…' : 'Confirmar registro'}

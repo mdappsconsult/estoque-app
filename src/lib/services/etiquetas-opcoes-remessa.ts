@@ -13,10 +13,14 @@ export type OpcaoRemessaSepEtiquetas = {
   status?: string;
   /** `created_at` da transferência escolhida (painel / data de referência). */
   transferenciaCreatedAt?: string;
+  /** `transferencias.criado_por` distintos nesta viagem (quem registrou a separação). */
+  criadoresTransferencia?: string[];
 };
 
 export type BuscarOpcoesRemessaSepOpts = {
   origemId?: string | null;
+  /** Só remessas em que alguma `transferencias` da viagem foi criada por este usuário (login indústria em Etiquetas). */
+  apenasCriadorUsuarioId?: string | null;
 };
 
 const LIM_TRANSFERENCIAS_VIAGEM = 200;
@@ -25,7 +29,7 @@ const MAX_OPCOES_REMESSA_TOTAL = 200;
 const CHUNK_VIAGEM_ENRICH = 45;
 
 const SELECT_TRANS_COM_LOCAIS =
-  'viagem_id, origem_id, destino_id, created_at, status, tipo, origem:locais!origem_id(nome), destino:locais!destino_id(nome)';
+  'viagem_id, origem_id, destino_id, created_at, status, tipo, criado_por, origem:locais!origem_id(nome), destino:locais!destino_id(nome)';
 
 type TransRow = {
   viagem_id: string | null;
@@ -34,6 +38,7 @@ type TransRow = {
   created_at: string | null;
   tipo: string | null;
   status: string | null;
+  criado_por: string | null;
   origem: { nome?: string } | null;
   destino: { nome?: string } | null;
 };
@@ -87,6 +92,9 @@ function opcaoDeGrupoViagem(vid: string, rows: TransRow[]): OpcaoRemessaSepEtiqu
     .map((r) => String(r.created_at ?? ''))
     .sort()
     .reverse()[0];
+  const criadoresTransferencia = [
+    ...new Set(rows.map((r) => String(r.criado_por ?? '').trim()).filter(Boolean)),
+  ];
   return {
     lote: loteCanonicoParaViagem(vid),
     created_at: createdMax || String(best.created_at ?? ''),
@@ -96,6 +104,7 @@ function opcaoDeGrupoViagem(vid: string, rows: TransRow[]): OpcaoRemessaSepEtiqu
     destinoLocalId: best.destino_id ?? null,
     status: String(best.status ?? ''),
     transferenciaCreatedAt: String(best.created_at ?? ''),
+    criadoresTransferencia: criadoresTransferencia.length ? criadoresTransferencia : undefined,
   };
 }
 
@@ -155,7 +164,38 @@ async function enriquecerOpcoesSemMeta(opcoes: OpcaoRemessaSepEtiquetas[]): Prom
       status: fill.status,
       transferenciaCreatedAt: fill.transferenciaCreatedAt,
       created_at: o.created_at > fill.created_at ? o.created_at : fill.created_at,
+      criadoresTransferencia: fill.criadoresTransferencia?.length
+        ? fill.criadoresTransferencia
+        : o.criadoresTransferencia,
     };
+  });
+}
+
+/** Garante `criadoresTransferencia` para filtro por criador (opções vindas só do RPC/scan às vezes já têm origem). */
+async function enriquecerCriadoresTransferencia(
+  opcoes: OpcaoRemessaSepEtiquetas[]
+): Promise<OpcaoRemessaSepEtiquetas[]> {
+  const faltando = opcoes.filter((o) => !o.criadoresTransferencia?.length);
+  if (faltando.length === 0) return opcoes;
+
+  const ids = [
+    ...new Set(
+      faltando.map((o) => parseViagemIdDeLoteSep(o.lote)).filter((x): x is string => Boolean(x))
+    ),
+  ];
+  const trans = await buscarTransPorViagemIds(ids);
+  const grupos = agruparPorViagem(trans);
+  const mapCriadores = new Map<string, string[]>();
+  for (const [vid, rows] of grupos) {
+    const c = [...new Set(rows.map((r) => String(r.criado_por ?? '').trim()).filter(Boolean))];
+    if (c.length) mapCriadores.set(vid, c);
+  }
+
+  return opcoes.map((o) => {
+    if (o.criadoresTransferencia?.length) return o;
+    const vid = parseViagemIdDeLoteSep(o.lote);
+    const c = vid ? mapCriadores.get(vid) : undefined;
+    return c?.length ? { ...o, criadoresTransferencia: c } : o;
   });
 }
 
@@ -245,6 +285,15 @@ export async function buscarOpcoesRemessaSepParaEtiquetas(
     const origemNorm = origem.toLowerCase();
     ordenadas = ordenadas.filter(
       (o) => (o.origemLocalId || '').trim().toLowerCase() === origemNorm
+    );
+  }
+
+  const filtroCriador = opts?.apenasCriadorUsuarioId?.trim();
+  if (filtroCriador) {
+    ordenadas = await enriquecerCriadoresTransferencia(ordenadas);
+    const uid = filtroCriador.toLowerCase();
+    ordenadas = ordenadas.filter((o) =>
+      (o.criadoresTransferencia ?? []).some((id) => String(id).trim().toLowerCase() === uid)
     );
   }
 

@@ -122,21 +122,23 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
   const todosItemIdsConsumidos = selecoesPorProduto.flatMap((s) => s.itemIds);
   const produtosInsumos = [...new Set(consumosMerged.map((c) => c.produtoId))];
 
+  const baseProducao = {
+    produto_id: input.produtoId,
+    quantidade: quantidadeAcabado,
+    num_baldes: input.numBaldes,
+    local_id: input.localId,
+    responsavel: input.responsavelNome,
+    observacoes: input.observacoes || null,
+  };
+
   const { data: producaoRow, error: producaoErr } = await supabase
     .from('producoes')
-    .insert({
-      produto_id: input.produtoId,
-      quantidade: quantidadeAcabado,
-      num_baldes: input.numBaldes,
-      local_id: input.localId,
-      responsavel: input.responsavelNome,
-      observacoes: input.observacoes || null,
-      registrado_por: input.usuarioId,
-    })
+    .insert({ ...baseProducao, registrado_por: input.usuarioId })
     .select('id')
     .single();
 
   if (producaoErr) throw producaoErr;
+  if (!producaoRow?.id) throw new Error('Resposta inválida ao gravar produção');
   const producaoId = producaoRow.id;
 
   const { error: updErr } = await supabase

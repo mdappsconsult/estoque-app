@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { QrCode, Loader2, Printer, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { Eye, QrCode, Loader2, Printer, RefreshCw, Server, Trash2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import Input from '@/components/ui/Input';
@@ -16,6 +16,7 @@ import {
 } from '@/lib/services/etiquetas-opcoes-remessa';
 import { contarUnidadesTransferenciaPorLoteSep, upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
+  abrirPreviaEtiquetasEmJanela,
   confirmarImpressao,
   FORMATO_CONFIG,
   FORMATO_IMPRESSAO_STORAGE_KEY,
@@ -189,23 +190,28 @@ function rowsParaEtiquetasImpressao(
   numerosPorItemId?: Map<string, number | null> | null
 ): EtiquetaParaImpressao[] {
   const loja = (nomeLojaOuLocal && String(nomeLojaOuLocal).trim()) || undefined;
-  return lista.map((e) => ({
-    id: e.id,
-    produtoNome: e.produto?.nome || 'Produto',
-    dataManipulacao: e.data_producao,
-    dataValidade: dataValidadeParaImpressaoEtiqueta(e),
-    lote: e.lote || '-',
-    tokenQr: e.item?.token_qr || e.id,
-    tokenShort: e.item?.token_short || e.id.slice(0, 8).toUpperCase(),
-    responsavel: usuarioNome,
-    nomeLoja: loja,
-    dataGeracaoIso: e.created_at,
-    numeroSequenciaLoja:
-      numerosPorItemId != null ? (numerosPorItemId.get(e.id) ?? null) : (e.numero_sequencia_loja ?? null),
-  }));
+  return lista.map((e) => {
+    const numeroSequenciaLoja =
+      numerosPorItemId != null
+        ? (numerosPorItemId.get(e.id) ?? null)
+        : (e.numero_sequencia_loja ?? null);
+    return {
+      id: e.id,
+      produtoNome: e.produto?.nome || 'Produto',
+      dataManipulacao: e.data_producao,
+      dataValidade: dataValidadeParaImpressaoEtiqueta(e),
+      lote: e.lote || '-',
+      tokenQr: e.item?.token_qr || e.id,
+      tokenShort: e.item?.token_short || e.id.slice(0, 8).toUpperCase(),
+      responsavel: usuarioNome,
+      nomeLoja: loja,
+      dataGeracaoIso: e.created_at,
+      numeroSequenciaLoja,
+    };
+  });
 }
 
-/** Antes de gerar HTML: grava `numero_sequencia_loja` no banco para baldes da remessa SEP-… (quando há destino). */
+/** Antes de gerar HTML: grava `numero_sequencia_loja` no banco para baldes SEP-… (sequência por loja de destino). */
 async function garantirNumerosSequenciaBaldeAntesImpressao(
   lista: EtiquetaRow[],
   destinoLocalId: string | null | undefined
@@ -213,7 +219,6 @@ async function garantirNumerosSequenciaBaldeAntesImpressao(
   if (lista.length === 0) return null;
   const lote = lista[0]?.lote?.trim();
   if (!lote || !lote.startsWith('SEP-')) return null;
-  /** Lote SEP: renumerar 1..N pela remessa **sem** exigir `destino_id` (meta da transferência pode atrasar; sem isso a impressão usava números duplicados do banco). */
   const destinoTrim = String(destinoLocalId || '').trim() || null;
   return upsertEtiquetasSeparacaoLoja(
     lista.map((e) => ({
@@ -346,6 +351,7 @@ export default function EtiquetasPage() {
   const piConnection = somenteZebra6060Industria ? piIndustria.connection : null;
   const piPrintAvailable = Boolean(piConnection);
   const [printing, setPrinting] = useState(false);
+  const [previsualizando, setPrevisualizando] = useState(false);
   const [erroImpressao, setErroImpressao] = useState('');
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(() => new Set());
@@ -396,7 +402,12 @@ export default function EtiquetasPage() {
     setCarregandoOpcoesRemessa(true);
     setErroOpcoesRemessa('');
     try {
-      const opcoes = await buscarOpcoesRemessaSepParaEtiquetas({ origemId: origemIdOpcoesRemessa });
+      const opcoes = await buscarOpcoesRemessaSepParaEtiquetas({
+        origemId: origemIdOpcoesRemessa,
+        /** Indústria (ex. Leonardo): só separações registradas por este usuário — não mistura remessas de outras contas/lojas. */
+        apenasCriadorUsuarioId:
+          loginIndustriaEtiquetas && usuario?.id?.trim() ? usuario.id.trim() : undefined,
+      });
       setOpcoesRemessa(opcoes);
     } catch (err: unknown) {
       setErroOpcoesRemessa(err instanceof Error ? err.message : 'Não foi possível listar remessas');
@@ -404,7 +415,7 @@ export default function EtiquetasPage() {
     } finally {
       setCarregandoOpcoesRemessa(false);
     }
-  }, [origemIdOpcoesRemessa]);
+  }, [origemIdOpcoesRemessa, loginIndustriaEtiquetas, usuario?.id]);
 
   useEffect(() => {
     void carregarOpcoesRemessa();
@@ -728,6 +739,58 @@ export default function EtiquetasPage() {
     }
   };
 
+  const prepararListaMesmaOrdemImpressao = useCallback(
+    (lista: EtiquetaRow[]) =>
+      formatoImpressao === '60x30'
+        ? ordenarEtiquetasPorProdutoParaImpressao(lista)
+        : [...lista],
+    [formatoImpressao]
+  );
+
+  const previsualizarEtiquetas = useCallback(
+    async (lista: EtiquetaRow[]) => {
+      if (lista.length === 0) return;
+      setPrevisualizando(true);
+      setErroImpressao('');
+      try {
+        const ordenada = prepararListaMesmaOrdemImpressao(lista);
+        const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
+        const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
+        const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
+        const payload = rowsParaEtiquetasImpressao(
+          ordenada,
+          usuario?.nome || 'OPERADOR',
+          nomeLojaOuLocalRemessa,
+          numerosMap
+        );
+        const mensagemBarra = somenteZebra6060Industria
+          ? 'O Pi/Zebra recebe este mesmo layout. Feche a aba após conferir e use o botão Zebra 60×60.'
+          : formatoImpressao === '60x30'
+            ? 'O navegador imprimirá nesta ordem, com pares 60×30 por folha (pilhas por lado).'
+            : undefined;
+        const ok = await abrirPreviaEtiquetasEmJanela(payload, formatoImpressao, {
+          preparar60x30PilhasPorLado: formatoImpressao === '60x30' ? true : undefined,
+          mensagemBarra,
+        });
+        if (!ok) {
+          throw new Error('Não foi possível abrir a prévia. Libere pop-ups e tente novamente.');
+        }
+      } catch (err: unknown) {
+        setErroImpressao(err instanceof Error ? err.message : 'Falha ao gerar prévia');
+      } finally {
+        setPrevisualizando(false);
+      }
+    },
+    [
+      formatoImpressao,
+      metaPorViagemId,
+      nomeLojaOuLocalRemessa,
+      prepararListaMesmaOrdemImpressao,
+      somenteZebra6060Industria,
+      usuario?.nome,
+    ]
+  );
+
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -756,30 +819,68 @@ export default function EtiquetasPage() {
             filtradas.filter((e) => !e.impressa).length > 0 && (
             <>
               {!somenteZebra6060Industria && (
-                <Button variant="primary" onClick={() => void imprimirPendentes()} disabled={printing} className="w-full sm:w-auto">
-                  {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
-                  Imprimir pendentes
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      void previsualizarEtiquetas(filtradas.filter((e) => !e.impressa))
+                    }
+                    disabled={previsualizando || printing}
+                    className="w-full sm:w-auto"
+                    title="Abre uma nova aba com o layout exato antes de imprimir"
+                  >
+                    {previsualizando ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Eye className="w-4 h-4 mr-2" />
+                    )}
+                    Ver prévia
+                  </Button>
+                  <Button variant="primary" onClick={() => void imprimirPendentes()} disabled={printing} className="w-full sm:w-auto">
+                    {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
+                    Imprimir pendentes
+                  </Button>
+                </>
               )}
               {mostrarZebra6060 && (
-                <Button
-                  variant="primary"
-                  onClick={() => void imprimirPendentesNoPi()}
-                  disabled={printing || piCfgLoading || !piPrintAvailable}
-                  title={
-                    !piPrintAvailable && !piCfgLoading
-                      ? 'Configure em Configurações → Impressoras'
-                      : 'Zebra 60×60 via Pi indústria'
-                  }
-                  className="w-full sm:w-auto border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white"
-                >
-                  {printing ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Server className="w-4 h-4 mr-2" />
-                  )}
-                  Zebra 60×60 (indústria)
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      void previsualizarEtiquetas(filtradas.filter((e) => !e.impressa))
+                    }
+                    disabled={previsualizando || printing}
+                    className="w-full sm:w-auto border-emerald-800/40 text-emerald-950"
+                    title="Mesmo HTML enviado à Zebra — conferir antes de imprimir"
+                  >
+                    {previsualizando ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Eye className="w-4 h-4 mr-2" />
+                    )}
+                    Ver prévia
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => void imprimirPendentesNoPi()}
+                    disabled={printing || piCfgLoading || !piPrintAvailable}
+                    title={
+                      !piPrintAvailable && !piCfgLoading
+                        ? 'Configure em Configurações → Impressoras'
+                        : 'Zebra 60×60 via Pi indústria'
+                    }
+                    className="w-full sm:w-auto border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white"
+                  >
+                    {printing ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Server className="w-4 h-4 mr-2" />
+                    )}
+                    Zebra 60×60 (indústria)
+                  </Button>
+                </>
               )}
             </>
           )}
@@ -895,8 +996,13 @@ export default function EtiquetasPage() {
               </>
             ) : loginIndustriaEtiquetas ? (
               <>
-                Nenhuma remessa <code className="text-[10px]">SEP-…</code> com origem no seu local da indústria. Remessas
-                criadas a partir do armazém central ficam na lista da equipe de estoque.
+                Nenhuma remessa <code className="text-[10px]">SEP-…</code> da indústria <strong>criada por este login</strong>{' '}
+                (origem no seu local). Remessas registradas por outro usuário ou pelo armazém central não aparecem aqui.
+                Registre em{' '}
+                <Link href="/separar-por-loja" className="text-red-600 underline">
+                  Separar por Loja
+                </Link>{' '}
+                com o mesmo usuário para listar.
               </>
             ) : origemIdOpcoesRemessa ? (
               <>
@@ -1076,7 +1182,26 @@ export default function EtiquetasPage() {
               Troque a remessa no campo acima. A lista por produto fica abaixo.
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                previsualizando ||
+                printing ||
+                carregandoEtiquetasRemessa ||
+                linhasRemessaBulk.length === 0
+              }
+              onClick={() => void previsualizarEtiquetas(linhasRemessaBulk)}
+              title="Pré-visualizar todas as etiquetas ativas desta remessa"
+            >
+              {previsualizando ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Eye className="w-4 h-4 mr-2" />
+              )}
+              Ver prévia — remessa ({linhasRemessaBulk.length})
+            </Button>
             {mostrarZebra6060 && (
               <Button
                 variant="primary"
@@ -1190,7 +1315,23 @@ export default function EtiquetasPage() {
                 </div>
               </div>
               {grupo.pendentes > 0 && (
-                <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      void previsualizarEtiquetas(grupo.etiquetas.filter((et) => !et.impressa))
+                    }
+                    disabled={previsualizando || printing}
+                    title="Prévia só das pendentes deste produto"
+                  >
+                    {previsualizando ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Eye className="w-4 h-4 mr-2" />
+                    )}
+                    Prévia ({grupo.pendentes})
+                  </Button>
                   {!somenteZebra6060Industria && (
                     <Button variant="primary" onClick={() => void imprimirGrupo(grupo)} disabled={printing}>
                       {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
@@ -1241,6 +1382,23 @@ export default function EtiquetasPage() {
                     </Badge>
                   </div>
                   <div className="flex gap-1 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      aria-label="Ver prévia desta etiqueta"
+                      title="Prévia numa nova aba"
+                      disabled={previsualizando}
+                      onClick={() => {
+                        setErroImpressao('');
+                        void previsualizarEtiquetas([e]);
+                      }}
+                      className="p-2 text-gray-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg disabled:opacity-40"
+                    >
+                      {previsualizando ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
                     {!somenteZebra6060Industria && (
                       <button
                         type="button"
