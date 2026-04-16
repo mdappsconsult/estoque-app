@@ -22,6 +22,7 @@ import {
   type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
+import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
 
 function novaLinhaInsumo() {
   return {
@@ -80,13 +81,14 @@ export default function ProducaoPage() {
   const [confirmacaoAberta, setConfirmacaoAberta] = useState(false);
   const [erroConfirmacao, setErroConfirmacao] = useState('');
   const diasValidadeNumero = Number(form.dias_validade);
-  const dataValidadePrevista = Number.isInteger(diasValidadeNumero) && diasValidadeNumero > 0
-    ? (() => {
-        const data = new Date();
-        data.setDate(data.getDate() + diasValidadeNumero);
-        return data.toISOString().slice(0, 10);
-      })()
-    : null;
+  const dataValidadePrevista = useMemo(() => {
+    if (!Number.isInteger(diasValidadeNumero) || diasValidadeNumero <= 0) return null;
+    try {
+      return calcularDataValidadeYmdAposDiasCorridosBr(diasValidadeNumero);
+    } catch {
+      return null;
+    }
+  }, [diasValidadeNumero]);
   const produtoSelecionadoNome = produtos.find((produto) => produto.id === form.produto_id)?.nome || '-';
   const localSelecionadoNome = warehouses.find((local) => local.id === form.local_id)?.nome || '-';
 

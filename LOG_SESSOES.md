@@ -1,5 +1,34 @@
 # Log de Sessões
 
+### Sessão - 2026-04-16 - Produção: validade por dias em calendário BR + etiqueta sem “um dia a menos”
+- **Problema:** validade do acabado parecia “presa” ao primeiro cálculo ou dia errado: `toISOString().slice(0,10)` após `setDate` usa **dia UTC**, não o calendário de Brasília; na etiqueta, `new Date('YYYY-MM-DD')` vira meia-noite **UTC** e em pt-BR aparecia **um dia antes**.
+- **Mudança:** `src/lib/datas/validade-producao-br.ts` — `calcularDataValidadeYmdAposDiasCorridosBr` (hoje em `America/Sao_Paulo` + N dias) e `formatarValidadeDdMmAaEtiquetaBr` (prioriza prefixo `YYYY-MM-DD`). **`registrarProducaoComItens`** e prévia em **`/producao`** usam o mesmo cálculo; **`formatarValidadeEtiquetaIndustria`** (60×60) usa o formatador seguro.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-16 - Etiquetas: Leonardo vê todas as remessas SEP da indústria
+- **Pedido:** funcionário Leonardo deve visualizar **todos** os lançamentos da indústria (remessas `SEP-…`).
+- **Mudança:** em **`/etiquetas`**, removido o filtro `apenasCriadorUsuarioId` em `buscarOpcoesRemessaSepParaEtiquetas` para logins indústria (60×60 / `usuarioIndustriaSemConsultaEstoque`). Lista de lotes alinhada às demais telas da matriz (origem = `local_padrao_id`), sem restringir a `transferencias.criado_por`.
+- **Impacto:** Leonardo (e demais logins em `NEXT_PUBLIC_ETIQUETAS_INDUSTRIA_LOGINS`) passam a ver separações registradas por **qualquer** usuário da indústria.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-16 - Validade SEP Indústria (Delivery / Balde 11L) 15/04 → 22/04
+- **Problema:** etiquetas **Indústria** com lote **`SEP-…`** (ex.: envio **Delivery**, Açaí Balde 11L) continuavam **Val. 15/04/26** na impressão; o SQL antigo filtrava só `created_at = 16/04`, mas no banco o `created_at` dessas linhas **não** era 16 (ex.: 10/04 no ref do MCP).
+- **Mudança:** `UPDATE` em **`etiquetas`** e **`itens`**: local **«Indústria»**, `lote LIKE 'SEP-%'`, validade ainda **15/04/2026** → **22/04/2026** (MCP: **33** linhas). Ordem: `itens` antes de `etiquetas` (mesmo critério `EXISTS`).
+- **Doc:** `docs/consultas-sql/correcao-validade-etiquetas-industria-2026-04-16.sql` — bloco **(A) SEP**.
+- **Produção:** se o app ainda mostrar 15/04, rodar o mesmo SQL no Supabase do **Railway** (ref pode diferir do dev).
+
+### Sessão - 2026-04-16 - Reverter validade no local Estoque (não devia mudar)
+- **Pedido:** «Estoque» não era para alterar; deixar como era (**15/04/2026**).
+- **Mudança:** no Postgres do MCP, **550** etiquetas + **550** itens no local **«Estoque»** (geradas **16/04/2026**) revertidos de **22/04** para **15/04/2026**. Script para outros ambientes: **`docs/consultas-sql/reverter-validade-estoque-2026-04-16.sql`**. **`correcao-validade-etiquetas-industria-2026-04-16.sql`** fica só para **Indústria** (variante Estoque removida).
+- **Validação:** contagens pós-update; `itens` corrigidos em segundo `UPDATE` (ordem após `etiquetas`).
+
+### Sessão - 2026-04-16 - Correção de validade (etiquetas indústria 16/04 → 22/04/2026)
+- **Pedido:** alterar validade das etiquetas geradas em **16/04/2026**, somente **indústria** (local `WAREHOUSE`), para **22/04/2026**.
+- **Mudança (1ª rodada):** SQL no MCP: `WAREHOUSE` + criadas em **16/04** → **550** etiquetas (no ref do MCP todas eram local **«Estoque»**, não «Indústria»), validade **22/04**.
+- **Ajuste (2ª rodada):** o operador ainda via **15/04/2026** onde o banco de **produção** grava no local **«Indústria»** (ou o MCP ≠ Railway). Script **`docs/consultas-sql/correcao-validade-etiquetas-industria-2026-04-16.sql`** refeito: filtro **`locais.nome = 'Indústria'`** + **`data_validade` ainda no dia 15/04/2026** + criadas em 16/04; variante comentada para **«Estoque»** se aplicável. Rodar no **Supabase de produção** o bloco certo.
+- **Impacto:** impressão / QR alinhados a **22/04/2026** para o conjunto filtrado.
+- **Validação:** diagnóstico por `nome` do local; MCP sem linhas em Indústria no dia 16 (0); produção depende do ref Railway.
+
 ### Sessão - 2026-04-15 - `registrado_por`: código alinhado ao banco (sem fallback)
 - **Pedido:** alinhar perfeitamente — sem retry sem a coluna.
 - **Mudança:** removidos `postgrestColunaAusenteNoSchemaCache` e o segundo insert em **`producoes`** (`producao.ts`) e **`lotes_compra`** (`lotes-compra.ts`); removido `src/lib/supabase/postgrest-coluna-schema-cache.ts`. Inserts **sempre** enviam `registrado_por`; exige migração **`20260410140000_lotes_producoes_registrado_por.sql`** no Supabase do ambiente.

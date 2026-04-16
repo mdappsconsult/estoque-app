@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { formatarValidadeDdMmAaEtiquetaBr } from '@/lib/datas/validade-producao-br';
 
 export type FormatoEtiqueta = '60x30' | '60x60' | '58x40' | '50x30';
 
@@ -139,14 +140,9 @@ function formatarDataPtBr(dataIso: string): string {
   return data.toLocaleDateString('pt-BR');
 }
 
-/** Validade na etiqueta 60×60 indústria: dd/mm/aa */
+/** Validade na etiqueta 60×60 indústria: dd/mm/aa (prefixo YYYY-MM-DD = dia civil, sem deslocar por UTC). */
 function formatarValidadeEtiquetaIndustria(dataIso: string): string {
-  const data = new Date(dataIso);
-  if (Number.isNaN(data.getTime())) return '-';
-  const d = String(data.getDate()).padStart(2, '0');
-  const m = String(data.getMonth() + 1).padStart(2, '0');
-  const y = String(data.getFullYear() % 100).padStart(2, '0');
-  return `${d}/${m}/${y}`;
+  return formatarValidadeDdMmAaEtiquetaBr(dataIso);
 }
 
 function extrairVolumeProduto(nome: string): string {

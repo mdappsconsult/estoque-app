@@ -5,6 +5,7 @@ import { gerarLote } from './etiquetas';
 import { EtiquetaInsert, Item } from '@/types/database';
 import { recalcularEstoqueProduto, recalcularEstoqueProdutos } from './estoque-sync';
 import { garantirItensDisponiveisNoLocal } from './lotes-compra';
+import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
 
 export interface ConsumoProducaoLinha {
   produtoId: string;
@@ -32,16 +33,6 @@ export interface EtiquetaGeradaProducao {
   lote: string;
   tokenQr: string;
   tokenShort: string | null;
-}
-
-function calcularDataValidadePorDias(diasValidade: number): string {
-  if (!Number.isInteger(diasValidade) || diasValidade <= 0) {
-    throw new Error('Dias de validade deve ser um número inteiro maior que zero');
-  }
-
-  const data = new Date();
-  data.setDate(data.getDate() + diasValidade);
-  return data.toISOString().slice(0, 10);
 }
 
 function mergeConsumos(linhas: ConsumoProducaoLinha[]): ConsumoProducaoLinha[] {
@@ -96,7 +87,9 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
 
   const dataValidadeCalculada =
     input.dataValidade ||
-    (typeof input.diasValidade === 'number' ? calcularDataValidadePorDias(input.diasValidade) : null);
+    (typeof input.diasValidade === 'number'
+      ? calcularDataValidadeYmdAposDiasCorridosBr(input.diasValidade)
+      : null);
   if (!dataValidadeCalculada) {
     throw new Error('Informe a data de validade ou os dias de validade');
   }

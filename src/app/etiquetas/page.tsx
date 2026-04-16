@@ -404,9 +404,7 @@ export default function EtiquetasPage() {
     try {
       const opcoes = await buscarOpcoesRemessaSepParaEtiquetas({
         origemId: origemIdOpcoesRemessa,
-        /** Indústria (ex. Leonardo): só separações registradas por este usuário — não mistura remessas de outras contas/lojas. */
-        apenasCriadorUsuarioId:
-          loginIndustriaEtiquetas && usuario?.id?.trim() ? usuario.id.trim() : undefined,
+        /** Indústria (Leonardo / logins 60×60): todas as remessas SEP da origem (`local_padrao_id`), como nas demais telas da indústria. */
       });
       setOpcoesRemessa(opcoes);
     } catch (err: unknown) {
@@ -415,7 +413,7 @@ export default function EtiquetasPage() {
     } finally {
       setCarregandoOpcoesRemessa(false);
     }
-  }, [origemIdOpcoesRemessa, loginIndustriaEtiquetas, usuario?.id]);
+  }, [origemIdOpcoesRemessa]);
 
   useEffect(() => {
     void carregarOpcoesRemessa();
