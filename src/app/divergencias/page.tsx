@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   Package,
+  Warehouse,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
@@ -60,7 +61,12 @@ export default function DivergenciasPage() {
   const [agruparRemessa, setAgruparRemessa] = useState(true);
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [entradaLoadingId, setEntradaLoadingId] = useState<string | null>(null);
   const [resolverErro, setResolverErro] = useState<string | null>(null);
+  const [entradaModal, setEntradaModal] = useState<DivergenciaAdminRow | null>(null);
+  const [entradaLogin, setEntradaLogin] = useState('');
+  const [entradaSenha, setEntradaSenha] = useState('');
+  const [entradaErro, setEntradaErro] = useState<string | null>(null);
   const carregarRef = useRef<() => Promise<void>>(async () => {});
   const loadOpcoesRemessasRef = useRef<() => Promise<void>>(async () => {});
 
@@ -123,6 +129,14 @@ export default function DivergenciasPage() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    if (!entradaModal) return;
+    const op = usuario?.login_operacional?.trim();
+    setEntradaLogin(op ?? '');
+    setEntradaSenha('');
+    setEntradaErro(null);
+  }, [entradaModal, usuario?.login_operacional]);
 
   useEffect(() => {
     const ch = supabase
@@ -190,6 +204,43 @@ export default function DivergenciasPage() {
     setActionLoading(null);
   };
 
+  const handleConfirmarEntradaLoja = async () => {
+    if (!entradaModal) return;
+    const loginOp = entradaLogin.trim().toLowerCase();
+    if (!loginOp) {
+      setEntradaErro('Informe o login operacional.');
+      return;
+    }
+    if (!entradaSenha) {
+      setEntradaErro('Informe a senha.');
+      return;
+    }
+    setEntradaErro(null);
+    setEntradaLoadingId(entradaModal.id);
+    try {
+      const res = await fetch('/api/operacional/dar-entrada-faltante-divergencia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          divergenciaId: entradaModal.id,
+          login: loginOp,
+          senha: entradaSenha,
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(payload.error || 'Falha ao registrar entrada na loja');
+      }
+      setEntradaModal(null);
+      setEntradaSenha('');
+      await carregar();
+    } catch (err: unknown) {
+      setEntradaErro(errMessage(err, 'Erro ao registrar entrada'));
+    } finally {
+      setEntradaLoadingId(null);
+    }
+  };
+
   const renderLinha = (d: DivergenciaAdminRow) => (
     <div
       key={d.id}
@@ -216,15 +267,31 @@ export default function DivergenciasPage() {
             <CheckCircle className="w-4 h-4" /> {d.resolvedor?.nome ?? 'Resolvida'}
           </div>
         ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleResolver(d.id)}
-            disabled={actionLoading === d.id}
-          >
-            {actionLoading === d.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            Resolver
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+            {d.tipo === 'FALTANTE' ? (
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                onClick={() => setEntradaModal(d)}
+                disabled={!!actionLoading || entradaLoadingId === d.id}
+                className="whitespace-nowrap"
+              >
+                <Warehouse className="w-3.5 h-3.5 mr-1 shrink-0" />
+                Dar entrada na loja
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => handleResolver(d.id)}
+              disabled={actionLoading === d.id || entradaLoadingId === d.id}
+            >
+              {actionLoading === d.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+              Resolver
+            </Button>
+          </div>
         )}
       </div>
     </div>
@@ -240,6 +307,74 @@ export default function DivergenciasPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-2 sm:px-0">
+      {entradaModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="entrada-faltante-titulo"
+        >
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-md w-full p-4 space-y-3">
+            <h2 id="entrada-faltante-titulo" className="text-lg font-semibold text-gray-900">
+              Dar entrada na loja (faltante)
+            </h2>
+            <p className="text-sm text-gray-600">
+              Confirma que a unidade foi localizada e deve ficar no estoque de{' '}
+              <strong>{normTransf(entradaModal.transferencia)?.destino?.nome ?? 'destino'}</strong>. O
+              sistema marcará a linha como recebida e atualizará o estoque agregado.
+            </p>
+            <p className="text-xs text-gray-500 font-mono truncate" title={entradaModal.item?.token_qr}>
+              {entradaModal.item?.produto?.nome ?? 'Produto'} · QR {tokenCurto(entradaModal)}
+            </p>
+            {entradaErro ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {entradaErro}
+              </div>
+            ) : null}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Login operacional</label>
+              <input
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                autoComplete="username"
+                value={entradaLogin}
+                onChange={(e) => setEntradaLogin(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Senha</label>
+              <input
+                type="password"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                autoComplete="current-password"
+                value={entradaSenha}
+                onChange={(e) => setEntradaSenha(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setEntradaModal(null)}
+                disabled={!!entradaLoadingId}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => void handleConfirmarEntradaLoja()}
+                disabled={!!entradaLoadingId}
+              >
+                {entradaLoadingId ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                Confirmar entrada
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center shrink-0">
           <AlertTriangle className="w-5 h-5 text-yellow-600" />
@@ -248,6 +383,8 @@ export default function DivergenciasPage() {
           <h1 className="text-2xl font-bold text-gray-900">Divergências</h1>
           <p className="text-sm text-gray-500">
             Faltante = esperado na remessa e não escaneado ao confirmar. Excedente = QR lido mas não pertencia à remessa.
+            Para faltante localizado depois, use <strong>Dar entrada na loja</strong> (credencial do gestor); «Resolver»
+            apenas encerra o registro sem mover estoque.
           </p>
         </div>
         <span className="ml-auto sm:ml-0">

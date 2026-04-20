@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
+import { LogoKim } from '@/components/branding/LogoKim';
 import { PerfilUsuario } from '@/types/database';
 
 type HomeFeature = {
@@ -178,11 +179,19 @@ export default function Home() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          {usuario ? `Olá, ${usuario.nome}` : 'Home'}
-        </h1>
-        <p className="text-gray-500 mt-1">Navegação organizada por prioridade de trabalho</p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <LogoKim className="max-h-12 w-auto shrink-0 rounded-md" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {usuario ? `Olá, ${usuario.nome}` : 'Home'}
+              </h1>
+              <p className="text-gray-500 text-sm mt-0.5">Açaí do Kim — operações</p>
+            </div>
+          </div>
+          <p className="text-gray-500 text-sm">Navegação organizada por prioridade de trabalho</p>
+        </div>
       </div>
 
       <div className="space-y-8">

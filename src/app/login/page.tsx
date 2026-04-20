@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Loader2, LogIn, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import { LogoKim } from '@/components/branding/LogoKim';
 import { useAuth } from '@/hooks/useAuth';
 import { autenticarOperacional } from '@/lib/services/acesso';
 
@@ -31,15 +32,11 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 -mt-14">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-8">
       <div className="w-full max-w-sm mx-auto p-6">
-        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl font-bold text-white">E</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Estoque QR</h1>
-          <p className="text-gray-500 mt-1">Controle de estoque unitário</p>
+          <LogoKim className="max-h-36 w-auto mx-auto mb-3" priority />
+          <p className="text-gray-600 text-sm font-medium">Controle de estoque unitário</p>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">

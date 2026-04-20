@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ChevronLeft, LogOut, Timer } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useValidadeAlert } from '@/components/validade/ValidadeAlertProvider';
+import { LogoKim } from '@/components/branding/LogoKim';
 
 export default function MobileHeader() {
   const pathname = usePathname();
@@ -38,12 +39,10 @@ export default function MobileHeader() {
             <ChevronLeft className="w-5 h-5" />
           </Link>
         )}
-        <span className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center text-red-600 font-bold">
-          E
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-gray-900">Estoque QR</p>
-          <p className="text-xs text-gray-500">{usuario?.nome || 'Mobile'}</p>
+        <LogoKim className="max-h-9 w-auto shrink-0 rounded-md" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900 truncate">Açaí do Kim</p>
+          <p className="text-xs text-gray-500 truncate">{usuario?.nome || '—'}</p>
         </div>
       </div>
 

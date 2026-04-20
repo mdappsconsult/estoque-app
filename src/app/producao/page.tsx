@@ -70,6 +70,10 @@ export default function ProducaoPage() {
     lote: string;
     tokenQr: string;
     tokenShort: string | null;
+    numeroLoteProducao: number;
+    sequenciaNoLote: number;
+    numBaldesLote: number;
+    dataLoteProducaoIso: string;
   }>>([]);
   const [produtoParaImpressao, setProdutoParaImpressao] = useState('Produto');
   const [localParaImpressao, setLocalParaImpressao] = useState('Indústria');
@@ -185,6 +189,10 @@ export default function ProducaoPage() {
           lote: etiqueta.lote,
           tokenQr: etiqueta.tokenQr,
           tokenShort: etiqueta.tokenShort,
+          numeroLoteProducao: etiqueta.numeroLoteProducao,
+          sequenciaNoLote: etiqueta.sequenciaNoLote,
+          numBaldesLote: etiqueta.numBaldesLote,
+          dataLoteProducaoIso: etiqueta.dataLoteProducaoIso,
         }))
       );
 
@@ -222,6 +230,10 @@ export default function ProducaoPage() {
       responsavel: usuario?.nome || 'OPERADOR',
       nomeLoja: nomeLocal,
       dataGeracaoIso: agora,
+      loteProducaoNumero: etiqueta.numeroLoteProducao,
+      sequenciaNoLote: etiqueta.sequenciaNoLote,
+      numBaldesLoteProducao: etiqueta.numBaldesLote,
+      dataLoteProducaoIso: etiqueta.dataLoteProducaoIso,
     }));
   };
 
@@ -269,16 +281,20 @@ export default function ProducaoPage() {
         produtoNome: produtoSelecionadoNome,
         dataManipulacao: agora,
         dataValidade: valIso,
-        lote: 'Após confirmar — lote gerado no registro',
+        lote: 'PREVIA',
         tokenQr: `PREVIA-PRODUCAO-${i + 1}`,
         tokenShort: `PREV${i + 1}`,
         responsavel: usuario?.nome?.trim() || 'OPERADOR',
         nomeLoja: localSelecionadoNome,
         dataGeracaoIso: agora,
         numeroSequenciaLoja: i + 1,
+        loteProducaoNumero: 99,
+        sequenciaNoLote: i + 1,
+        numBaldesLoteProducao: numBaldesInt,
+        dataLoteProducaoIso: agora,
       }));
       const ok = await abrirPreviaEtiquetasEmJanela(payload, FORMATO_ETIQUETA_INDUSTRIA, {
-        mensagemBarra: `Amostra de ${amostras} etiqueta(s) com estes dados. Total ao registrar: ${numBaldesInt}. Tokens e lote reais só após confirmar o registro.`,
+        mensagemBarra: `Amostra de ${amostras} etiqueta(s). Total ao registrar: ${numBaldesInt}. Número de lote/sequência reais só após confirmar o registro (ex.: Lote prod. 99 é fictício na prévia).`,
       });
       if (!ok) throw new Error('Não foi possível abrir a prévia. Libere pop-ups.');
     } catch (e: unknown) {

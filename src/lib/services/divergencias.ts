@@ -1,6 +1,8 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { Divergencia } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
+import { recalcularEstoqueProduto } from './estoque-sync';
 
 const SELECT_DIV_ADMIN = `
   id, transferencia_id, item_id, tipo, resolvido, created_at, resolvido_por,
@@ -279,4 +281,120 @@ export async function resolverDivergencia(id: string, usuarioId: string): Promis
     acao: 'RESOLVER_DIVERGENCIA',
     detalhes: { divergencia_id: id },
   });
+}
+
+function unwrapEmbed<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? v[0] ?? null : v;
+}
+
+/**
+ * Gestor confirma o faltante físico: marca `recebido` na remessa, move o item para o **local destino**
+ * (`EM_ESTOQUE`), recalcula agregado e fecha a divergência. Usar com **service role** na API.
+ */
+export async function darEntradaFaltanteNaLojaDivergencia(
+  divergenciaId: string,
+  usuarioId: string,
+  client: SupabaseClient
+): Promise<void> {
+  const { data: raw, error: eDiv } = await client
+    .from('divergencias')
+    .select(
+      `id, transferencia_id, item_id, tipo, resolvido, transferencia:transferencias(id, destino_id, status)`
+    )
+    .eq('id', divergenciaId)
+    .single();
+
+  if (eDiv) throw new Error(eDiv.message);
+  if (!raw) throw new Error('Divergência não encontrada');
+
+  if (raw.resolvido) {
+    throw new Error('Esta divergência já foi resolvida.');
+  }
+  if (raw.tipo !== 'FALTANTE') {
+    throw new Error('Só é possível dar entrada automática para divergências do tipo faltante.');
+  }
+
+  const tr = unwrapEmbed(
+    raw.transferencia as unknown as { id: string; destino_id: string; status: string } | null
+  );
+  if (!tr?.destino_id) {
+    throw new Error('Remessa não encontrada.');
+  }
+  if (tr.status !== 'DIVERGENCE') {
+    throw new Error(
+      'A remessa não está em status «Divergência». Só é possível dar entrada após o recebimento com divergência.'
+    );
+  }
+
+  const destinoId = tr.destino_id;
+  const transId = raw.transferencia_id as string;
+  const itemId = raw.item_id as string;
+
+  const { data: ti, error: eTi } = await client
+    .from('transferencia_itens')
+    .select('recebido')
+    .eq('transferencia_id', transId)
+    .eq('item_id', itemId)
+    .maybeSingle();
+  if (eTi) throw new Error(eTi.message);
+  if (!ti) {
+    throw new Error('Item não pertence a esta remessa.');
+  }
+
+  const { data: item, error: eItem } = await client
+    .from('itens')
+    .select('id, produto_id, estado, local_atual_id')
+    .eq('id', itemId)
+    .single();
+  if (eItem || !item) {
+    throw new Error('Item não encontrado.');
+  }
+
+  const destinoOk = item.estado === 'EM_ESTOQUE' && item.local_atual_id === destinoId;
+
+  if (!destinoOk) {
+    if (item.estado === 'BAIXADO' || item.estado === 'DESCARTADO') {
+      throw new Error('O item não pode entrar no estoque (estado inválido).');
+    }
+  }
+
+  if (!ti.recebido) {
+    const { error: eUpTi } = await client
+      .from('transferencia_itens')
+      .update({ recebido: true })
+      .eq('transferencia_id', transId)
+      .eq('item_id', itemId);
+    if (eUpTi) throw new Error(eUpTi.message);
+  }
+
+  if (!destinoOk) {
+    const { error: eUpIt } = await client
+      .from('itens')
+      .update({ local_atual_id: destinoId, estado: 'EM_ESTOQUE' })
+      .eq('id', itemId);
+    if (eUpIt) throw new Error(eUpIt.message);
+    await recalcularEstoqueProduto(String(item.produto_id), client);
+  }
+
+  const { error: eRes } = await client
+    .from('divergencias')
+    .update({ resolvido: true, resolvido_por: usuarioId })
+    .eq('id', divergenciaId);
+  if (eRes) throw new Error(eRes.message);
+
+  await registrarAuditoria(
+    {
+      usuario_id: usuarioId,
+      local_id: destinoId,
+      item_id: itemId,
+      acao: 'ENTRADA_FALTANTE_DIVERGENCIA_LOJA',
+      detalhes: {
+        divergencia_id: divergenciaId,
+        transferencia_id: transId,
+        apenas_marcou_recebido: destinoOk,
+      },
+    },
+    client
+  );
 }

@@ -55,11 +55,31 @@ export async function getProducoes(): Promise<(Producao & { produto: { nome: str
 }
 
 export async function createProducao(producao: ProducaoInsert): Promise<Producao> {
+  const numBaldes = producao.num_baldes ?? producao.quantidade;
+  let numeroLote = producao.numero_lote_producao;
+  if (numeroLote == null) {
+    const lid = producao.local_id?.trim();
+    if (!lid) {
+      throw new Error('local_id é obrigatório para registrar produção e reservar número de lote.');
+    }
+    const { data: rpcRaw, error: rpcErr } = await supabase.rpc('reservar_numero_lote_producao', {
+      p_produto_id: producao.produto_id,
+      p_local_id: lid,
+    });
+    if (rpcErr) throw rpcErr;
+    numeroLote =
+      typeof rpcRaw === 'number' ? rpcRaw : typeof rpcRaw === 'string' ? parseInt(rpcRaw, 10) : NaN;
+    if (!Number.isFinite(numeroLote)) {
+      throw new Error('Falha ao reservar número de lote de produção.');
+    }
+  }
+
   const { data, error } = await supabase
     .from('producoes')
     .insert({
       ...producao,
-      num_baldes: producao.num_baldes ?? producao.quantidade,
+      num_baldes: numBaldes,
+      numero_lote_producao: numeroLote,
     })
     .select()
     .single();

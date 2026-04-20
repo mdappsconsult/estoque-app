@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseAdmin } from '@/lib/supabase/admin';
+import { errMessage } from '@/lib/errMessage';
 import { validarCredencialOperacional } from '@/lib/services/operacional-auth-server';
 import {
   criarSeparacaoMatrizLojaAtomica,
@@ -106,7 +107,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(resultado);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Falha ao registrar separação';
+    const msg = errMessage(e, 'Falha ao registrar separação');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

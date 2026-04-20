@@ -230,6 +230,7 @@ export type Database = {
           observacoes: string | null;
           registrado_por: string | null;
           created_at: string;
+          numero_lote_producao: number;
         };
         Insert: {
           id?: string;
@@ -242,6 +243,7 @@ export type Database = {
           observacoes?: string | null;
           registrado_por?: string | null;
           created_at?: string;
+          numero_lote_producao?: number;
         };
         Update: {
           id?: string;
@@ -253,6 +255,7 @@ export type Database = {
           responsavel?: string;
           observacoes?: string | null;
           registrado_por?: string | null;
+          numero_lote_producao?: number;
         };
       };
       producao_consumo_itens: {
@@ -330,6 +333,10 @@ export type Database = {
           excluida: boolean;
           created_at: string;
           numero_sequencia_loja: number | null;
+          lote_producao_numero: number | null;
+          sequencia_no_lote_producao: number | null;
+          data_lote_producao: string | null;
+          num_baldes_lote_producao: number | null;
         };
         Insert: {
           id?: string;
@@ -341,6 +348,10 @@ export type Database = {
           excluida?: boolean;
           created_at?: string;
           numero_sequencia_loja?: number | null;
+          lote_producao_numero?: number | null;
+          sequencia_no_lote_producao?: number | null;
+          data_lote_producao?: string | null;
+          num_baldes_lote_producao?: number | null;
         };
         Update: {
           id?: string;
@@ -351,6 +362,10 @@ export type Database = {
           impressa?: boolean;
           excluida?: boolean;
           numero_sequencia_loja?: number | null;
+          lote_producao_numero?: number | null;
+          sequencia_no_lote_producao?: number | null;
+          data_lote_producao?: string | null;
+          num_baldes_lote_producao?: number | null;
         };
       };
       estoque: {
@@ -613,6 +628,8 @@ export type Database = {
           data_validade: string | null;
           data_producao: string | null;
           created_at: string;
+          producao_id: string | null;
+          sequencia_no_lote_producao: number | null;
         };
         Insert: {
           id?: string;
@@ -625,6 +642,8 @@ export type Database = {
           data_validade?: string | null;
           data_producao?: string | null;
           created_at?: string;
+          producao_id?: string | null;
+          sequencia_no_lote_producao?: number | null;
         };
         Update: {
           id?: string;
@@ -636,6 +655,8 @@ export type Database = {
           estado?: 'EM_ESTOQUE' | 'EM_TRANSFERENCIA' | 'BAIXADO' | 'DESCARTADO';
           data_validade?: string | null;
           data_producao?: string | null;
+          producao_id?: string | null;
+          sequencia_no_lote_producao?: number | null;
         };
       };
       viagens: {
@@ -832,6 +853,10 @@ export type Database = {
       };
       reservar_sequencia_balde_loja: {
         Args: { p_local_destino_id: string; p_quantidade: number };
+        Returns: number;
+      };
+      reservar_numero_lote_producao: {
+        Args: { p_produto_id: string; p_local_id: string };
         Returns: number;
       };
     };

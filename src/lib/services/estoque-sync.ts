@@ -1,20 +1,24 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 /**
  * Agregado global por produto: itens EM_ESTOQUE + saldo de compra ainda não emitido como QR
  * (quantidade do lote − itens já vinculados ao lote).
  */
-export async function recalcularEstoqueProduto(produtoId: string): Promise<void> {
+export async function recalcularEstoqueProduto(
+  produtoId: string,
+  client: SupabaseClient = supabase
+): Promise<void> {
   if (!produtoId) return;
 
-  const { count: itemCount, error: countError } = await supabase
+  const { count: itemCount, error: countError } = await client
     .from('itens')
     .select('id', { count: 'exact', head: true })
     .eq('produto_id', produtoId)
     .eq('estado', 'EM_ESTOQUE');
   if (countError) throw countError;
 
-  const { data: lotes, error: lotesError } = await supabase
+  const { data: lotes, error: lotesError } = await client
     .from('lotes_compra')
     .select('id, quantidade')
     .eq('produto_id', produtoId);
@@ -23,7 +27,7 @@ export async function recalcularEstoqueProduto(produtoId: string): Promise<void>
   const loteIds = (lotes || []).map((l) => l.id);
   const mintByLote = new Map<string, number>();
   if (loteIds.length > 0) {
-    const { data: mintRows, error: mintErr } = await supabase
+    const { data: mintRows, error: mintErr } = await client
       .from('itens')
       .select('lote_compra_id')
       .in('lote_compra_id', loteIds);
@@ -43,7 +47,7 @@ export async function recalcularEstoqueProduto(produtoId: string): Promise<void>
 
   const quantidade = (itemCount ?? 0) + bulkTotal;
 
-  const { error: upsertError } = await supabase
+  const { error: upsertError } = await client
     .from('estoque')
     .upsert(
       {
@@ -56,9 +60,12 @@ export async function recalcularEstoqueProduto(produtoId: string): Promise<void>
   if (upsertError) throw upsertError;
 }
 
-export async function recalcularEstoqueProdutos(produtoIds: string[]): Promise<void> {
+export async function recalcularEstoqueProdutos(
+  produtoIds: string[],
+  client: SupabaseClient = supabase
+): Promise<void> {
   const idsUnicos = Array.from(new Set(produtoIds.filter(Boolean)));
   for (const produtoId of idsUnicos) {
-    await recalcularEstoqueProduto(produtoId);
+    await recalcularEstoqueProduto(produtoId, client);
   }
 }

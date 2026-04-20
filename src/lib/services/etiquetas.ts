@@ -30,6 +30,7 @@ function validadeItemParaEtiqueta(item: UpsertEtiquetaSeparacaoItem): string {
 }
 
 const CHUNK_TRANSF_SEP_DESTINO = 200;
+const CHUNK_TRANSFERENCIA_IDS_IN = 120;
 
 async function destinoPorItemIdViagemSep(
   client: SupabaseClient,
@@ -119,6 +120,24 @@ type LinhaMergeSep = {
   impressa: boolean;
   lote: string;
   numero_sequencia_loja: number | null;
+  lote_producao_numero: number | null;
+  sequencia_no_lote_producao: number | null;
+  data_lote_producao: string | null;
+  num_baldes_lote_producao: number | null;
+};
+
+type BaselineEtiquetaRow = {
+  id: string;
+  produto_id: string;
+  data_validade: string;
+  data_producao: string;
+  impressa: boolean;
+  numero_sequencia_loja: number | null;
+  lote: string | null;
+  lote_producao_numero: number | null;
+  sequencia_no_lote_producao: number | null;
+  data_lote_producao: string | null;
+  num_baldes_lote_producao: number | null;
 };
 
 /**
@@ -149,30 +168,45 @@ export async function upsertEtiquetasSeparacaoLoja(
 
   const ids = itensUnicos.map((i) => i.id);
 
-  let etiquetasExistentesNoLote: {
-    id: string;
-    produto_id: string;
-    data_validade: string;
-    data_producao: string;
-    impressa: boolean;
-    numero_sequencia_loja: number | null;
-  }[] = [];
-  if (isLoteSep) {
+  const baselineById = new Map<string, BaselineEtiquetaRow>();
+  const chunkBas = 400;
+  for (let i = 0; i < ids.length; i += chunkBas) {
+    const slice = ids.slice(i, i + chunkBas);
     const { data, error } = await client
       .from('etiquetas')
-      .select('id, produto_id, data_validade, data_producao, impressa, numero_sequencia_loja')
-      .eq('lote', loteNorm)
+      .select(
+        'id, produto_id, data_validade, data_producao, impressa, numero_sequencia_loja, lote, lote_producao_numero, sequencia_no_lote_producao, data_lote_producao, num_baldes_lote_producao'
+      )
+      .in('id', slice)
       .eq('excluida', false);
     if (error) throw error;
-    etiquetasExistentesNoLote = (data || []) as typeof etiquetasExistentesNoLote;
+    for (const row of data || []) {
+      const r = row as Record<string, unknown>;
+      const nSeq = r.numero_sequencia_loja;
+      const nLoteP = r.lote_producao_numero;
+      const nSeqL = r.sequencia_no_lote_producao;
+      const nBaldes = r.num_baldes_lote_producao;
+      baselineById.set(String(r.id), {
+        id: String(r.id),
+        produto_id: String(r.produto_id),
+        data_validade: String(r.data_validade),
+        data_producao: String(r.data_producao),
+        impressa: Boolean(r.impressa),
+        numero_sequencia_loja:
+          nSeq != null && Number.isFinite(Number(nSeq)) ? Number(nSeq) : null,
+        lote: (r.lote as string | null) ?? null,
+        lote_producao_numero:
+          nLoteP != null && Number.isFinite(Number(nLoteP)) ? Number(nLoteP) : null,
+        sequencia_no_lote_producao:
+          nSeqL != null && Number.isFinite(Number(nSeqL)) ? Number(nSeqL) : null,
+        data_lote_producao: r.data_lote_producao != null ? String(r.data_lote_producao) : null,
+        num_baldes_lote_producao:
+          nBaldes != null && Number.isFinite(Number(nBaldes)) ? Number(nBaldes) : null,
+      });
+    }
   }
 
-  const produtoIds = [
-    ...new Set([
-      ...itensUnicos.map((i) => i.produto_id),
-      ...etiquetasExistentesNoLote.map((r) => String(r.produto_id)),
-    ]),
-  ];
+  const produtoIds = [...new Set(itensUnicos.map((i) => i.produto_id))];
 
   const produtosPorId = new Map<string, { origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS'; nome: string }>();
   const chunkProd = 120;
@@ -193,7 +227,11 @@ export async function upsertEtiquetasSeparacaoLoja(
     const chunkSize = 500;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const slice = ids.slice(i, i + chunkSize);
-      const { data, error } = await client.from('etiquetas').select('id, impressa').in('id', slice);
+      const { data, error } = await client
+        .from('etiquetas')
+        .select('id, impressa')
+        .in('id', slice)
+        .eq('excluida', false);
       if (error) throw error;
       (data || []).forEach((row: { id: string; impressa: boolean }) => {
         impressaPorId.set(row.id, row.impressa === true);
@@ -211,30 +249,29 @@ export async function upsertEtiquetasSeparacaoLoja(
 
   if (isLoteSep) {
     const merge = new Map<string, LinhaMergeSep>();
-    for (const r of etiquetasExistentesNoLote) {
-      const nRaw = r.numero_sequencia_loja;
-      const nSeq =
-        nRaw != null && Number.isFinite(Number(nRaw)) ? Number(nRaw) : null;
-      merge.set(String(r.id), {
-        produto_id: String(r.produto_id),
-        data_validade: String(r.data_validade),
-        data_producao: String(r.data_producao),
-        impressa: Boolean(r.impressa),
-        lote: loteNorm,
-        numero_sequencia_loja: nSeq,
-      });
-    }
     for (const item of itensUnicos) {
-      const prev = merge.get(item.id);
+      const b = baselineById.get(item.id);
+      const baselineLote = b?.lote != null ? String(b.lote).trim() : '';
+      const mesmoLoteAtivo = baselineLote === loteNorm;
       const impressa =
-        options.mode === 'impresso_agora' ? true : impressaPorId.get(item.id) === true;
+        options.mode === 'impresso_agora'
+          ? true
+          : mesmoLoteAtivo && impressaPorId.get(item.id) === true;
+      const nSeqBalde =
+        b?.numero_sequencia_loja != null && Number.isFinite(Number(b.numero_sequencia_loja))
+          ? Number(b.numero_sequencia_loja)
+          : null;
       merge.set(item.id, {
         produto_id: item.produto_id,
         data_validade: validadeItemParaEtiqueta(item),
-        data_producao: prev?.data_producao ?? agora,
+        data_producao: b?.data_producao ? String(b.data_producao) : agora,
         impressa,
         lote: loteNorm,
-        numero_sequencia_loja: prev?.numero_sequencia_loja ?? null,
+        numero_sequencia_loja: nSeqBalde,
+        lote_producao_numero: b?.lote_producao_numero ?? null,
+        sequencia_no_lote_producao: b?.sequencia_no_lote_producao ?? null,
+        data_lote_producao: b?.data_lote_producao ?? null,
+        num_baldes_lote_producao: b?.num_baldes_lote_producao ?? null,
       });
     }
 
@@ -285,6 +322,10 @@ export async function upsertEtiquetasSeparacaoLoja(
       impressa: m.impressa,
       excluida: false,
       numero_sequencia_loja: itemEhBalde(m.produto_id) ? (seqPorId.get(id) ?? null) : null,
+      lote_producao_numero: m.lote_producao_numero,
+      sequencia_no_lote_producao: m.sequencia_no_lote_producao,
+      data_lote_producao: m.data_lote_producao,
+      num_baldes_lote_producao: m.num_baldes_lote_producao,
     }));
 
     const upsertChunk = 200;
@@ -309,21 +350,9 @@ export async function upsertEtiquetasSeparacaoLoja(
   }
 
   const numeroExistentePorId = new Map<string, number | null>();
-  const chunkExist = 500;
-  for (let i = 0; i < ids.length; i += chunkExist) {
-    const slice = ids.slice(i, i + chunkExist);
-    const { data, error } = await client
-      .from('etiquetas')
-      .select('id, numero_sequencia_loja')
-      .in('id', slice);
-    if (error) throw error;
-    for (const row of data || []) {
-      const n = row.numero_sequencia_loja;
-      numeroExistentePorId.set(
-        row.id as string,
-        n != null && Number.isFinite(Number(n)) ? Number(n) : null
-      );
-    }
+  for (const id of ids) {
+    const n = baselineById.get(id)?.numero_sequencia_loja;
+    numeroExistentePorId.set(id, n != null && Number.isFinite(Number(n)) ? Number(n) : null);
   }
 
   const idsPrecisamNumero: string[] = [];
@@ -366,18 +395,27 @@ export async function upsertEtiquetasSeparacaoLoja(
 
   const rows: EtiquetaInsert[] = itensUnicos.map((item) => {
     const validade = validadeItemParaEtiqueta(item);
+    const b = baselineById.get(item.id);
+    const baselineLote = b?.lote != null ? String(b.lote).trim() : '';
+    const mesmoLoteAtivo = baselineLote === loteNorm;
     const impressa =
-      options.mode === 'impresso_agora' ? true : impressaPorId.get(item.id) === true;
+      options.mode === 'impresso_agora'
+        ? true
+        : mesmoLoteAtivo && impressaPorId.get(item.id) === true;
 
     return {
       id: item.id,
       produto_id: item.produto_id,
-      data_producao: agora,
+      data_producao: b?.data_producao ? String(b.data_producao) : agora,
       data_validade: validade,
       lote: options.lote,
       impressa,
       excluida: false,
       numero_sequencia_loja: numerosPorItemId.get(item.id) ?? null,
+      lote_producao_numero: b?.lote_producao_numero ?? null,
+      sequencia_no_lote_producao: b?.sequencia_no_lote_producao ?? null,
+      data_lote_producao: b?.data_lote_producao ?? null,
+      num_baldes_lote_producao: b?.num_baldes_lote_producao ?? null,
     };
   });
 
@@ -480,13 +518,13 @@ export async function sincronizarEtiquetasRemessaPorLoteSep(
 }
 
 /**
- * Itens distintos em `transferencia_itens` para as transferências WAREHOUSE_STORE da viagem do lote SEP-…
- * (mesma base do resumo «N unidade(s)» em Separar por Loja / envios).
+ * IDs de unidades (`itens.id`) na remessa SEP: distintos em `transferencia_itens` para todas as
+ * transferências `WAREHOUSE_STORE` da viagem. Ordem estável (UUID) — alinhada ao upsert de sequência de balde.
  */
-export async function contarUnidadesTransferenciaPorLoteSep(
+export async function listarItemIdsRemessaSepOrdenados(
   loteSep: string,
   client: SupabaseClient = supabase
-): Promise<number | null> {
+): Promise<string[] | null> {
   const viagemId = parseViagemIdDeLoteSep(loteSep);
   if (!viagemId) return null;
   const { data: trs, error } = await client
@@ -496,12 +534,33 @@ export async function contarUnidadesTransferenciaPorLoteSep(
     .eq('viagem_id', viagemId);
   if (error || !trs?.length) return null;
   const idsTr = trs.map((t) => t.id as string);
-  const { data: titens, error: e2 } = await client
-    .from('transferencia_itens')
-    .select('item_id')
-    .in('transferencia_id', idsTr);
-  if (e2 || !titens) return null;
-  return new Set(titens.map((r) => String((r as { item_id?: string }).item_id || '').trim()).filter(Boolean)).size;
+  const uniq = new Set<string>();
+  for (let i = 0; i < idsTr.length; i += CHUNK_TRANSFERENCIA_IDS_IN) {
+    const slice = idsTr.slice(i, i + CHUNK_TRANSFERENCIA_IDS_IN);
+    const { data: titens, error: e2 } = await client
+      .from('transferencia_itens')
+      .select('item_id')
+      .in('transferencia_id', slice);
+    if (e2) return null;
+    for (const r of titens || []) {
+      const id = String((r as { item_id?: string }).item_id || '').trim();
+      if (id) uniq.add(id);
+    }
+  }
+  return [...uniq].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Itens distintos em `transferencia_itens` para as transferências WAREHOUSE_STORE da viagem do lote SEP-…
+ * (mesma base do resumo «N unidade(s)» em Separar por Loja / envios).
+ */
+export async function contarUnidadesTransferenciaPorLoteSep(
+  loteSep: string,
+  client: SupabaseClient = supabase
+): Promise<number | null> {
+  const ids = await listarItemIdsRemessaSepOrdenados(loteSep, client);
+  if (ids == null) return null;
+  return ids.length;
 }
 
 export interface EtiquetaCompleta extends Etiqueta {

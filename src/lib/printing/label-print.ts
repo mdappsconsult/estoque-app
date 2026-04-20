@@ -79,6 +79,14 @@ export interface EtiquetaParaImpressao {
   dataGeracaoIso?: string;
   /** Balde indústria → loja: sequência contínua por loja de destino (Separar por Loja). */
   numeroSequenciaLoja?: number | null;
+  /** Rastreio 60×60: número sequencial do lançamento de produção (por produto + armazém). */
+  loteProducaoNumero?: number | null;
+  /** Posição 1..N dentro do lançamento. */
+  sequenciaNoLote?: number | null;
+  /** N (total de baldes do lançamento). */
+  numBaldesLoteProducao?: number | null;
+  /** Instante de criação do lançamento (`producoes.created_at`) para exibir «criado dd/mm/aa». */
+  dataLoteProducaoIso?: string | null;
 }
 
 /**
@@ -150,15 +158,32 @@ function extrairVolumeProduto(nome: string): string {
   return match ? match[1].replace(/\s+/g, '').toUpperCase() : '';
 }
 
-/** Lote SEP-{uuid}: na etiqueta mostra só o primeiro bloco (ex. SEP-2697e6df) para caber na térmica. */
-function formatarLoteExibicao6060(lote: string): string {
-  const t = String(lote || '').trim();
-  if (!t) return '—';
-  if (!t.startsWith('SEP-')) return t.length > 28 ? `${t.slice(0, 26)}…` : t;
-  const rest = t.slice(4).trim();
-  const primeiro = rest.split('-')[0]?.trim() || '';
-  if (primeiro.length >= 6) return `SEP-${primeiro}`;
-  return t.length > 24 ? `${t.slice(0, 22)}…` : t;
+/** Linha «Lote prod. N · k/N · criado dd/mm/aa» na 60×60 indústria (não exibe lote SEP). */
+function formatarRastreioLoteProducao6060(item: EtiquetaParaImpressao): string | null {
+  const n = item.loteProducaoNumero;
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  const k = item.sequenciaNoLote;
+  const tot = item.numBaldesLoteProducao;
+  const frac =
+    k != null &&
+    tot != null &&
+    Number.isFinite(Number(k)) &&
+    Number.isFinite(Number(tot)) &&
+    Number(tot) > 0
+      ? `${k}/${tot}`
+      : null;
+  const rawIso = (item.dataLoteProducaoIso || '').trim();
+  let dataPt = '';
+  if (rawIso) {
+    const d = new Date(rawIso);
+    if (!Number.isNaN(d.getTime())) {
+      dataPt = d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    }
+  }
+  const partes = [`Lote prod. ${n}`];
+  if (frac) partes.push(frac);
+  if (dataPt) partes.push(`criado ${dataPt}`);
+  return partes.join(' · ');
 }
 
 /**
@@ -262,7 +287,10 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
   const qrPx = pixelsQrParaImpressao(qrMm);
   const produtoNome = escaparHtml(item.produtoNome || 'BALDE ACAI').toUpperCase();
   const volume = escaparHtml(extrairVolumeProduto(item.produtoNome));
-  const lote = escaparHtml(formatarLoteExibicao6060(item.lote || ''));
+  const rastreioProducao = formatarRastreioLoteProducao6060(item);
+  const blocoRastreioProducao = rastreioProducao
+    ? `<div class="e6060-lote-prod">${escaparHtml(rastreioProducao)}</div>`
+    : '';
   const responsavel = escaparHtml((item.responsavel || '—').trim() || '—');
   const tokenShort = escaparHtml(item.tokenShort || item.id.slice(0, 8).toUpperCase());
   const tokenQr = escaparHtml(item.tokenQr);
@@ -304,7 +332,7 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
       <div class="e6060-ids">
         <div class="e6060-tok">${tokenShort}</div>
         <div class="e6060-tokqr">${tokenQr}</div>
-        <div class="e6060-lote">LOTE: ${lote}</div>
+        ${blocoRastreioProducao}
       </div>
       <div class="e6060-spacer" aria-hidden="true"></div>
       <div class="e6060-legal">
@@ -413,7 +441,15 @@ export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): E
       mk('000000000002', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T2', 13),
     ];
   }
-  return [mk('000000000099', 'AÇAÍ BALDE 11L TESTE IMPRESSORA', 'TESTE-99', 7)];
+  return [
+    {
+      ...mk('000000000099', 'AÇAÍ BALDE 11L TESTE IMPRESSORA', 'TESTE-99', 7),
+      loteProducaoNumero: 40,
+      sequenciaNoLote: 3,
+      numBaldesLoteProducao: 130,
+      dataLoteProducaoIso: agora,
+    },
+  ];
 }
 
 export function confirmarImpressao(totalEtiquetas: number, formato?: FormatoEtiqueta): boolean {
@@ -746,6 +782,15 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       font-size: 5pt;
       font-weight: 700;
       color: #222;
+    }
+    .e6060-lote-prod {
+      margin-top: 0.35mm;
+      font-size: 4.9pt;
+      font-weight: 800;
+      color: #111;
+      line-height: 1.08;
+      max-width: 58mm;
+      word-break: break-word;
     }
     .e6060-legal {
       flex: 0 0 auto;

@@ -9,6 +9,7 @@ import MobileHeader from '@/components/layout/MobileHeader';
 import { ValidadeAlertProvider } from '@/components/validade/ValidadeAlertProvider';
 import { ValidadeBanner } from '@/components/validade/ValidadeBanner';
 import { ShieldX } from 'lucide-react';
+import { LogoKim } from '@/components/branding/LogoKim';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { usuario, loading } = useAuth();
@@ -26,7 +27,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   // Loading
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-gray-50">
+        <LogoKim className="max-h-16 w-auto opacity-90" priority />
         <div className="w-8 h-8 border-3 border-red-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );

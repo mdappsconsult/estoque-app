@@ -5,11 +5,29 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Badge from '@/components/ui/Badge';
 import { useAuth } from '@/hooks/useAuth';
 import { getUsuarioLogado } from '@/lib/auth';
+import {
+  formatarDataHoraBr,
+  formatarInstanteConsultaBr,
+  formatarSoDataBr,
+} from '@/lib/datas/formatar-auditoria-br';
 import { escopoValidadesPorPerfil } from '@/lib/operador-loja-scope';
 import {
   listarItensAlertaValidade,
   type ItemValidadeRow,
 } from '@/lib/services/validades-itens';
+
+function joinUm<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? v[0] ?? null : v;
+}
+
+function tokenExibicao(i: ItemValidadeRow): string {
+  const s = i.token_short?.trim();
+  if (s) return s;
+  const q = i.token_qr;
+  if (q && q.length > 14) return `…${q.slice(-10)}`;
+  return q || '—';
+}
 
 function ordenarPorLocalDepoisValidade(rows: ItemValidadeRow[]): ItemValidadeRow[] {
   return [...rows].sort((a, b) => {
@@ -31,8 +49,7 @@ export default function ValidadesPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [proximos, setProximos] = useState<ItemValidadeRow[]>([]);
   const [vencidos, setVencidos] = useState<ItemValidadeRow[]>([]);
-
-  const agora = new Date();
+  const [instanteConsulta, setInstanteConsulta] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     if (escopo.tipo !== 'local' && escopo.tipo !== 'todos_locais') return;
@@ -44,6 +61,7 @@ export default function ValidadesPage() {
       localAtualId: localId,
       diasProximos: dias,
     });
+    setInstanteConsulta(formatarInstanteConsultaBr(new Date()));
     if (error) {
       setErro(error);
       setProximos([]);
@@ -111,8 +129,10 @@ export default function ValidadesPage() {
     );
   }
 
+  const agora = new Date();
+
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
@@ -123,6 +143,13 @@ export default function ValidadesPage() {
             <p className="text-sm text-gray-500">Itens próximos do vencimento</p>
             {subtituloEscopo && (
               <p className="text-xs text-gray-500 mt-1 max-w-xl">{subtituloEscopo}</p>
+            )}
+            {instanteConsulta && (
+              <p className="text-xs text-gray-600 mt-2 max-w-2xl leading-relaxed">
+                <span className="font-medium text-gray-700">Referência desta lista (auditoria):</span>{' '}
+                {instanteConsulta}. Compare com a validade do produto e com a data em que a unidade foi
+                confirmada neste local (recebimento ou ajuste).
+              </p>
             )}
           </div>
         </div>
@@ -164,27 +191,87 @@ export default function ValidadesPage() {
             <AlertTriangle className="w-5 h-5" /> Vencidos ({vencidos.length})
           </h2>
           <div className="space-y-2 mb-6">
-            {vencidos.slice(0, 50).map((i) => (
-              <div
-                key={i.id}
-                className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center justify-between"
-              >
-                <div>
-                  <p className="font-semibold text-red-800">{i.produto?.nome ?? '—'}</p>
-                  <p className="text-xs text-red-400">
-                    {i.local_atual?.nome ?? 'Local —'} • {i.token_qr}
-                  </p>
+            {vencidos.slice(0, 50).map((i) => {
+              const lc = joinUm(i.lote_compra);
+              const diasAtraso = Math.max(
+                0,
+                Math.floor(
+                  (agora.getTime() - new Date(i.data_validade).getTime()) / 86_400_000
+                )
+              );
+              return (
+                <div
+                  key={i.id}
+                  className="bg-red-50 border border-red-200 rounded-xl p-3 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-start"
+                >
+                  <div className="min-w-0 space-y-1.5">
+                    <p className="font-semibold text-red-800">{i.produto?.nome ?? '—'}</p>
+                    <p className="text-xs text-red-600/90">
+                      <span className="text-red-400">{i.local_atual?.nome ?? 'Local —'}</span>
+                      {' · '}
+                      <span className="font-mono" title={i.token_qr}>
+                        {tokenExibicao(i)}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-red-700/80 font-mono break-all">ID {i.id}</p>
+                    <div className="pt-1 space-y-0.5 text-xs text-red-900/85">
+                      <p>
+                        <span className="text-red-600">Unidade no sistema desde:</span>{' '}
+                        {formatarDataHoraBr(i.created_at)}
+                      </p>
+                      {i.data_producao ? (
+                        <p>
+                          <span className="text-red-600">Data produção (item):</span>{' '}
+                          {formatarSoDataBr(i.data_producao)}
+                        </p>
+                      ) : null}
+                      {i.confirmacao_neste_local_em ? (
+                        <p>
+                          <span className="text-red-600">Confirmação neste local:</span>{' '}
+                          {formatarDataHoraBr(i.confirmacao_neste_local_em)} (recebimento ou entrada
+                          avulsa)
+                        </p>
+                      ) : i.remessa_vinculada_criada_em ? (
+                        <p>
+                          <span className="text-red-600">Remessa vinculada (registro):</span>{' '}
+                          {formatarDataHoraBr(i.remessa_vinculada_criada_em)}{' '}
+                          <span className="text-red-700/80">
+                            — sem auditoria de recebimento; data da criação da remessa.
+                          </span>
+                        </p>
+                      ) : (
+                        <p>
+                          <span className="text-red-600">Confirmação neste local:</span> sem registro
+                          (ex.: origem local ou histórico antigo).
+                        </p>
+                      )}
+                      {i.etiqueta?.lote ? (
+                        <p>
+                          <span className="text-red-600">Lote / remessa (etiqueta):</span>{' '}
+                          <span className="font-mono">{i.etiqueta.lote}</span>
+                        </p>
+                      ) : null}
+                      {lc ? (
+                        <p>
+                          <span className="text-red-600">Lote compra:</span>{' '}
+                          {lc.lote_fornecedor ?? '—'}
+                          {lc.nota_fiscal ? ` · NF ${lc.nota_fiscal}` : null}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="text-left sm:text-right shrink-0">
+                    <Badge variant="error" size="sm">
+                      Vencido
+                      {diasAtraso > 0 ? ` · há ${diasAtraso}d` : ''}
+                    </Badge>
+                    <p className="text-xs text-red-700 mt-1 font-medium">
+                      Validade: {formatarSoDataBr(i.data_validade)}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <Badge variant="error" size="sm">
-                    Vencido
-                  </Badge>
-                  <p className="text-xs text-red-400 mt-1">
-                    {new Date(i.data_validade).toLocaleDateString('pt-BR')}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {vencidos.length > 50 && (
               <p className="text-xs text-gray-500">
                 Mostrando 50 de {vencidos.length} vencidos. Use filtros ou relatórios para lista completa.
@@ -202,18 +289,65 @@ export default function ValidadesPage() {
           const diasRestantes = Math.ceil(
             (new Date(i.data_validade).getTime() - agora.getTime()) / 86400000
           );
+          const lc = joinUm(i.lote_compra);
           return (
             <div
               key={i.id}
-              className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between"
+              className="bg-white rounded-xl border border-gray-200 p-3 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-start"
             >
-              <div>
+              <div className="min-w-0 space-y-1.5">
                 <p className="font-semibold text-gray-900">{i.produto?.nome ?? '—'}</p>
-                <p className="text-xs text-gray-400">
-                  {i.local_atual?.nome ?? 'Local —'} • {i.token_qr}
+                <p className="text-xs text-gray-500">
+                  {i.local_atual?.nome ?? 'Local —'} ·{' '}
+                  <span className="font-mono" title={i.token_qr}>
+                    {tokenExibicao(i)}
+                  </span>
                 </p>
+                <p className="text-[11px] text-gray-400 font-mono break-all">ID {i.id}</p>
+                <div className="pt-1 space-y-0.5 text-xs text-gray-700">
+                  <p>
+                    <span className="text-gray-500">Unidade no sistema desde:</span>{' '}
+                    {formatarDataHoraBr(i.created_at)}
+                  </p>
+                  {i.data_producao ? (
+                    <p>
+                      <span className="text-gray-500">Data produção (item):</span>{' '}
+                      {formatarSoDataBr(i.data_producao)}
+                    </p>
+                  ) : null}
+                  {i.confirmacao_neste_local_em ? (
+                    <p>
+                      <span className="text-gray-500">Confirmação neste local:</span>{' '}
+                      {formatarDataHoraBr(i.confirmacao_neste_local_em)}
+                    </p>
+                  ) : i.remessa_vinculada_criada_em ? (
+                    <p>
+                      <span className="text-gray-500">Remessa vinculada (registro):</span>{' '}
+                      {formatarDataHoraBr(i.remessa_vinculada_criada_em)}
+                      <span className="text-gray-400"> · sem auditoria de recebimento</span>
+                    </p>
+                  ) : (
+                    <p>
+                      <span className="text-gray-500">Confirmação neste local:</span>{' '}
+                      <span className="text-gray-400">sem registro</span>
+                    </p>
+                  )}
+                  {i.etiqueta?.lote ? (
+                    <p>
+                      <span className="text-gray-500">Lote / remessa (etiqueta):</span>{' '}
+                      <span className="font-mono">{i.etiqueta.lote}</span>
+                    </p>
+                  ) : null}
+                  {lc ? (
+                    <p>
+                      <span className="text-gray-500">Lote compra:</span>{' '}
+                      {lc.lote_fornecedor ?? '—'}
+                      {lc.nota_fiscal ? ` · NF ${lc.nota_fiscal}` : null}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-              <div className="text-right">
+              <div className="text-left sm:text-right shrink-0">
                 <Badge
                   variant={
                     diasRestantes <= 2 ? 'error' : diasRestantes <= 5 ? 'warning' : 'info'
@@ -222,8 +356,8 @@ export default function ValidadesPage() {
                 >
                   {diasRestantes}d
                 </Badge>
-                <p className="text-xs text-gray-400 mt-1">
-                  {new Date(i.data_validade).toLocaleDateString('pt-BR')}
+                <p className="text-xs text-gray-600 mt-1 font-medium">
+                  Validade: {formatarSoDataBr(i.data_validade)}
                 </p>
               </div>
             </div>

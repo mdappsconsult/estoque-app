@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, LogOut, Warehouse } from 'lucide-react';
+import { ChevronDown, LogOut } from 'lucide-react';
 import clsx from 'clsx';
+import { LogoKim } from '@/components/branding/LogoKim';
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -11,11 +12,10 @@ export default function Header() {
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 fixed top-0 left-64 right-0 z-10">
       {/* Info da Unidade */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-          <Warehouse className="w-5 h-5 text-red-500" />
-        </div>
+        <LogoKim className="max-h-10 w-auto shrink-0 rounded-md" />
         <div>
-          <h2 className="font-semibold text-gray-800">Controle de Estoque</h2>
+          <h2 className="font-semibold text-gray-800">Açaí do Kim</h2>
+          <p className="text-xs text-gray-500">Controle de estoque</p>
         </div>
         <span className="px-3 py-1 bg-red-100 text-red-600 text-xs font-medium rounded-full">
           Local: Indústria

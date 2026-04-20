@@ -33,6 +33,10 @@ export interface EtiquetaGeradaProducao {
   lote: string;
   tokenQr: string;
   tokenShort: string | null;
+  numeroLoteProducao: number;
+  sequenciaNoLote: number;
+  numBaldesLote: number;
+  dataLoteProducaoIso: string;
 }
 
 function mergeConsumos(linhas: ConsumoProducaoLinha[]): ConsumoProducaoLinha[] {
@@ -115,6 +119,21 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
   const todosItemIdsConsumidos = selecoesPorProduto.flatMap((s) => s.itemIds);
   const produtosInsumos = [...new Set(consumosMerged.map((c) => c.produtoId))];
 
+  const { data: rpcNumero, error: rpcLoteErr } = await supabase.rpc('reservar_numero_lote_producao', {
+    p_produto_id: input.produtoId,
+    p_local_id: input.localId,
+  });
+  if (rpcLoteErr) throw rpcLoteErr;
+  const numeroLoteProducao =
+    typeof rpcNumero === 'number'
+      ? rpcNumero
+      : typeof rpcNumero === 'string'
+        ? parseInt(rpcNumero, 10)
+        : NaN;
+  if (!Number.isFinite(numeroLoteProducao)) {
+    throw new Error('Falha ao reservar número de lote de produção.');
+  }
+
   const baseProducao = {
     produto_id: input.produtoId,
     quantidade: quantidadeAcabado,
@@ -126,13 +145,18 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
 
   const { data: producaoRow, error: producaoErr } = await supabase
     .from('producoes')
-    .insert({ ...baseProducao, registrado_por: input.usuarioId })
-    .select('id')
+    .insert({
+      ...baseProducao,
+      registrado_por: input.usuarioId,
+      numero_lote_producao: numeroLoteProducao,
+    })
+    .select('id, created_at, numero_lote_producao')
     .single();
 
   if (producaoErr) throw producaoErr;
   if (!producaoRow?.id) throw new Error('Resposta inválida ao gravar produção');
   const producaoId = producaoRow.id;
+  const dataLoteProducaoIso = String((producaoRow as { created_at?: string }).created_at || '');
 
   const { error: updErr } = await supabase
     .from('itens')
@@ -173,7 +197,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     if (audErr) console.error('Erro ao registrar auditoria de baixas da produção:', audErr);
   }
 
-  const itensAcabado = Array.from({ length: quantidadeAcabado }, () => ({
+  const itensAcabado = Array.from({ length: quantidadeAcabado }, (_, idx) => ({
     token_qr: gerarTokenQR(),
     token_short: gerarTokenShort(),
     produto_id: input.produtoId,
@@ -181,6 +205,8 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     estado: 'EM_ESTOQUE' as const,
     data_validade: dataValidadeCalculada,
     data_producao: new Date().toISOString(),
+    producao_id: producaoId,
+    sequencia_no_lote_producao: idx + 1,
   }));
 
   const { data: itensCriados, error: itensError } = await supabase.from('itens').insert(itensAcabado).select();
@@ -189,7 +215,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
 
   const loteProducao = gerarLote();
 
-  const etiquetas: EtiquetaInsert[] = itensGerados.map((item) => ({
+  const etiquetas: EtiquetaInsert[] = itensGerados.map((item, idx) => ({
     id: item.id,
     produto_id: item.produto_id,
     data_producao: item.data_producao || new Date().toISOString(),
@@ -197,6 +223,10 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     lote: loteProducao,
     impressa: false,
     excluida: false,
+    lote_producao_numero: numeroLoteProducao,
+    sequencia_no_lote_producao: idx + 1,
+    data_lote_producao: dataLoteProducaoIso || null,
+    num_baldes_lote_producao: quantidadeAcabado,
   }));
 
   if (etiquetas.length > 0) {
@@ -215,6 +245,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
       produto_id: input.produtoId,
       quantidade: quantidadeAcabado,
       num_baldes: input.numBaldes,
+      numero_lote_producao: numeroLoteProducao,
       dias_validade: input.diasValidade ?? null,
       data_validade: dataValidadeCalculada,
       consumos: consumosMerged.map((c) => ({ produto_id: c.produtoId, quantidade: c.quantidade })),
@@ -222,7 +253,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     },
   });
 
-  return itensGerados.map((item) => ({
+  return itensGerados.map((item, idx) => ({
     id: item.id,
     produtoId: item.produto_id,
     dataProducao: item.data_producao || new Date().toISOString(),
@@ -230,5 +261,9 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     lote: loteProducao,
     tokenQr: item.token_qr,
     tokenShort: item.token_short || null,
+    numeroLoteProducao,
+    sequenciaNoLote: idx + 1,
+    numBaldesLote: quantidadeAcabado,
+    dataLoteProducaoIso: dataLoteProducaoIso || new Date().toISOString(),
   }));
 }

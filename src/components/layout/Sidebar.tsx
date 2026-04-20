@@ -26,6 +26,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
+import { LogoKim } from '@/components/branding/LogoKim';
 
 const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string }[] = [
   { name: 'Início', href: '/', icon: Home },
@@ -104,10 +105,9 @@ export default function Sidebar() {
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 h-screen flex flex-col fixed left-0 top-0">
-      {/* Logo */}
-      <div className="p-6">
-        <h1 className="text-xl font-bold text-red-500">Estoque QR</h1>
-        <p className="text-xs text-gray-500">Operações</p>
+      <div className="p-5 border-b border-gray-100">
+        <LogoKim className="max-h-14 w-auto mx-auto mb-2" />
+        <p className="text-xs text-center text-gray-500">Estoque · operações</p>
       </div>
 
       {/* Menu principal */}

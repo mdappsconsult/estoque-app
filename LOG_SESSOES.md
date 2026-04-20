@@ -1,5 +1,88 @@
 # Log de Sessões
 
+### Sessão - 2026-04-20 - SEP matriz→loja: reserva de estoque na criação da remessa
+- **Pedido:** ao criar separação para loja, o saldo **Em estoque** na origem deve cair na hora (ex.: 10 → 9); só voltar ao cancelar a remessa SEP antes do trânsito.
+- **Mudança:** [`src/lib/services/transferencias.ts`](src/lib/services/transferencias.ts) — em `criarTransferencia`, se `tipo === 'WAREHOUSE_STORE'`, `UPDATE itens` → `EM_TRANSFERENCIA` (origem inalterada) em fatias + `sincronizarEstoquePorProdutos` (client opcional no helper). `cancelarRemessaMatrizParaLoja`: valida `EM_ESTOQUE` ou `EM_TRANSFERENCIA` na origem; antes de apagar, restaura `EM_ESTOQUE` + sync. `despacharTransferencia`: pré-check idempotente (`EM_ESTOQUE` ou `EM_TRANSFERENCIA` na origem). `CONTEXTO_ATUAL.md`.
+- **Impacto:** indústria/estoque matriz alinha painel ao físico na SEP; loja/recebimento inalterados (`IN_TRANSIT` + leitura de QRs como hoje).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Dados: fundir Loja Paraiso em Loja Jardim Paraíso
+- **Pedido:** duas lojas cadastradas para a mesma unidade; manter o nome **Loja Jardim Paraíso** e concentrar dados.
+- **Mudança:** transação SQL no Supabase — funde `loja_produtos_config` (GREATEST mínimo, OR ativo), realoca `loja_contagens`, funde `sequencia_balde_loja_destino` se existir, atualiza FKs (`usuarios`, `itens`, `transferencias`, `lotes_compra`, `baixas`, `perdas`, `producoes`, `auditoria`), remove o registro duplicado em `locais` (`32824153-4e04-4ac5-9216-06f747be7629`). Artefato: `docs/consultas-sql/fusao-lojas-paraiso-duplicada.sql`; `CONTEXTO_ATUAL.md`.
+- **Impacto:** um único local STORE para essa filial; usuários com `local_padrao_id` da duplicata passam a Jardim Paraíso; histórico de remessas/auditoria com IDs atualizados.
+- **Validação:** consultas pós-execução (local removido; Joana/Silvania em Jardim Paraíso).
+
+### Sessão - 2026-04-20 - Trigger DB: bloquear mesmo QR em duas remessas abertas
+- **Pedido:** garantia forte para nunca mais dupla reserva (corrida entre requisições), além do assert em `criarTransferencia`.
+- **Mudança:** migração **`20260420180000_transferencia_itens_bloquear_dup_remessa_aberta.sql`** — função + `BEFORE INSERT` em `transferencia_itens` (`FOR UPDATE` em `itens`, `EXISTS` remessa aberta, `RAISE` `check_violation` com mensagem em PT). API **`POST /api/operacional/criar-separacao-matriz-loja`** usa `errMessage` no `catch` para repassar texto PostgREST. `CONTEXTO_ATUAL.md`.
+- **Impacto:** novos vínculos inválidos falham no Postgres; histórico antigo não é alterado. Migração aplicada no projeto Supabase via **MCP**; repetir no deploy (`supabase db push` / pipeline) se outro ref.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Panorama dupla reserva (vários produtos / QRs)
+- **Pedido:** entender a situação além de um único token; várias unidades com etiqueta vs sistema divergentes.
+- **Leitura Supabase:** ~**364** itens com **2+** remessas em `transferencia_itens` (conjunto analisado: só **`WAREHOUSE_STORE`**); ~**328** com **mesmo dia** (`America/Sao_Paulo`), mesma origem e **dois destinos** (dupla lista). Picos: **16/04** Estoque **Delivery × Loja JK** (80 itens); **08–09/04** Estoque com vários pares; **16/04** Indústria Delivery×JK (15). Estados atuais desses itens: mistura **EM_ESTOQUE** / **EM_TRANSFERENCIA** / **BAIXADO**.
+- **Artefatos:** `docs/consultas-sql/panorama-dupla-reserva-remessas.sql`; `CONTEXTO_ATUAL.md` (secção **Panorama dupla reserva**).
+- **Validação:** consultas MCP/SQL; documentação apenas (blindagem em `criarTransferencia` já registrada na sessão anterior).
+
+### Sessão - 2026-04-20 - Etiqueta «Delivery» vs loja JK: dupla remessa + blindagem
+- **Problema:** mesmo QR em duas remessas no mesmo dia (JK e Delivery); etiqueta 60×30 mostra **nome do destino da separação** impressa; último `RECEBER_TRANSFERENCIA` definiu `local_atual` na **Loja JK** — operador via divergência entre rótulo e sistema.
+- **Causa:** índice único só `(transferencia_id, item_id)`; antes do despacho o item segue `EM_ESTOQUE` na origem, então **segunda separação** aceitava o mesmo QR outra vez.
+- **Mudança:** `assertItensSemVinculoRemessaAberta` em `criarTransferencia` (`transferencias.ts`); SQL de diagnóstico `docs/consultas-sql/item-token-qr-multiplas-remessas.sql`; `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas SEP: sem fallback se a transferência não carregar
+- **Pedido:** plano A (lista pela transferência) sempre; não usar só `etiquetas` quando a leitura da remessa falha.
+- **Mudança:** `/etiquetas` — removido fallback; erro explícito se `listarItemIdsRemessaSepOrdenados` for `null`/vazio ou se faltar montar alguma unidade; lista vazia até resolver. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas SEP: lista só pela separação (sem união extra)
+- **Pedido:** simplificar — quantidade da remessa = o que foi lançado em Separar por Loja; operação só com produto etiquetado / QRs da remessa.
+- **Mudança:** `/etiquetas` para `SEP-…` usa apenas `listarItemIdsRemessaSepOrdenados` quando há dados; remove união com ids só em `etiquetas` e o bloco de três contagens. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas SEP: união transferência + etiquetas + totais na UI
+- **Pedido:** conferir se a remessa reflete tudo o que foi separado; não esconder unidades.
+- **Mudança:** `listarItemIdsRemessaSepOrdenados` com `transferencia_itens` em fatias; ordem da folha = transferência + ids só em `etiquetas`; bloco «Conferência» com 3 números. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas SEP: imprimir/prévia com todas as unidades da transferência
+- **Problema:** só apareciam as linhas já gravadas em `etiquetas` (ex.: 2), faltando o restante da remessa SEP na folha.
+- **Mudança:** `listarItemIdsRemessaSepOrdenados` em `etiquetas.ts`; `/etiquetas` mescla ordem da transferência `WAREHOUSE_STORE` + linhas fantasma a partir de `itens` quando falta registro em `etiquetas`; `contarUnidadesTransferenciaPorLoteSep` reutiliza a lista. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas: prévia sem upsert + lista só total
+- **Problema:** «Ver prévia» falhava para operador (ex. matriz Estoque) e a lista longa por produto/tokens não era necessária.
+- **Mudança:** `previsualizarEtiquetas` não chama mais `garantirNumerosSequenciaBaldeAntesImpressao`; `rowsParaEtiquetasImpressao(..., null)` usa só o que já veio da query. Removidos grupos/lista detalhada; faixa com total de etiquetas + aviso prévia vs impressão. `CONTEXTO_ATUAL.md` (Etiquetas + prévia).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Etiquetas: fluxo mínimo (sem filtros, sem painel verde, sem marcar impressão na UI)
+- **Pedido:** `/etiquetas` só **SEP → escolher remessa → prévia/impressão da remessa inteira** no topo; remover filtros Pendentes/Impressas/Todas, card verde (sync, contagens, produtos, código duplicado), ações por grupo/linha e `marcarImpressa` nesta página; lista só consulta.
+- **Mudança:** `src/app/etiquetas/page.tsx` (UI e estado); `src/lib/services/etiquetas.ts` — `impressaPorId` ignora `excluida`; preservação de `impressa` no upsert só quando baseline é **mesmo lote** ativo (SEP e não-SEP). `CONTEXTO_ATUAL.md` / `LOG_SESSOES.md`.
+- **Impacto:** não há mais sync de transferência → `etiquetas` nesta tela; alinhamento raro fica em **Separar por Loja**, suporte ou **`POST /api/operacional/sync-etiquetas-remessa`**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Marca: logotipo Açaí do Kim no app
+- **Pedido:** usar o logotipo fornecido nos pontos adequados da interface.
+- **Mudança:** `public/branding/acai-do-kim-logo.png`; componente **`LogoKim`** (`src/components/branding/LogoKim.tsx`); **`/login`**, **`MobileHeader`**, **`/`** (home), **`AuthGuard`** (loading), **`Sidebar`**, **`Header`**; **`layout.tsx`** — título/descrição com marca.
+- **Impacto:** identidade visual alinhada à operação; título da aba do navegador reflete a marca.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: lote sequencial + rastreio na etiqueta 60×60 (sem SEP na face)
+- **Pedido:** declarar lote de produção por lançamento (nº sequencial por produto+armazém), posição **k/N** e data de criação na etiqueta **60×60** ao imprimir após separação; não exibir `LOTE: SEP-…` na face impressa.
+- **Mudança:** migração **`20260420120000_producao_lote_rastreio_etiqueta.sql`** (`sequencia_lote_producao`, RPC `reservar_numero_lote_producao`, colunas em `producoes`/`itens`/`etiquetas`); **`registrarProducaoComItens`**; **`upsertEtiquetasSeparacaoLoja`** (baseline por `id` + preservação); **`label-print`** (`EtiquetaParaImpressao`, faixa `e6060-lote-prod`); **`/etiquetas`** e **`/producao`**; tipos **`database.ts`**; **`createProducao`** reserva lote se omitido.
+- **Impacto:** deploy exige migração no Supabase; etiquetas antigas sem metadados não mostram linha de lote prod. (só tokens + demais campos).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-15 - Validades: contexto de auditoria na lista
+- **Pedido:** na tela de validade, deixar explícito «hoje», quando o produto «chegou» no local e demais dados para auditoria.
+- **Mudança:** `validades-itens.ts` — select ampliado + enriquecimento (etiquetas lote SEP, `lotes_compra`, menor data entre recebimento na loja e entrada de faltante em divergência; fallback data de criação da remessa); `formatar-auditoria-br.ts` (datas em pt-BR, fuso São Paulo). **`/validades`:** bloco «Referência desta lista», cartões com ID, token curto, datas e lotes.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-15 - Divergências: gestor dá entrada do faltante na loja
+- **Pedido:** botão para o gestor colocar no estoque da loja de destino o produto que não foi lido no recebimento (faltante físico encontrado depois).
+- **Mudança:** `darEntradaFaltanteNaLojaDivergencia` em `divergencias.ts` (service role); `recalcularEstoqueProduto` aceita `SupabaseClient` opcional; rota **`POST /api/operacional/dar-entrada-faltante-divergencia`** (`MANAGER` / `ADMIN_MASTER` + credencial); UI **Dar entrada na loja** + modal de login/senha; **Resolver** permanece só marcação. Auditoria `ENTRADA_FALTANTE_DIVERGENCIA_LOJA`.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-16 - Produção: validade por dias em calendário BR + etiqueta sem “um dia a menos”
 - **Problema:** validade do acabado parecia “presa” ao primeiro cálculo ou dia errado: `toISOString().slice(0,10)` após `setDate` usa **dia UTC**, não o calendário de Brasília; na etiqueta, `new Date('YYYY-MM-DD')` vira meia-noite **UTC** e em pt-BR aparecia **um dia antes**.
 - **Mudança:** `src/lib/datas/validade-producao-br.ts` — `calcularDataValidadeYmdAposDiasCorridosBr` (hoje em `America/Sao_Paulo` + N dias) e `formatarValidadeDdMmAaEtiquetaBr` (prioriza prefixo `YYYY-MM-DD`). **`registrarProducaoComItens`** e prévia em **`/producao`** usam o mesmo cálculo; **`formatarValidadeEtiquetaIndustria`** (60×60) usa o formatador seguro.

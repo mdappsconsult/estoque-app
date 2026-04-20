@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Eye, QrCode, Loader2, Printer, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { Eye, QrCode, Loader2, Printer, RefreshCw, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
-import Badge from '@/components/ui/Badge';
-import Input from '@/components/ui/Input';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
@@ -14,7 +12,7 @@ import {
   buscarOpcoesRemessaSepParaEtiquetas,
   type OpcaoRemessaSepEtiquetas,
 } from '@/lib/services/etiquetas-opcoes-remessa';
-import { contarUnidadesTransferenciaPorLoteSep, upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
+import { listarItemIdsRemessaSepOrdenados, upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
 import {
   abrirPreviaEtiquetasEmJanela,
   confirmarImpressao,
@@ -40,12 +38,9 @@ import type { Local } from '@/types/database';
 import { lerUltimaRemessaPersistida } from '@/lib/separacao/ultima-remessa-storage';
 import {
   type MetaTransferenciaRemessa,
-  dataReferenciaRemessa,
   formatarDataHoraRemessaPt,
   loteSepResumidoParaUi,
   parseViagemIdDeLoteSep,
-  resumoProdutosRemessa,
-  statusTransferenciaLegivel,
   truncarTexto,
 } from '@/lib/separacao/remessa-separacao-ui';
 
@@ -59,26 +54,12 @@ interface EtiquetaRow {
   excluida: boolean;
   created_at: string;
   numero_sequencia_loja?: number | null;
+  lote_producao_numero?: number | null;
+  sequencia_no_lote_producao?: number | null;
+  data_lote_producao?: string | null;
+  num_baldes_lote_producao?: number | null;
   produto: { nome: string; validade_dias?: number; validade_horas?: number; validade_minutos?: number };
   item?: { id: string; token_qr: string; token_short: string | null } | null;
-}
-
-interface GrupoEtiquetas {
-  chave: string;
-  lote: string;
-  produtoNome: string;
-  total: number;
-  pendentes: number;
-  impressas: number;
-  etiquetas: EtiquetaRow[];
-}
-
-function produtoTemValidade(produto: EtiquetaRow['produto'] | undefined) {
-  return Boolean(
-    ((produto?.validade_dias || 0) > 0) ||
-      ((produto?.validade_horas || 0) > 0) ||
-      ((produto?.validade_minutos || 0) > 0)
-  );
 }
 
 /** Data gravada na etiqueta/item; ignora sentinela «sem validade» usada no banco. */
@@ -92,8 +73,6 @@ function dataValidadeParaImpressaoEtiqueta(e: EtiquetaRow): string {
 
 /** Máximo de etiquetas carregadas por remessa selecionada (uma viagem). */
 const MAX_ETIQUETAS_POR_REMESSA = 6000;
-/** Por grupo: renderiza só as N primeiras até expandir (evita milhares de nós no DOM). */
-const ETIQUETAS_VISIVEIS_POR_GRUPO = 50;
 const REFETCH_DEBOUNCE_ETIQUETAS_MS = 600;
 const CHUNK_ITENS_TOKENS_ETIQUETAS = 400;
 
@@ -134,6 +113,9 @@ function normalizarLinhaEtiquetaApi(row: Record<string, unknown>): EtiquetaRow {
     : { nome: 'Produto' };
 
   const nSeq = row.numero_sequencia_loja;
+  const nLoteP = row.lote_producao_numero;
+  const nSeqL = row.sequencia_no_lote_producao;
+  const nBaldes = row.num_baldes_lote_producao;
   return {
     id: String(row.id),
     produto_id: String(row.produto_id),
@@ -145,9 +127,80 @@ function normalizarLinhaEtiquetaApi(row: Record<string, unknown>): EtiquetaRow {
     created_at: String(row.created_at),
     numero_sequencia_loja:
       nSeq != null && Number.isFinite(Number(nSeq)) ? Number(nSeq) : null,
+    lote_producao_numero:
+      nLoteP != null && Number.isFinite(Number(nLoteP)) ? Number(nLoteP) : null,
+    sequencia_no_lote_producao:
+      nSeqL != null && Number.isFinite(Number(nSeqL)) ? Number(nSeqL) : null,
+    data_lote_producao: row.data_lote_producao != null ? String(row.data_lote_producao) : null,
+    num_baldes_lote_producao:
+      nBaldes != null && Number.isFinite(Number(nBaldes)) ? Number(nBaldes) : null,
     produto,
     item: null,
   };
+}
+
+const DATA_SENTINELA_SEM_VALIDADE_ETIQUETA = '2999-12-31';
+
+/** Linha compatível com `EtiquetaRow` para unidade da transferência que ainda não tem registro em `etiquetas`. */
+function itemRowFantasmaParaEtiquetaRowSep(row: Record<string, unknown>, lote: string): EtiquetaRow {
+  const produtoRaw = normalizarJoinUm<Record<string, unknown>>(row.produto);
+  const produto = produtoRaw
+    ? {
+        nome: String(produtoRaw.nome ?? 'Produto'),
+        validade_dias: produtoRaw.validade_dias as number | undefined,
+        validade_horas: produtoRaw.validade_horas as number | undefined,
+        validade_minutos: produtoRaw.validade_minutos as number | undefined,
+      }
+    : { nome: 'Produto' };
+  const id = String(row.id);
+  const dv =
+    row.data_validade != null && String(row.data_validade).trim() !== ''
+      ? String(row.data_validade)
+      : DATA_SENTINELA_SEM_VALIDADE_ETIQUETA;
+  const dp =
+    row.data_producao != null && String(row.data_producao).trim() !== ''
+      ? String(row.data_producao)
+      : String(row.created_at);
+  return {
+    id,
+    produto_id: String(row.produto_id),
+    data_producao: dp,
+    data_validade: dv,
+    lote,
+    impressa: false,
+    excluida: false,
+    created_at: String(row.created_at),
+    numero_sequencia_loja: null,
+    lote_producao_numero: null,
+    sequencia_no_lote_producao: null,
+    data_lote_producao: null,
+    num_baldes_lote_producao: null,
+    produto,
+    item: {
+      id,
+      token_qr: String((row as { token_qr?: string }).token_qr ?? id),
+      token_short: ((row as { token_short?: string | null }).token_short as string | null) ?? null,
+    },
+  };
+}
+
+async function carregarLinhasFantasmaItensParaSep(ids: string[], lote: string): Promise<EtiquetaRow[]> {
+  const out: EtiquetaRow[] = [];
+  const uniq = [...new Set(ids.filter(Boolean))];
+  for (let i = 0; i < uniq.length; i += CHUNK_ITENS_TOKENS_ETIQUETAS) {
+    const slice = uniq.slice(i, i + CHUNK_ITENS_TOKENS_ETIQUETAS);
+    const { data, error } = await supabase
+      .from('itens')
+      .select(
+        'id, produto_id, token_qr, token_short, data_validade, data_producao, created_at, produto:produtos(nome, validade_dias, validade_horas, validade_minutos)'
+      )
+      .in('id', slice);
+    if (error) throw error;
+    for (const row of data || []) {
+      out.push(itemRowFantasmaParaEtiquetaRowSep(row as Record<string, unknown>, lote));
+    }
+  }
+  return out;
 }
 
 /**
@@ -170,17 +223,6 @@ function ordenarEtiquetasPorProdutoParaImpressao(lista: EtiquetaRow[]): Etiqueta
     if (c !== 0) return c;
     return a.id.localeCompare(b.id);
   });
-}
-
-function compararEtiquetasNoGrupoUi(a: EtiquetaRow, b: EtiquetaRow): number {
-  const na = a.numero_sequencia_loja;
-  const nb = b.numero_sequencia_loja;
-  const aOk = na != null && Number.isFinite(Number(na));
-  const bOk = nb != null && Number.isFinite(Number(nb));
-  if (aOk && bOk && Number(na) !== Number(nb)) return Number(na) - Number(nb);
-  if (aOk && !bOk) return -1;
-  if (!aOk && bOk) return 1;
-  return a.id.localeCompare(b.id);
 }
 
 function rowsParaEtiquetasImpressao(
@@ -207,6 +249,10 @@ function rowsParaEtiquetasImpressao(
       nomeLoja: loja,
       dataGeracaoIso: e.created_at,
       numeroSequenciaLoja,
+      loteProducaoNumero: e.lote_producao_numero ?? null,
+      sequenciaNoLote: e.sequencia_no_lote_producao ?? null,
+      numBaldesLoteProducao: e.num_baldes_lote_producao ?? null,
+      dataLoteProducaoIso: e.data_lote_producao ?? null,
     };
   });
 }
@@ -289,7 +335,6 @@ export default function EtiquetasPage() {
   const [carregandoOpcoesRemessa, setCarregandoOpcoesRemessa] = useState(true);
   const [erroOpcoesRemessa, setErroOpcoesRemessa] = useState('');
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
-  const [unidadesNaTransferencia, setUnidadesNaTransferencia] = useState<number | null>(null);
 
   const metaPorViagemId = useMemo(() => {
     const m = new Map<string, MetaTransferenciaRemessa>();
@@ -330,7 +375,6 @@ export default function EtiquetasPage() {
     data: etiquetas,
     loading: carregandoEtiquetasRemessa,
     error: erroQueryEtiquetas,
-    refetch: refetchEtiquetasRemessa,
   } = useRealtimeQuery<EtiquetaRow>({
     table: 'etiquetas',
     select: '*, produto:produtos(nome, validade_dias, validade_horas, validade_minutos)',
@@ -342,7 +386,103 @@ export default function EtiquetasPage() {
     refetchDebounceMs: REFETCH_DEBOUNCE_ETIQUETAS_MS,
   });
 
-  const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'impressas'>('pendentes');
+  const etiquetasRef = useRef(etiquetas);
+  etiquetasRef.current = etiquetas;
+
+  const [linhasRemessa, setLinhasRemessa] = useState<EtiquetaRow[]>([]);
+  const [mesclandoLinhasSep, setMesclandoLinhasSep] = useState(false);
+  /** Só SEP: falha ao montar lista exclusivamente pela transferência (sem fallback em `etiquetas`). */
+  const [erroListaTransferenciaSep, setErroListaTransferenciaSep] = useState('');
+
+  useLayoutEffect(() => {
+    const lote = loteSelecionado?.trim() ?? '';
+    if (lote.toUpperCase().startsWith('SEP-')) {
+      setMesclandoLinhasSep(true);
+    } else {
+      setMesclandoLinhasSep(false);
+    }
+  }, [loteSelecionado]);
+
+  useEffect(() => {
+    if (!loteSelecionado?.trim()) {
+      setLinhasRemessa([]);
+      setMesclandoLinhasSep(false);
+      setErroListaTransferenciaSep('');
+      return;
+    }
+    const lote = loteSelecionado.trim();
+    if (!lote.toUpperCase().startsWith('SEP-')) {
+      setLinhasRemessa(etiquetasRef.current);
+      setMesclandoLinhasSep(false);
+      setErroListaTransferenciaSep('');
+      return;
+    }
+
+    let cancelled = false;
+    setMesclandoLinhasSep(true);
+    setErroListaTransferenciaSep('');
+    setLinhasRemessa([]);
+
+    void (async () => {
+      try {
+        const idsTransfer = await listarItemIdsRemessaSepOrdenados(lote);
+        if (cancelled) return;
+
+        if (idsTransfer == null) {
+          setLinhasRemessa([]);
+          setErroListaTransferenciaSep(
+            'Não foi possível ler a transferência matriz → loja desta viagem (transferências / itens da remessa). Sem essa leitura não exibimos lista de impressão — verifique rede, login e políticas RLS no Supabase, ou contate o suporte.'
+          );
+          return;
+        }
+        if (idsTransfer.length === 0) {
+          setLinhasRemessa([]);
+          setErroListaTransferenciaSep(
+            'Esta viagem não tem unidades em transferência matriz → loja vinculadas. Se a separação foi registrada, há inconsistência no banco — contate o suporte.'
+          );
+          return;
+        }
+
+        const etiquetasAtual = etiquetasRef.current;
+        const porId = new Map(etiquetasAtual.map((e) => [e.id, e]));
+        const missing = idsTransfer.filter((id) => !porId.has(id));
+        const synth =
+          missing.length > 0 ? await carregarLinhasFantasmaItensParaSep(missing, lote) : [];
+        if (cancelled) return;
+        const synMap = new Map(synth.map((s) => [s.id, s]));
+        const folha = idsTransfer
+          .map((id) => porId.get(id) ?? synMap.get(id))
+          .filter((x): x is EtiquetaRow => x != null);
+
+        if (folha.length !== idsTransfer.length) {
+          setLinhasRemessa([]);
+          setErroListaTransferenciaSep(
+            `A transferência indica ${idsTransfer.length} unidade(s), mas só ${folha.length} puderam ser montadas (linhas em etiquetas + consulta a itens). Ajuste permissões de leitura ou dados em Supabase — a lista de impressão exige as ${idsTransfer.length} unidades.`
+          );
+          return;
+        }
+
+        setErroListaTransferenciaSep('');
+        setLinhasRemessa(folha);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setLinhasRemessa([]);
+          setErroListaTransferenciaSep(
+            err instanceof Error
+              ? err.message
+              : 'Falha ao montar a lista da remessa a partir da transferência.'
+          );
+        }
+      } finally {
+        if (!cancelled) setMesclandoLinhasSep(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loteSelecionado, etiquetas]);
+
   const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x30');
   /** Indústria: sempre 60×60 + Pi; estoque: 60×30 navegador. */
   const mostrarZebra6060 = somenteZebra6060Industria;
@@ -354,12 +494,6 @@ export default function EtiquetasPage() {
   const [previsualizando, setPrevisualizando] = useState(false);
   const [erroImpressao, setErroImpressao] = useState('');
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
-  const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(() => new Set());
-  const [sincronizandoEtiquetasRemessa, setSincronizandoEtiquetasRemessa] = useState(false);
-  const [erroSincEtiquetasRemessa, setErroSincEtiquetasRemessa] = useState('');
-  const [sucessoSincEtiquetasRemessa, setSucessoSincEtiquetasRemessa] = useState('');
-  const [loginParaSyncRemessa, setLoginParaSyncRemessa] = useState('');
-  const [senhaParaSyncRemessa, setSenhaParaSyncRemessa] = useState('');
 
   /**
    * Recorte por origem da transferência (UUID do warehouse matriz).
@@ -420,62 +554,6 @@ export default function EtiquetasPage() {
   }, [carregarOpcoesRemessa]);
 
   useEffect(() => {
-    setErroSincEtiquetasRemessa('');
-    setSucessoSincEtiquetasRemessa('');
-    setSenhaParaSyncRemessa('');
-    const op = usuario?.login_operacional?.trim();
-    setLoginParaSyncRemessa(op ?? '');
-  }, [loteSelecionado, usuario?.login_operacional]);
-
-  const sincronizarEtiquetasDaTransferencia = useCallback(async () => {
-    if (!loteSelecionado) return;
-    const loginOp = loginParaSyncRemessa.trim().toLowerCase();
-    const senha = senhaParaSyncRemessa;
-    if (!loginOp) {
-      setErroSincEtiquetasRemessa('Informe o login operacional (o mesmo da tela de entrada).');
-      return;
-    }
-    if (!senha) {
-      setErroSincEtiquetasRemessa('Informe a senha.');
-      return;
-    }
-    setSincronizandoEtiquetasRemessa(true);
-    setErroSincEtiquetasRemessa('');
-    setSucessoSincEtiquetasRemessa('');
-    try {
-      const res = await fetch('/api/operacional/sync-etiquetas-remessa', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loteSep: loteSelecionado, login: loginOp, senha }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; n?: number };
-      if (!res.ok) {
-        throw new Error(payload.error || 'Falha ao sincronizar etiquetas');
-      }
-      const n = typeof payload.n === 'number' ? payload.n : 0;
-      setSenhaParaSyncRemessa('');
-      await refetchEtiquetasRemessa();
-      const nTr = await contarUnidadesTransferenciaPorLoteSep(loteSelecionado);
-      setUnidadesNaTransferencia(nTr);
-      setSucessoSincEtiquetasRemessa(
-        n > 0
-          ? `${n} etiqueta(s) gravadas. A lista abaixo deve atualizar em instantes.`
-          : 'Nenhuma linha gravada (confira se a remessa tem unidades na transferência).'
-      );
-    } catch (err: unknown) {
-      setErroSincEtiquetasRemessa(err instanceof Error ? err.message : 'Falha ao sincronizar etiquetas');
-    } finally {
-      setSincronizandoEtiquetasRemessa(false);
-    }
-  }, [loteSelecionado, loginParaSyncRemessa, senhaParaSyncRemessa, refetchEtiquetasRemessa]);
-
-  useEffect(() => {
-    if (!sucessoSincEtiquetasRemessa) return;
-    const t = setTimeout(() => setSucessoSincEtiquetasRemessa(''), 10000);
-    return () => clearTimeout(t);
-  }, [sucessoSincEtiquetasRemessa]);
-
-  useEffect(() => {
     if (opcoesRemessa.length === 0) {
       setLoteSelecionado(null);
       return;
@@ -488,42 +566,6 @@ export default function EtiquetasPage() {
     });
   }, [opcoesRemessa]);
 
-  useEffect(() => {
-    if (!loteSelecionado) {
-      setUnidadesNaTransferencia(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const n = await contarUnidadesTransferenciaPorLoteSep(loteSelecionado);
-      if (!cancelled) setUnidadesNaTransferencia(n);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loteSelecionado]);
-
-  const remessaBulkContexto = useMemo(() => {
-    if (!loteSelecionado) return null;
-    const entry = {
-      lote: loteSelecionado,
-      rows: etiquetas,
-      maisRecente:
-        etiquetas.length > 0
-          ? Math.max(...etiquetas.map((r) => new Date(r.created_at).getTime()))
-          : 0,
-    };
-    const vid = parseViagemIdDeLoteSep(loteSelecionado);
-    const meta = vid ? metaPorViagemId.get(vid) : undefined;
-    return { entry, meta, vid };
-  }, [loteSelecionado, etiquetas, metaPorViagemId]);
-
-  const linhasRemessaBulk = etiquetas;
-  const pendentesRemessaBulk = useMemo(
-    () => linhasRemessaBulk.filter((e) => !e.impressa).length,
-    [linhasRemessaBulk]
-  );
-
   function rotuloOpcaoRemessaNoTopo(o: OpcaoRemessaSepEtiquetas): string {
     if (o.origemNome && o.destinoNome) {
       const dataIso = o.transferenciaCreatedAt || o.created_at;
@@ -531,64 +573,6 @@ export default function EtiquetasPage() {
     }
     return `${formatarDataHoraRemessaPt(o.created_at)} · ${loteSepResumidoParaUi(o.lote)}`;
   }
-
-  const filtradas = useMemo(
-    () =>
-      etiquetas.filter((e) => {
-        if (e.excluida) return false;
-        if (filtro === 'pendentes') return !e.impressa;
-        if (filtro === 'impressas') return e.impressa;
-        return true;
-      }),
-    [etiquetas, filtro]
-  );
-
-  const grupos = useMemo(() => {
-    const map = new Map<string, GrupoEtiquetas>();
-    for (const etiqueta of filtradas) {
-      const lote = etiqueta.lote || `SEM_LOTE_${etiqueta.id}`;
-      const produtoNome = etiqueta.produto?.nome || 'Produto';
-      const chave = `${lote}::${produtoNome}`;
-      let g = map.get(chave);
-      if (!g) {
-        g = {
-          chave,
-          lote: etiqueta.lote || 'Sem lote',
-          produtoNome,
-          total: 0,
-          pendentes: 0,
-          impressas: 0,
-          etiquetas: [],
-        };
-        map.set(chave, g);
-      }
-      g.etiquetas.push(etiqueta);
-      g.total += 1;
-      if (etiqueta.impressa) g.impressas += 1;
-      else g.pendentes += 1;
-    }
-    return Array.from(map.values())
-      .map((g) => ({
-        ...g,
-        etiquetas: [...g.etiquetas].sort(compararEtiquetasNoGrupoUi),
-      }))
-      .sort((a, b) => {
-        if (b.total !== a.total) return b.total - a.total;
-        return a.produtoNome.localeCompare(b.produtoNome, 'pt-BR', { sensitivity: 'base' });
-      });
-  }, [filtradas]);
-
-  const marcarImpressa = async (ids: string[]) => {
-    const { error } = await supabase.from('etiquetas').update({ impressa: true }).in('id', ids);
-    if (error) throw error;
-    await refetchEtiquetasRemessa();
-  };
-
-  const excluir = async (id: string) => {
-    await supabase.from('etiquetas').update({ excluida: true }).eq('id', id);
-    await refetchEtiquetasRemessa();
-    void carregarOpcoesRemessa();
-  };
 
   const imprimirLista = async (lista: EtiquetaRow[]) => {
     if (lista.length === 0) return;
@@ -621,8 +605,6 @@ export default function EtiquetasPage() {
       if (!sucesso) {
         throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
       }
-
-      await marcarImpressa(ordenada.map((e) => e.id));
     } catch (err: unknown) {
       setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir etiquetas');
     } finally {
@@ -668,70 +650,8 @@ export default function EtiquetasPage() {
         connection: piConnection,
         papel: 'industria',
       });
-      await marcarImpressa(lista.map((e) => e.id));
     } catch (err: unknown) {
       setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir na estação Pi');
-    } finally {
-      setPrinting(false);
-    }
-  };
-
-  const imprimirEtiqueta = async (e: EtiquetaRow) => {
-    await imprimirLista([e]);
-  };
-
-  const imprimirPendentes = async () => {
-    const pendentes = filtradas.filter((e) => !e.impressa);
-    await imprimirLista(pendentes);
-  };
-
-  const imprimirGrupo = async (grupo: GrupoEtiquetas) => {
-    const pendentes = grupo.etiquetas.filter((etiqueta) => !etiqueta.impressa);
-    await imprimirLista(pendentes);
-  };
-
-  const imprimirGrupoNoPi = async (grupo: GrupoEtiquetas) => {
-    const pendentes = grupo.etiquetas.filter((etiqueta) => !etiqueta.impressa);
-    await imprimirListaNoPi(pendentes);
-  };
-
-  const imprimirPendentesNoPi = async () => {
-    const pendentes = filtradas.filter((e) => !e.impressa);
-    await imprimirListaNoPi(pendentes);
-  };
-
-  const imprimirRemessaInteiraNavegador = async (lista: EtiquetaRow[]) => {
-    if (lista.length === 0) return;
-    if (somenteZebra6060Industria) {
-      setErroImpressao('Nesta conta use apenas a impressão Zebra 60×60 (Pi indústria).');
-      return;
-    }
-    if (!confirmarImpressao(lista.length, formatoImpressao)) return;
-
-    setPrinting(true);
-    setErroImpressao('');
-    try {
-      const ordenada = ordenarEtiquetasPorProdutoParaImpressao(lista);
-      const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
-      const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
-      const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
-
-      const ok = await imprimirEtiquetasEmJobUnico(
-        rowsParaEtiquetasImpressao(
-          ordenada,
-          usuario?.nome || 'OPERADOR',
-          nomeLojaOuLocalRemessa,
-          numerosMap
-        ),
-        formatoImpressao,
-        formatoImpressao === '60x30' ? { preparar60x30PilhasPorLado: true } : undefined
-      );
-      if (!ok) {
-        throw new Error('Não foi possível abrir a janela de impressão. Libere pop-ups e tente novamente.');
-      }
-      await marcarImpressa(ordenada.map((e) => e.id));
-    } catch (err: unknown) {
-      setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir remessa no navegador');
     } finally {
       setPrinting(false);
     }
@@ -752,14 +672,12 @@ export default function EtiquetasPage() {
       setErroImpressao('');
       try {
         const ordenada = prepararListaMesmaOrdemImpressao(lista);
-        const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
-        const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
-        const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
+        /** Só leitura: não chama upsert/RPC no Supabase (evita falha com RLS ou login sem escrita em `etiquetas`). Imprimir remessa continua gravando números antes da folha. */
         const payload = rowsParaEtiquetasImpressao(
           ordenada,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
-          numerosMap
+          null
         );
         const mensagemBarra = somenteZebra6060Industria
           ? 'O Pi/Zebra recebe este mesmo layout. Feche a aba após conferir e use o botão Zebra 60×60.'
@@ -781,7 +699,6 @@ export default function EtiquetasPage() {
     },
     [
       formatoImpressao,
-      metaPorViagemId,
       nomeLojaOuLocalRemessa,
       prepararListaMesmaOrdemImpressao,
       somenteZebra6060Industria,
@@ -814,16 +731,15 @@ export default function EtiquetasPage() {
           </select>
           {loteSelecionado &&
             !carregandoEtiquetasRemessa &&
-            filtradas.filter((e) => !e.impressa).length > 0 && (
+            !mesclandoLinhasSep &&
+            linhasRemessa.length > 0 && (
             <>
               {!somenteZebra6060Industria && (
                 <>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() =>
-                      void previsualizarEtiquetas(filtradas.filter((e) => !e.impressa))
-                    }
+                    onClick={() => void previsualizarEtiquetas(linhasRemessa)}
                     disabled={previsualizando || printing}
                     className="w-full sm:w-auto"
                     title="Abre uma nova aba com o layout exato antes de imprimir"
@@ -835,9 +751,14 @@ export default function EtiquetasPage() {
                     )}
                     Ver prévia
                   </Button>
-                  <Button variant="primary" onClick={() => void imprimirPendentes()} disabled={printing} className="w-full sm:w-auto">
+                  <Button
+                    variant="primary"
+                    onClick={() => void imprimirLista(linhasRemessa)}
+                    disabled={printing}
+                    className="w-full sm:w-auto"
+                  >
                     {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
-                    Imprimir pendentes
+                    Imprimir remessa
                   </Button>
                 </>
               )}
@@ -846,9 +767,7 @@ export default function EtiquetasPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() =>
-                      void previsualizarEtiquetas(filtradas.filter((e) => !e.impressa))
-                    }
+                    onClick={() => void previsualizarEtiquetas(linhasRemessa)}
                     disabled={previsualizando || printing}
                     className="w-full sm:w-auto border-emerald-800/40 text-emerald-950"
                     title="Mesmo HTML enviado à Zebra — conferir antes de imprimir"
@@ -862,7 +781,7 @@ export default function EtiquetasPage() {
                   </Button>
                   <Button
                     variant="primary"
-                    onClick={() => void imprimirPendentesNoPi()}
+                    onClick={() => void imprimirListaNoPi(linhasRemessa)}
                     disabled={printing || piCfgLoading || !piPrintAvailable}
                     title={
                       !piPrintAvailable && !piCfgLoading
@@ -876,7 +795,7 @@ export default function EtiquetasPage() {
                     ) : (
                       <Server className="w-4 h-4 mr-2" />
                     )}
-                    Zebra 60×60 (indústria)
+                    Imprimir remessa (Zebra)
                   </Button>
                 </>
               )}
@@ -1038,199 +957,36 @@ export default function EtiquetasPage() {
         </div>
       )}
 
-      {loteSelecionado && remessaBulkContexto && (
-        <div className="mb-5 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm space-y-3">
-          <div className="flex flex-col gap-2">
-            <p className="text-lg font-bold text-emerald-950">Remessa selecionada</p>
-            {carregandoEtiquetasRemessa && (
-              <p className="text-xs text-emerald-800">Carregando etiquetas desta remessa…</p>
-            )}
-            <div className="text-sm text-emerald-950 space-y-1.5 rounded-lg bg-white/70 border border-emerald-100 px-3 py-2.5">
-              <p className="font-semibold">
-                {formatarDataHoraRemessaPt(
-                  dataReferenciaRemessa(remessaBulkContexto.entry.rows, remessaBulkContexto.meta)
-                )}
-                {remessaBulkContexto.meta ? (
-                  <>
-                    {' '}
-                    · <span className="text-emerald-900">{remessaBulkContexto.meta.origemNome}</span>
-                    <span className="text-emerald-700 font-normal"> → </span>
-                    <span className="text-emerald-900">{remessaBulkContexto.meta.destinoNome}</span>
-                  </>
-                ) : (
-                  <span className="text-amber-800 font-normal text-xs block mt-1">
-                    Origem e destino ainda não carregaram (ou transferência não encontrada). A data acima vem das
-                    etiquetas.
-                  </span>
-                )}
-              </p>
-              {remessaBulkContexto.meta && (
-                <p className="text-xs text-emerald-800">
-                  Situação da viagem: <strong>{statusTransferenciaLegivel(remessaBulkContexto.meta.status)}</strong>
-                </p>
-              )}
-              <p className="text-xs text-emerald-900">
-                <strong>{linhasRemessaBulk.length}</strong> linha(s) em <code className="text-[10px]">etiquetas</code> para
-                este lote — <strong>{pendentesRemessaBulk}</strong> ainda sem impressão,{' '}
-                <strong>{linhasRemessaBulk.length - pendentesRemessaBulk}</strong> já impressas.
-              </p>
-              {unidadesNaTransferencia != null && unidadesNaTransferencia > linhasRemessaBulk.length && (
-                <p className="text-xs text-amber-950 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2">
-                  Na <strong>transferência</strong> (matriz → loja) há <strong>{unidadesNaTransferencia}</strong> unidade(s)
-                  distintas; aqui só aparecem as que já têm linha em <code className="text-[10px]">etiquetas</code>. Para
-                  gerar as que faltam, use <strong>Gravar etiquetas a partir da transferência</strong> abaixo (login +
-                  senha operacional).
-                </p>
-              )}
-              {parseViagemIdDeLoteSep(loteSelecionado) &&
-                !carregandoEtiquetasRemessa &&
-                !erroQueryEtiquetas && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2 text-xs text-amber-950">
-                    {linhasRemessaBulk.length === 0 ? (
-                      <p>
-                        <strong>Nenhuma etiqueta ativa</strong> para este lote. Preencha <strong>login</strong> e{' '}
-                        <strong>senha</strong> (os mesmos da tela de entrada) e confirme: o servidor grava em{' '}
-                        <code className="text-[10px]">etiquetas</code> a partir da transferência (contorna bloqueio de
-                        permissão no navegador).
-                      </p>
-                    ) : (
-                      <p>
-                        Se <strong>Separar por Loja</strong> mostra mais unidades do que esta lista, use abaixo: o
-                        servidor recompõe <code className="text-[10px]">etiquetas</code> com <strong>todos</strong> os
-                        itens das transferências matriz→loja desta viagem (mesmo destino), sem apagar o que já estava
-                        impresso.
-                      </p>
-                    )}
-                    {sucessoSincEtiquetasRemessa && (
-                      <p className="text-emerald-900 bg-emerald-100 border border-emerald-200 rounded px-2 py-1.5">
-                        {sucessoSincEtiquetasRemessa}
-                      </p>
-                    )}
-                    {erroSincEtiquetasRemessa && (
-                      <p className="text-red-800 bg-red-50 border border-red-100 rounded px-2 py-1">
-                        {erroSincEtiquetasRemessa}
-                      </p>
-                    )}
-                    <div className="space-y-2 pt-1">
-                      <Input
-                        label="Login operacional"
-                        autoComplete="username"
-                        className="text-sm py-2"
-                        value={loginParaSyncRemessa}
-                        onChange={(e) => setLoginParaSyncRemessa(e.target.value)}
-                        placeholder="ex.: leonardo"
-                        disabled={sincronizandoEtiquetasRemessa}
-                      />
-                      <Input
-                        label="Senha"
-                        type="password"
-                        autoComplete="current-password"
-                        className="text-sm py-2"
-                        value={senhaParaSyncRemessa}
-                        onChange={(e) => setSenhaParaSyncRemessa(e.target.value)}
-                        placeholder="Mesma senha do login"
-                        disabled={sincronizandoEtiquetasRemessa}
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full sm:w-auto inline-flex items-center justify-center border-amber-500 text-amber-950 hover:bg-amber-100 text-xs mt-1"
-                        disabled={
-                          sincronizandoEtiquetasRemessa ||
-                          !loginParaSyncRemessa.trim() ||
-                          !senhaParaSyncRemessa
-                        }
-                        onClick={() => void sincronizarEtiquetasDaTransferencia()}
-                      >
-                        {sincronizandoEtiquetasRemessa ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin shrink-0" />
-                            Gravando no servidor…
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 mr-1.5 shrink-0" />
-                            Gravar etiquetas a partir da transferência
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              {resumoProdutosRemessa(linhasRemessaBulk, 4) && (
-                <p className="text-xs text-gray-700">
-                  <span className="font-medium text-emerald-900">Produtos:</span> {resumoProdutosRemessa(linhasRemessaBulk, 4)}
-                </p>
-              )}
-              <p className="text-[11px] text-gray-500 font-mono break-all">
-                Código interno (suporte): {loteSelecionado}
-              </p>
-              {typeof window !== 'undefined' &&
-                (() => {
-                  const salva = lerUltimaRemessaPersistida();
-                  if (salva?.lote !== loteSelecionado) return null;
-                  return (
-                    <p className="text-xs text-emerald-800">
-                      Última separação registrada neste aparelho para a loja: <strong>{salva.nomeLoja}</strong>
-                    </p>
-                  );
-                })()}
-            </div>
-            <p className="text-xs text-emerald-900">
-              Troque a remessa no campo acima. A lista por produto fica abaixo.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                previsualizando ||
-                printing ||
-                carregandoEtiquetasRemessa ||
-                linhasRemessaBulk.length === 0
-              }
-              onClick={() => void previsualizarEtiquetas(linhasRemessaBulk)}
-              title="Pré-visualizar todas as etiquetas ativas desta remessa"
-            >
-              {previsualizando ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Eye className="w-4 h-4 mr-2" />
-              )}
-              Ver prévia — remessa ({linhasRemessaBulk.length})
-            </Button>
-            {mostrarZebra6060 && (
-              <Button
-                variant="primary"
-                className="border-emerald-600 bg-emerald-700 hover:bg-emerald-800"
-                disabled={
-                  printing || piCfgLoading || !piPrintAvailable || carregandoEtiquetasRemessa || linhasRemessaBulk.length === 0
-                }
-                onClick={() => void imprimirListaNoPi(linhasRemessaBulk)}
-                title="Zebra 60×60 — Pi indústria"
-              >
-                {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
-                Zebra 60×60 — remessa ({linhasRemessaBulk.length})
-              </Button>
-            )}
-            {!somenteZebra6060Industria && (
-              <Button
-                variant="primary"
-                className="border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white"
-                disabled={printing || carregandoEtiquetasRemessa || linhasRemessaBulk.length === 0}
-                onClick={() => void imprimirRemessaInteiraNavegador(linhasRemessaBulk)}
-              >
-                {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
-                Navegador — remessa inteira ({formatoImpressao})
-              </Button>
-            )}
-          </div>
-          {mostrarZebra6060 && !piCfgLoading && !piPrintAvailable && (
-            <p className="text-xs text-amber-900">
-              Pi indústria indisponível: use o botão do navegador ou configure em Configurações → Impressoras.
-            </p>
-          )}
+      {loteSelecionado?.trim().toUpperCase().startsWith('SEP-') &&
+        erroListaTransferenciaSep &&
+        !carregandoEtiquetasRemessa &&
+        !mesclandoLinhasSep && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>Remessa SEP — lista da separação:</strong> {erroListaTransferenciaSep}
+        </div>
+      )}
+
+      {loteSelecionado && mostrarZebra6060 && !piCfgLoading && !piPrintAvailable && (
+        <p className="mb-4 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Impressão 60×60 na estação indisponível: configure a ponte indústria em Configurações → Impressoras (veja a
+          documentação do Raspberry).
+        </p>
+      )}
+
+      {loteSelecionado &&
+        !carregandoEtiquetasRemessa &&
+        !mesclandoLinhasSep &&
+        !erroQueryEtiquetas &&
+        linhasRemessa.length === 0 &&
+        !erroListaTransferenciaSep && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p>
+            Nenhuma linha de etiqueta para este lote. Confira a separação em{' '}
+            <Link href="/separar-por-loja" className="font-medium text-red-700 underline underline-offset-2">
+              Separar por Loja
+            </Link>{' '}
+            ou contate o suporte se a remessa deveria ter unidades.
+          </p>
         </div>
       )}
 
@@ -1241,241 +997,35 @@ export default function EtiquetasPage() {
         </div>
       )}
 
-      {loteSelecionado && carregandoEtiquetasRemessa && !erroQueryEtiquetas && (
+      {loteSelecionado &&
+        (carregandoEtiquetasRemessa || mesclandoLinhasSep) &&
+        !erroQueryEtiquetas && (
         <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-600">
           <Loader2 className="w-10 h-10 text-red-500 animate-spin" />
-          <p className="text-sm">Carregando etiquetas desta remessa…</p>
+          <p className="text-sm">
+            {carregandoEtiquetasRemessa
+              ? 'Carregando etiquetas desta remessa…'
+              : 'Carregando unidades da separação (remessa SEP)…'}
+          </p>
         </div>
       )}
 
-      {loteSelecionado && !carregandoEtiquetasRemessa && !erroQueryEtiquetas && (
-        <>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {(['pendentes', 'impressas', 'todas'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setFiltro(f)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  filtro === f ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {f === 'pendentes' ? 'Pendentes' : f === 'impressas' ? 'Impressas' : 'Todas'}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-3">
-        {grupos.map((grupo) => (
-          <div key={grupo.chave} className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-              <div>
-                <p className="font-semibold text-gray-900">{grupo.produtoNome}</p>
-                <div className="flex flex-col gap-1 mt-1">
-                  {(() => {
-                    const vidGrupo = parseViagemIdDeLoteSep(grupo.lote);
-                    if (!vidGrupo) return null;
-                    const tm = metaPorViagemId.get(vidGrupo);
-                    if (tm) {
-                      return (
-                        <span className="text-xs text-gray-700">
-                          <span className="font-medium text-gray-800">Remessa separação:</span>{' '}
-                          {formatarDataHoraRemessaPt(tm.createdAt)} · {tm.origemNome} → {tm.destinoNome}
-                          <span className="text-gray-500"> · {statusTransferenciaLegivel(tm.status)}</span>
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className="text-xs text-amber-800">
-                        Remessa sem dados de transferência neste aparelho (código {grupo.lote}).
-                      </span>
-                    );
-                  })()}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-gray-500">
-                      {parseViagemIdDeLoteSep(grupo.lote) ? (
-                        <>
-                          Código interno:{' '}
-                          <code className="text-[10px] bg-gray-100 px-1 rounded">{grupo.lote}</code>
-                        </>
-                      ) : (
-                        <>Lote: {grupo.lote}</>
-                      )}
-                    </span>
-                  <span className="text-xs text-gray-500">Total: {grupo.total}</span>
-                  <Badge variant="warning" size="sm">
-                    Pendentes: {grupo.pendentes}
-                  </Badge>
-                  <Badge variant="success" size="sm">
-                    Impressas: {grupo.impressas}
-                  </Badge>
-                  </div>
-                </div>
-              </div>
-              {grupo.pendentes > 0 && (
-                <div className="flex flex-col sm:flex-row flex-wrap gap-2 shrink-0">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      void previsualizarEtiquetas(grupo.etiquetas.filter((et) => !et.impressa))
-                    }
-                    disabled={previsualizando || printing}
-                    title="Prévia só das pendentes deste produto"
-                  >
-                    {previsualizando ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Eye className="w-4 h-4 mr-2" />
-                    )}
-                    Prévia ({grupo.pendentes})
-                  </Button>
-                  {!somenteZebra6060Industria && (
-                    <Button variant="primary" onClick={() => void imprimirGrupo(grupo)} disabled={printing}>
-                      {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Printer className="w-4 h-4 mr-2" />}
-                      Navegador ({grupo.pendentes})
-                    </Button>
-                  )}
-                  {mostrarZebra6060 && (
-                    <Button
-                      variant="primary"
-                      onClick={() => void imprimirGrupoNoPi(grupo)}
-                      disabled={printing || piCfgLoading || !piPrintAvailable}
-                      className="border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white"
-                    >
-                      {printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Server className="w-4 h-4 mr-2" />}
-                      Zebra 60×60 ({grupo.pendentes})
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 max-h-[min(24rem,70vh)] overflow-y-auto space-y-2">
-              {(gruposExpandidos.has(grupo.chave)
-                ? grupo.etiquetas
-                : grupo.etiquetas.slice(0, ETIQUETAS_VISIVEIS_POR_GRUPO)
-              ).map((e) => (
-                <div
-                  key={e.id}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-gray-400">
-                      Val:{' '}
-                      {produtoTemValidade(e.produto)
-                        ? new Date(e.data_validade).toLocaleDateString('pt-BR')
-                        : 'Sem validade'}
-                    </span>
-                    <span className="text-xs text-gray-400 font-mono">
-                      Token: {e.item?.token_short || e.id.slice(0, 8).toUpperCase()}
-                    </span>
-                    {e.numero_sequencia_loja != null && Number.isFinite(Number(e.numero_sequencia_loja)) && (
-                      <span className="text-xs font-semibold text-emerald-800">
-                        Balde nº {e.numero_sequencia_loja}
-                      </span>
-                    )}
-                    <Badge variant={e.impressa ? 'success' : 'warning'} size="sm">
-                      {e.impressa ? 'Impressa' : 'Pendente'}
-                    </Badge>
-                  </div>
-                  <div className="flex gap-1 self-end sm:self-auto">
-                    <button
-                      type="button"
-                      aria-label="Ver prévia desta etiqueta"
-                      title="Prévia numa nova aba"
-                      disabled={previsualizando}
-                      onClick={() => {
-                        setErroImpressao('');
-                        void previsualizarEtiquetas([e]);
-                      }}
-                      className="p-2 text-gray-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg disabled:opacity-40"
-                    >
-                      {previsualizando ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                    {!somenteZebra6060Industria && (
-                      <button
-                        type="button"
-                        aria-label="Imprimir etiqueta no navegador"
-                        onClick={async () => {
-                          setErroImpressao('');
-                          try {
-                            await imprimirEtiqueta(e);
-                          } catch (err: unknown) {
-                            setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir etiqueta');
-                          }
-                        }}
-                        className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
-                    )}
-                    {mostrarZebra6060 && (
-                      <button
-                        type="button"
-                        aria-label="Imprimir etiqueta na Zebra 60×60 (indústria)"
-                        disabled={printing || piCfgLoading || !piPrintAvailable}
-                        title={
-                          !piPrintAvailable
-                            ? 'Configure a ponte Pi indústria'
-                            : 'Zebra 60×60 via Pi indústria'
-                        }
-                        onClick={async () => {
-                          setErroImpressao('');
-                          try {
-                            await imprimirListaNoPi([e]);
-                          } catch (err: unknown) {
-                            setErroImpressao(err instanceof Error ? err.message : 'Falha ao imprimir na Pi');
-                          }
-                        }}
-                        className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-40 disabled:pointer-events-none"
-                      >
-                        <Server className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => excluir(e.id)}
-                      className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {grupo.etiquetas.length > ETIQUETAS_VISIVEIS_POR_GRUPO && (
-                <button
-                  type="button"
-                  className="w-full text-xs font-medium text-red-600 hover:text-red-700 py-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/80"
-                  onClick={() =>
-                    setGruposExpandidos((prev) => {
-                      const n = new Set(prev);
-                      if (n.has(grupo.chave)) n.delete(grupo.chave);
-                      else n.add(grupo.chave);
-                      return n;
-                    })
-                  }
-                >
-                  {gruposExpandidos.has(grupo.chave)
-                    ? `Mostrar só as primeiras ${ETIQUETAS_VISIVEIS_POR_GRUPO} (ocultar ${grupo.etiquetas.length - ETIQUETAS_VISIVEIS_POR_GRUPO})`
-                    : `Mostrar todas as ${grupo.etiquetas.length} linhas deste grupo (${ETIQUETAS_VISIVEIS_POR_GRUPO} visíveis)`}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-        {filtradas.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <QrCode className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>Nenhuma etiqueta {filtro === 'pendentes' ? 'pendente' : ''} nesta remessa</p>
-          </div>
-        )}
-          </div>
-        </>
+      {loteSelecionado &&
+        !carregandoEtiquetasRemessa &&
+        !mesclandoLinhasSep &&
+        !erroQueryEtiquetas &&
+        linhasRemessa.length > 0 && (
+        <p className="mb-4 text-sm text-gray-600 rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-3">
+          <strong>{linhasRemessa.length}</strong> etiqueta{linhasRemessa.length === 1 ? '' : 's'} — mesma quantidade de
+          unidades registradas na separação matriz → loja para este lote <code className="text-[11px]">SEP-…</code>{' '}
+          (cada QR da remessa). Use <strong>Ver prévia</strong> ou <strong>Imprimir remessa</strong> no topo; a prévia
+          não grava no banco; ao imprimir, grava em <code className="text-[11px]">etiquetas</code> e sequência de balde
+          quando aplicável. Registro em{' '}
+          <Link href="/separar-por-loja" className="text-red-700 font-medium underline underline-offset-2">
+            Separar por Loja
+          </Link>
+          .
+        </p>
       )}
     </div>
   );
