@@ -2,6 +2,7 @@
 
 ## Objetivo
 - **Marca na interface:** logotipo **Açaí do Kim** em login, header mobile, início (`/`), loading do `AuthGuard`, `Sidebar` e `Header` (asset em `public/branding/acai-do-kim-logo.png`, componente `LogoKim`).
+- **PWA / atalho (iOS «Adicionar à Tela de Início»):** título e nome do app **controle de estoque**; ícone **`apple-touch-icon`** + [`public/manifest.webmanifest`](public/manifest.webmanifest) usam o mesmo logo em `/branding/acai-do-kim-logo.png` (`metadata` em [`src/app/layout.tsx`](src/app/layout.tsx)).
 - Controlar fluxo de itens unitários por QR entre indústria e lojas.
 - Garantir rastreabilidade completa do item no ciclo: origem -> trânsito -> destino.
 

@@ -1,0 +1,17 @@
+{
+  "name": "controle de estoque",
+  "short_name": "controle de estoque",
+  "description": "Controle de estoque por unidade com QR — Açaí do Kim",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/branding/acai-do-kim-logo.png",
+      "type": "image/png",
+      "sizes": "916x754",
+      "purpose": "any"
+    }
+  ]
+}

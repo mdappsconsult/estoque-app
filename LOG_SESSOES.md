@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-20 - PWA: ícone e nome «Adicionar à Tela de Início» (iOS)
+- **Pedido:** no atalho da tela inicial, mostrar o logotipo Açaí do Kim e o texto **controle de estoque** (em vez do «A» genérico e título longo).
+- **Mudança:** [`src/app/layout.tsx`](src/app/layout.tsx) — `title` / `applicationName` / `appleWebApp.title` + `icons.apple` → `/branding/acai-do-kim-logo.png`; [`public/manifest.webmanifest`](public/manifest.webmanifest). `CONTEXTO_ATUAL.md`.
+- **Impacto:** Safari passa a sugerir ícone e rótulo alinhados à marca; pode ser preciso **remover o atalho antigo** e adicionar de novo para limpar cache de ícone.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-20 - SEP matriz→loja: reserva de estoque na criação da remessa
 - **Pedido:** ao criar separação para loja, o saldo **Em estoque** na origem deve cair na hora (ex.: 10 → 9); só voltar ao cancelar a remessa SEP antes do trânsito.
 - **Mudança:** [`src/lib/services/transferencias.ts`](src/lib/services/transferencias.ts) — em `criarTransferencia`, se `tipo === 'WAREHOUSE_STORE'`, `UPDATE itens` → `EM_TRANSFERENCIA` (origem inalterada) em fatias + `sincronizarEstoquePorProdutos` (client opcional no helper). `cancelarRemessaMatrizParaLoja`: valida `EM_ESTOQUE` ou `EM_TRANSFERENCIA` na origem; antes de apagar, restaura `EM_ESTOQUE` + sync. `despacharTransferencia`: pré-check idempotente (`EM_ESTOQUE` ou `EM_TRANSFERENCIA` na origem). `CONTEXTO_ATUAL.md`.
