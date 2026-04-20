@@ -25,6 +25,202 @@ interface RegistrarProducaoInput {
   responsavelNome: string;
 }
 
+/**
+ * Select PostgREST para histórico na tela de produção (GET curto).
+ * Sem embed `itens(count)` nem `producao_consumo_itens(count)`: contagens em consultas separadas com `.in()` em **lotes pequenos** (URL GET longa → `TypeError: Failed to fetch` em proxy/mobile).
+ */
+/** Sem `numero_lote_producao`: em bancos sem migração `20260420120000_…` a coluna não existe em `producoes` — o lote exibido vem de `etiquetas.lote_producao_numero` quando houver. */
+export const HISTORICO_PRODUCAO_SELECT = [
+  'id',
+  'created_at',
+  'produto_id',
+  'quantidade',
+  'num_baldes',
+  'local_id',
+  'responsavel',
+  'produtos(nome)',
+  'locais(nome)',
+].join(', ');
+
+/** Máx. de UUIDs por `.in()` para evitar URL de GET gigante (414 / falha de rede). */
+const HISTORICO_IN_CHUNK = 20;
+
+export type ProducaoHistoricoResumo = {
+  id: string;
+  createdAt: string;
+  produtoNome: string;
+  localNome: string;
+  /** `null` se o banco não tiver rastreio de lote ou etiqueta ainda não tiver número. */
+  numeroLoteProducao: number | null;
+  numBaldes: number;
+  quantidade: number;
+  qrsAcabado: number;
+  /** `false` se a contagem por rede falhou (lista ainda aparece; «QRs acabado» fica N/D). */
+  contagemAcabadoDisponivel: boolean;
+  qrsInsumoBaixados: number;
+  /** `false` se a contagem de insumos por rede falhou parcial ou totalmente. */
+  contagemInsumoDisponivel: boolean;
+  responsavel: string;
+  /** QRs gerados do acabado batem com baldes e quantidade gravada. */
+  coerenteBaldes: boolean;
+};
+
+/**
+ * Conta QRs do acabado por produção e tenta obter número do lote via primeira etiqueta do lote (mesmo dado da face impressa).
+ * Não propaga erro de rede: retorna `contagemAcabadoDisponivel: false` para o chamador tratar.
+ */
+async function agregarItensAcabadoPorProducaoIds(producaoIds: string[]): Promise<{
+  qrsPorProducao: Map<string, number>;
+  loteNumeroPorProducao: Map<string, number | null>;
+  contagemAcabadoDisponivel: boolean;
+}> {
+  const qrsPorProducao = new Map<string, number>();
+  const primeiroItemIdPorProducao = new Map<string, string>();
+  const loteNumeroPorProducao = new Map<string, number | null>();
+  let contagemAcabadoDisponivel = true;
+
+  const ids = [...new Set(producaoIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel: true };
+  }
+
+  for (let i = 0; i < ids.length; i += HISTORICO_IN_CHUNK) {
+    const slice = ids.slice(i, i + HISTORICO_IN_CHUNK);
+    try {
+      const { data, error } = await supabase.from('itens').select('id, producao_id').in('producao_id', slice);
+      if (error) {
+        console.warn('[historico-producao] itens:', error.message);
+        contagemAcabadoDisponivel = false;
+        continue;
+      }
+      for (const row of data || []) {
+        const pid = (row as { producao_id?: string | null }).producao_id;
+        const iid = (row as { id?: string }).id;
+        if (!pid || !iid) continue;
+        qrsPorProducao.set(pid, (qrsPorProducao.get(pid) || 0) + 1);
+        if (!primeiroItemIdPorProducao.has(pid)) primeiroItemIdPorProducao.set(pid, iid);
+      }
+    } catch (e) {
+      console.warn('[historico-producao] itens rede:', e);
+      contagemAcabadoDisponivel = false;
+    }
+  }
+
+  const itemIds = [...new Set(primeiroItemIdPorProducao.values())];
+  if (itemIds.length === 0) {
+    return { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel };
+  }
+
+  const lotePorItemId = new Map<string, number | null>();
+  try {
+    for (let j = 0; j < itemIds.length; j += HISTORICO_IN_CHUNK) {
+      const sliceE = itemIds.slice(j, j + HISTORICO_IN_CHUNK);
+      const { data: ets, error: errE } = await supabase
+        .from('etiquetas')
+        .select('id, lote_producao_numero')
+        .in('id', sliceE);
+      if (errE) {
+        console.warn('[historico-producao] etiquetas:', errE.message);
+        break;
+      }
+      for (const e of ets || []) {
+        const er = e as { id?: string; lote_producao_numero?: number | string | null };
+        if (!er.id) continue;
+        const raw = er.lote_producao_numero;
+        const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10);
+        lotePorItemId.set(er.id, Number.isFinite(n) ? n : null);
+      }
+    }
+  } catch (e) {
+    console.warn('[historico-producao] etiquetas rede:', e);
+  }
+
+  for (const [pid, itemId] of primeiroItemIdPorProducao) {
+    loteNumeroPorProducao.set(pid, lotePorItemId.get(itemId) ?? null);
+  }
+
+  return { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel };
+}
+
+async function contarInsumosPorProducaoIds(producaoIds: string[]): Promise<{
+  insumosPorProducao: Map<string, number>;
+  contagemInsumoDisponivel: boolean;
+}> {
+  const insumosPorProducao = new Map<string, number>();
+  let contagemInsumoDisponivel = true;
+  const ids = [...new Set(producaoIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return { insumosPorProducao, contagemInsumoDisponivel: true };
+  }
+
+  for (let i = 0; i < ids.length; i += HISTORICO_IN_CHUNK) {
+    const slice = ids.slice(i, i + HISTORICO_IN_CHUNK);
+    try {
+      const { data, error } = await supabase
+        .from('producao_consumo_itens')
+        .select('producao_id')
+        .in('producao_id', slice);
+      if (error) {
+        console.warn('[historico-producao] consumo_itens:', error.message);
+        contagemInsumoDisponivel = false;
+        continue;
+      }
+      for (const row of data || []) {
+        const pid = (row as { producao_id?: string | null }).producao_id;
+        if (!pid) continue;
+        insumosPorProducao.set(pid, (insumosPorProducao.get(pid) || 0) + 1);
+      }
+    } catch (e) {
+      console.warn('[historico-producao] consumo_itens rede:', e);
+      contagemInsumoDisponivel = false;
+    }
+  }
+
+  return { insumosPorProducao, contagemInsumoDisponivel };
+}
+
+export async function mapearHistoricoProducaoRows(
+  rows: Record<string, unknown>[]
+): Promise<ProducaoHistoricoResumo[]> {
+  const ids = rows.map((r) => String(r.id ?? ''));
+  const [aggItens, aggInsumo] = await Promise.all([
+    agregarItensAcabadoPorProducaoIds(ids),
+    contarInsumosPorProducaoIds(ids),
+  ]);
+  const { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel } = aggItens;
+  const { insumosPorProducao, contagemInsumoDisponivel } = aggInsumo;
+
+  return rows.map((r) => {
+    const produtos = r.produtos as { nome?: string } | null;
+    const locais = r.locais as { nome?: string } | null;
+    const numBaldes = Math.floor(Number(r.num_baldes ?? 0));
+    const quantidade = Math.floor(Number(r.quantidade ?? 0));
+    const id = String(r.id);
+    const qrsAcabado = qrsPorProducao.get(id) ?? 0;
+    const qrsInsumoBaixados = insumosPorProducao.get(id) ?? 0;
+    return {
+      id,
+      createdAt: String(r.created_at ?? ''),
+      produtoNome: produtos?.nome?.trim() || '—',
+      localNome: locais?.nome?.trim() || '—',
+      numeroLoteProducao: loteNumeroPorProducao.get(id) ?? null,
+      numBaldes,
+      quantidade,
+      qrsAcabado,
+      contagemAcabadoDisponivel,
+      qrsInsumoBaixados,
+      contagemInsumoDisponivel,
+      responsavel: String(r.responsavel ?? '').trim() || '—',
+      coerenteBaldes:
+        contagemAcabadoDisponivel &&
+        contagemInsumoDisponivel &&
+        numBaldes > 0 &&
+        qrsAcabado === numBaldes &&
+        quantidade === numBaldes,
+    };
+  });
+}
+
 export interface EtiquetaGeradaProducao {
   id: string;
   produtoId: string;

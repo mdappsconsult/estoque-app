@@ -18,7 +18,8 @@
     "railway:release": "railway up --detach && node scripts/railway-wait-deployment.mjs",
     "railway:diagnose": "node scripts/railway-diagnose.mjs",
     "seed:operacional": "node scripts/seed-credenciais-operacionais.mjs",
-    "railway:prune-queued": "node scripts/railway-prune-queued.mjs"
+    "railway:prune-queued": "node scripts/railway-prune-queued.mjs",
+    "test:historico-producao": "node scripts/test-historico-producao.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.0",

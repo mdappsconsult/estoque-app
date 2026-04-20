@@ -1,14 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server, Eye } from 'lucide-react';
+import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server, Eye, History } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Modal from '@/components/ui/Modal';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import { registrarProducaoComItens } from '@/lib/services/producao';
+import {
+  HISTORICO_PRODUCAO_SELECT,
+  mapearHistoricoProducaoRows,
+  registrarProducaoComItens,
+  type ProducaoHistoricoResumo,
+} from '@/lib/services/producao';
 import { errMessage } from '@/lib/errMessage';
 import { contarItensDisponiveisLocal } from '@/lib/services/itens';
 import { supabase } from '@/lib/supabase';
@@ -51,6 +56,32 @@ export default function ProducaoPage() {
   );
   const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const warehouses = locais.filter((l) => l.tipo === 'WAREHOUSE');
+
+  const filtroHistoricoLocal = useMemo(() => {
+    if (!usuario) return undefined;
+    const perfil = usuario.perfil;
+    if (perfil === 'OPERATOR_WAREHOUSE' || perfil === 'OPERATOR_WAREHOUSE_DRIVER') {
+      const lid = usuario.local_padrao_id?.trim();
+      if (lid) return [{ column: 'local_id' as const, value: lid }];
+    }
+    return undefined;
+  }, [usuario]);
+
+  const {
+    data: historicoProducoes,
+    loading: historicoLoading,
+    error: historicoError,
+  } = useRealtimeQuery<ProducaoHistoricoResumo>({
+    table: 'producoes',
+    select: HISTORICO_PRODUCAO_SELECT,
+    filters: filtroHistoricoLocal,
+    orderBy: { column: 'created_at', ascending: false },
+    maxRows: 150,
+    enabled: Boolean(usuario),
+    transform: mapearHistoricoProducaoRows,
+    preserveDataWhileRefetching: true,
+    refetchDebounceMs: 400,
+  });
 
   const [form, setForm] = useState({
     produto_id: '',
@@ -368,7 +399,7 @@ export default function ProducaoPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-5xl mx-auto px-1 sm:px-0">
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
           <ChefHat className="w-5 h-5 text-green-600" />
@@ -465,7 +496,7 @@ export default function ProducaoPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mb-8">
         <Select
           label="Produto acabado"
           required
@@ -625,6 +656,125 @@ export default function ProducaoPage() {
           {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
           Registrar produção
         </Button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 mb-8">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
+            <History className="w-4 h-4 text-slate-600" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Produções registradas</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Cada balde corresponde a 1 QR do acabado. A coluna «QRs acabado» deve ser igual a «Baldes»; «Insumos
+              (QR)» é o total de unidades de insumo baixadas neste lançamento (FEFO no local).
+            </p>
+            {filtroHistoricoLocal && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 mt-2">
+                Lista filtrada ao seu armazém padrão ({warehouses.find((w) => w.id === filtroHistoricoLocal[0]?.value)?.nome ?? 'local'}).
+              </p>
+            )}
+          </div>
+        </div>
+
+        {historicoError && (
+          <div className="text-sm text-red-700 mb-3 space-y-1">
+            <p>
+              Não foi possível carregar o histórico:{' '}
+              {errMessage(historicoError, 'Erro desconhecido')}
+            </p>
+            {/failed to fetch|load failed|networkerror/i.test(String(historicoError.message)) && (
+              <p className="text-xs text-red-900/90">
+                Falha de rede ao falar com o Supabase (URL longa, proxy, VPN, projeto pausado ou variáveis
+                NEXT_PUBLIC_SUPABASE_* incorretas). Rode <code className="text-[11px]">npm run test:historico-producao</code>{' '}
+                no mesmo ambiente do deploy para isolar o problema.
+              </p>
+            )}
+          </div>
+        )}
+
+        {historicoLoading && historicoProducoes.length === 0 ? (
+          <div className="flex items-center gap-2 text-gray-600 text-sm py-6">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Carregando histórico…
+          </div>
+        ) : historicoProducoes.length === 0 ? (
+          <p className="text-sm text-gray-500 py-4">Nenhuma produção encontrada.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1 sm:mx-0">
+            <table className="min-w-[720px] w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-600">
+                  <th className="py-2 pr-3 font-medium whitespace-nowrap">Data / hora</th>
+                  <th className="py-2 pr-3 font-medium">Local</th>
+                  <th className="py-2 pr-3 font-medium">Produto</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Lote prod.</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Baldes</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Qtd gravada</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">QRs acabado</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Insumos (QR)</th>
+                  <th className="py-2 pr-3 font-medium whitespace-nowrap">Conferência</th>
+                  <th className="py-2 font-medium">Resp.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historicoProducoes.map((row) => (
+                  <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/80">
+                    <td className="py-2 pr-3 text-gray-800 whitespace-nowrap">
+                      {row.createdAt
+                        ? new Date(row.createdAt).toLocaleString('pt-BR', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="py-2 pr-3 text-gray-700 max-w-[140px] truncate" title={row.localNome}>
+                      {row.localNome}
+                    </td>
+                    <td className="py-2 pr-3 text-gray-800 max-w-[200px] truncate" title={row.produtoNome}>
+                      {row.produtoNome}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
+                      {row.numeroLoteProducao != null ? row.numeroLoteProducao : '—'}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums font-medium text-gray-900">{row.numBaldes}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-gray-700">{row.quantidade}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
+                      {row.contagemAcabadoDisponivel ? row.qrsAcabado : '—'}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
+                      {row.contagemInsumoDisponivel ? row.qrsInsumoBaixados : '—'}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {!row.contagemAcabadoDisponivel || !row.contagemInsumoDisponivel ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 text-xs font-medium"
+                          title="Contagem auxiliar não carregou (rede ou limite de URL). Recarregue a página."
+                        >
+                          N/D
+                        </span>
+                      ) : row.coerenteBaldes ? (
+                        <span className="inline-flex items-center rounded-full bg-green-50 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium">
+                          OK
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center rounded-full bg-red-50 text-red-800 border border-red-200 px-2 py-0.5 text-xs font-medium"
+                          title="Esperado: QRs acabado = baldes = qtd gravada"
+                        >
+                          Conferir
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 text-gray-600 max-w-[100px] truncate" title={row.responsavel}>
+                      {row.responsavel}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <Modal

@@ -1,5 +1,36 @@
 # Log de Sessões
 
+### Sessão - 2026-04-20 - Deploy: push `main` (Railway)
+- **Ação:** `npm run lint` e `npm run build` OK; commit das alterações locais (histórico produção, script `test:historico-producao`, docs) + `git push origin main` para disparar deploy Railpack no Railway (evitar segundo `railway up` logo após o push).
+
+### Sessão - 2026-04-20 - Separar por Loja: erro «column etiquetas.lote_producao_numero does not exist»
+- **Problema:** ao **Registrar remessa** (modal de senha), Postgres retornava `column etiquetas.lote_producao_numero does not exist` — `upsertEtiquetasSeparacaoLoja` grava `lote_producao_numero` e colunas correlatas em `etiquetas` (preservação de metadados de produção no lote `SEP-…`).
+- **Causa:** migração **`20260420120000_producao_lote_rastreio_etiqueta.sql`** não aplicada no projeto Supabase usado pelo deploy (código já esperava o esquema).
+- **Ação:** `apply_migration` no MCP Supabase com o SQL da migração (projeto alinhado ao `.env.local`). Se produção (`controle.acaidokim.com.br`) usar **outro** ref Supabase, repetir o mesmo SQL no SQL Editor desse projeto ou `supabase db push` / pipeline de migrações.
+- **Documentação:** `CONTEXTO_ATUAL.md` (requisito de migração na criação de separação).
+
+### Sessão - 2026-04-20 - Produção: histórico — GET curto, lotes `.in()` e teste `npm run test:historico-producao`
+- **Problema:** «TypeError: Failed to fetch» ao carregar **Produções registradas** (rede ou URL GET muito longa com muitos UUID em `.in()`).
+- **Mudança:** [`src/lib/services/producao.ts`](src/lib/services/producao.ts) — retira embeds `producao_consumo_itens(count)` da query principal; contagens de **acabado** e **insumo** em consultas separadas com **`HISTORICO_IN_CHUNK` = 20**; erros por lote não derrubam o restante; flags `contagemAcabadoDisponivel` / `contagemInsumoDisponivel`. [`src/app/producao/page.tsx`](src/app/producao/page.tsx) — colunas **—** + selo **N/D** quando contagem não confiável; texto de ajuda em falha de rede. [`scripts/test-historico-producao.mjs`](scripts/test-historico-producao.mjs) + `npm run test:historico-producao`. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`, `npm run test:historico-producao` (com `.env.local`: produções OK; aviso se `itens.producao_id` ausente — migração `20260420120000_…`).
+
+### Sessão - 2026-04-20 - Produção: histórico sem `producoes.numero_lote_producao`
+- **Problema:** «column producoes.numero_lote_producao does not exist» ao carregar histórico (Supabase sem migração `20260420120000_producao_lote_rastreio_etiqueta.sql` ou equivalente).
+- **Mudança:** [`src/lib/services/producao.ts`](src/lib/services/producao.ts) — retira `numero_lote_producao` do `HISTORICO_PRODUCAO_SELECT`; `agregarItensAcabadoPorProducaoIds` lê `itens` (contagem + primeiro `id`) e `etiquetas.lote_producao_numero` quando existir; tipo `numeroLoteProducao: number | null`. Tabela em [`src/app/producao/page.tsx`](src/app/producao/page.tsx) mostra **—** se ausente.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: histórico sem embed `itens` (PostgREST)
+- **Problema:** erro «Could not find a relationship between 'producoes' and 'itens' in the schema cache» ao carregar histórico.
+- **Causa:** embed `itens(count)` a partir de `producoes` não resolvido no cache do PostgREST do projeto (FK `itens.producao_id` pode não estar exposta da forma esperada).
+- **Mudança:** [`src/lib/services/producao.ts`](src/lib/services/producao.ts) — remove `itens(count)` do select; `mapearHistoricoProducaoRows` passa a ser **async** e agrega contagens com `itens.select('producao_id').in('producao_id', …)` em fatias. `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: histórico e conferência de baldes × QRs
+- **Pedido:** em produção (ambiente operacional), ver todas as produções e conferir se os baldes batem com o desconto/uso correto.
+- **Mudança:** [`src/lib/services/producao.ts`](src/lib/services/producao.ts) — `HISTORICO_PRODUCAO_SELECT`, `ProducaoHistoricoResumo`, `mapearHistoricoProducaoRows` (embed `itens(count)` + `producao_consumo_itens(count)`). [`src/app/producao/page.tsx`](src/app/producao/page.tsx) — tabela **Produções registradas**, selo OK vs Conferir, filtro por `local_id` para operador de armazém/motorista; `CONTEXTO_ATUAL.md`.
+- **Impacto:** gestão vê rede inteira; indústria vê só o próprio warehouse; conferência explícita baldes = qtd gravada = QRs do acabado; insumos mostrados como total de QR baixados no lançamento.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-20 - Recebimento: admin confirma entrega inteira sem escanear QR
 - **Pedido:** logado como administrador, ao escolher remessa em trânsito, poder dar entrada de **todos** os itens na loja sem ler cada QR (mesmo efeito de recebimento completo), p.ex. funcionário não consegue escanear e o admin resolve remoto.
 - **Mudança:** [`src/app/recebimento/page.tsx`](src/app/recebimento/page.tsx) — botão **«Confirmar entrega inteira sem escanear (administrador)»** (`ADMIN_MASTER`, só quando a conferência por QR ainda não está completa); `receberTransferencia` com lista = todos `itensEsperados`; `confirm` longo; helper `recebimentoSomenteAdminMaster`. `CONTEXTO_ATUAL.md`.
