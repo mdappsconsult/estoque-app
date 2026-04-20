@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, X } from 'lucide-react';
+import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, ShieldCheck, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import QRScanner from '@/components/QRScanner';
@@ -37,8 +37,14 @@ interface ItemEsperado {
   nome: string;
 }
 
+/** Ações sensíveis no recebimento (divergência ou confirmar tudo sem QR): só `ADMIN_MASTER`. */
+function recebimentoSomenteAdminMaster(perfil: string | undefined): boolean {
+  return perfil === 'ADMIN_MASTER';
+}
+
 export default function RecebimentoPage() {
   const { usuario } = useAuth();
+  const adminRecebimento = recebimentoSomenteAdminMaster(usuario?.perfil);
 
   /** Só a loja: busca no PostgREST já filtrada por destino — evita truncar/paginar o quadro geral e perder remessas novas. */
   const filtrosDestinoLoja = useMemo(() => {
@@ -231,7 +237,7 @@ export default function RecebimentoPage() {
     }
     if (!conferenciaCompleta) {
       setErro(
-        'Escaneie todos os itens da lista antes de confirmar. Se faltar produto na entrega, use «Encerrar com divergência».'
+        'Escaneie todos os itens da lista antes de confirmar. Se faltar produto na entrega, peça ao administrador do sistema.'
       );
       return;
     }
@@ -279,9 +285,85 @@ export default function RecebimentoPage() {
     }
   };
 
+  /** Mesmo efeito de «tudo escaneado», mas envia todos os `item_id` da remessa — só administrador (ex.: suporte remoto). */
+  const confirmarRecebimentoInteiroSemEscanearAdmin = async () => {
+    if (!usuario) {
+      setErro('Faça login novamente para continuar');
+      return;
+    }
+    if (!recebimentoSomenteAdminMaster(usuario.perfil)) {
+      setErro('Somente administrador do sistema pode confirmar a entrega inteira sem escanear.');
+      return;
+    }
+    if (!selecionada) {
+      setErro('Selecione uma transferência em trânsito');
+      return;
+    }
+    if (loadingEsperados || itensEsperados.length === 0) {
+      setErro('Aguarde carregar os itens esperados da transferência.');
+      return;
+    }
+    if (conferenciaCompleta) {
+      setErro('Todos os itens já constam como escaneados. Use «Confirmar recebimento (tudo escaneado)».');
+      return;
+    }
+
+    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    if (!transSelecionada) {
+      setErro('Transferência não encontrada. Atualize a página e tente novamente.');
+      return;
+    }
+    if (transSelecionada.status !== 'IN_TRANSIT') {
+      setErro(
+        transSelecionada.status === 'DELIVERED'
+          ? 'Esta entrega já foi concluída.'
+          : transSelecionada.status === 'DIVERGENCE'
+            ? 'Esta remessa já foi encerrada com divergência.'
+            : 'Esta transferência não está mais em trânsito.'
+      );
+      return;
+    }
+    if (!pendentes.some((t) => t.id === selecionada)) {
+      setErro('Esta transferência não está disponível para o seu usuário.');
+      return;
+    }
+
+    const n = itensEsperados.length;
+    const destinoNome = transSelecionada.destino?.nome || 'loja de destino';
+    const confirmou = window.confirm(
+      `Administrador: confirmar ENTREGA COMPLETA de ${n} unidade(ns) para «${destinoNome}» SEM leitura de QR neste aparelho.\n\n` +
+        `Todos os itens desta remessa serão registrados como recebidos e entrarão no estoque da loja, como se cada QR tivesse sido escaneado.\n\n` +
+        `Só continue se a carga física corresponde à remessa. A operação fica vinculada ao seu usuário em auditoria.`
+    );
+    if (!confirmou) return;
+
+    setSaving(true);
+    setErro('');
+    try {
+      const idsTodos = itensEsperados.map((e) => e.id);
+      const res = await receberTransferencia(
+        selecionada,
+        idsTodos,
+        transSelecionada.destino_id,
+        usuario.id
+      );
+      setResultado({ divergencias: res.divergencias.length });
+      setItensRecebidos([]);
+      setSelecionada('');
+    } catch (err: unknown) {
+      setErro(errMessage(err, 'Erro ao confirmar recebimento integral (administrador)'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const encerrarComDivergencia = async () => {
     if (!usuario) {
       setErro('Faça login novamente para continuar');
+      return;
+    }
+    if (!recebimentoSomenteAdminMaster(usuario.perfil)) {
+      setErro('Somente administrador do sistema pode encerrar com divergência. Use o login de administrador neste aparelho ou peça a um administrador.');
       return;
     }
     if (!selecionada) {
@@ -478,8 +560,21 @@ export default function RecebimentoPage() {
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-3">
-              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro). Só é possível concluir sem escanear tudo usando{' '}
-              <strong>Encerrar com divergência</strong>, com confirmação explícita.
+              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro).
+              {adminRecebimento ? (
+                <>
+                  {' '}
+                  Como administrador, você pode <strong>confirmar a entrega inteira sem escanear</strong> (carga ok na
+                  loja) ou usar <strong>Encerrar com divergência</strong> se faltar ou sobrar produto — ambos com
+                  confirmação explícita.
+                </>
+              ) : (
+                <>
+                  {' '}
+                  Se a carga chegou mas não dá para escanear, o <strong>administrador do sistema</strong> pode confirmar
+                  a entrega inteira sem QR ou tratar divergência nesta mesma tela.
+                </>
+              )}
             </p>
             {loadingEsperados ? (
               <div className="py-6 flex items-center justify-center text-gray-400">
@@ -587,22 +682,46 @@ export default function RecebimentoPage() {
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
               Confirmar recebimento (tudo escaneado)
             </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={encerrarComDivergencia}
-              disabled={
-                saving || loadingEsperados || itensEsperados.length === 0 || conferenciaCompleta
-              }
-            >
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Encerrar com divergência…
-            </Button>
-            {!loadingEsperados && itensEsperados.length > 0 && !conferenciaCompleta && (
+            {adminRecebimento && !conferenciaCompleta && (
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={confirmarRecebimentoInteiroSemEscanearAdmin}
+                disabled={saving || loadingEsperados || itensEsperados.length === 0}
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4 mr-2" />
+                )}
+                Confirmar entrega inteira sem escanear (administrador)
+              </Button>
+            )}
+            {adminRecebimento && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={encerrarComDivergencia}
+                disabled={
+                  saving || loadingEsperados || itensEsperados.length === 0 || conferenciaCompleta
+                }
+              >
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Encerrar com divergência…
+              </Button>
+            )}
+            {!loadingEsperados && itensEsperados.length > 0 && !conferenciaCompleta && adminRecebimento && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                Faltam{' '}
-                {itensEsperados.filter((e) => !idsEscaneados.has(e.id)).length} item(ns) na conferência para
-                liberar a confirmação normal. Se a carga realmente veio incompleta, use o botão acima.
+                Faltam {itensEsperados.filter((e) => !idsEscaneados.has(e.id)).length} item(ns) na conferência por QR.
+                Se a mercadoria <strong>chegou completa</strong>, use «Confirmar entrega inteira sem escanear». Se
+                faltou ou sobrou de fato, use «Encerrar com divergência».
+              </p>
+            )}
+            {!loadingEsperados && itensEsperados.length > 0 && !conferenciaCompleta && !adminRecebimento && (
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Faltam {itensEsperados.filter((e) => !idsEscaneados.has(e.id)).length} item(ns) para confirmar o
+                recebimento. Se a carga chegou mas não dá para escanear, ou se houve divergência, peça ao{' '}
+                <strong>administrador do sistema</strong> para tratar nesta tela (confirmação sem QR ou divergência).
               </p>
             )}
           </div>

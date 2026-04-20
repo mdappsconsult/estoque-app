@@ -347,9 +347,23 @@ export async function receberTransferencia(
     }
   });
 
+  if (divergencias.length > 0 && options?.encerrarComDivergencia) {
+    const { data: opRow, error: opErr } = await supabase
+      .from('usuarios')
+      .select('perfil')
+      .eq('id', usuarioId)
+      .single();
+    if (opErr) throw opErr;
+    if (opRow?.perfil !== 'ADMIN_MASTER') {
+      throw new Error(
+        'Somente administrador do sistema pode encerrar o recebimento com divergência. Escaneie todos os itens ou peça a um administrador.'
+      );
+    }
+  }
+
   if (divergencias.length > 0 && !options?.encerrarComDivergencia) {
     throw new Error(
-      'A conferência não está completa. Escanear todos os itens da lista antes de «Confirmar recebimento», ou use «Encerrar com divergência» se faltar produto na entrega.'
+      'A conferência não está completa. Escaneie todos os itens da lista antes de «Confirmar recebimento». Se faltar produto na entrega, peça ao administrador do sistema.'
     );
   }
 

@@ -1,5 +1,17 @@
 # Log de Sessões
 
+### Sessão - 2026-04-20 - Recebimento: admin confirma entrega inteira sem escanear QR
+- **Pedido:** logado como administrador, ao escolher remessa em trânsito, poder dar entrada de **todos** os itens na loja sem ler cada QR (mesmo efeito de recebimento completo), p.ex. funcionário não consegue escanear e o admin resolve remoto.
+- **Mudança:** [`src/app/recebimento/page.tsx`](src/app/recebimento/page.tsx) — botão **«Confirmar entrega inteira sem escanear (administrador)»** (`ADMIN_MASTER`, só quando a conferência por QR ainda não está completa); `receberTransferencia` com lista = todos `itensEsperados`; `confirm` longo; helper `recebimentoSomenteAdminMaster`. `CONTEXTO_ATUAL.md`.
+- **Impacto:** mesmo registro `DELIVERED` + movimento de estoque que o fluxo com todos os QRs; auditoria `RECEBER_TRANSFERENCIA` segue com o usuário admin.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Recebimento: «Encerrar com divergência» só ADMIN_MASTER
+- **Pedido:** operadores de loja não devem ver/usar encerramento com divergência; somente administrador.
+- **Mudança:** [`src/app/recebimento/page.tsx`](src/app/recebimento/page.tsx) — botão e faixa âmbar só com `perfil === 'ADMIN_MASTER'`; textos de ajuda para demais perfis. [`src/lib/services/transferencias.ts`](src/lib/services/transferencias.ts) — `receberTransferencia` com `encerrarComDivergencia` exige `usuarios.perfil === 'ADMIN_MASTER'`. `CONTEXTO_ATUAL.md`.
+- **Impacto:** `MANAGER` e operadores usam só confirmação total; divergência na entrega exige login **ADMIN_MASTER** na mesma tela (ou outro fluxo acordado).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-20 - PWA: ícone e nome «Adicionar à Tela de Início» (iOS)
 - **Pedido:** no atalho da tela inicial, mostrar o logotipo Açaí do Kim e o texto **controle de estoque** (em vez do «A» genérico e título longo).
 - **Mudança:** [`src/app/layout.tsx`](src/app/layout.tsx) — `title` / `applicationName` / `appleWebApp.title` + `icons.apple` → `/branding/acai-do-kim-logo.png`; [`public/manifest.webmanifest`](public/manifest.webmanifest). `CONTEXTO_ATUAL.md`.
