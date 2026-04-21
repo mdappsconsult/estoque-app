@@ -2,7 +2,8 @@
 
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
-  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer, Factory
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer, Factory,
+  FileImage,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -30,6 +31,7 @@ type HomeSection = {
 const features: HomeFeature[] = [
   { title: 'Escanear QR', description: 'Ações por item.', icon: QrCode, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/qrcode' },
   { title: 'Registrar Compra', description: 'Registrar compra do dia (lote + etiquetas).', icon: PackageCheck, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/entrada-compra' },
+  { title: 'Compra (foto da nota)', description: 'OCR da DANFE, conferência e lançamento em lote.', icon: FileImage, iconBg: 'bg-violet-100', iconColor: 'text-violet-600', href: '/entrada-compra-nota' },
   { title: 'Produção', description: 'Lote de produção + etiquetas.', icon: ChefHat, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/producao' },
   { title: 'Etiquetas', description: 'Impressão de QR.', icon: QrCode, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/etiquetas' },
   { title: 'Separar por Loja', description: 'Warehouse → Store.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/separar-por-loja' },

@@ -28,6 +28,7 @@ interface ProdutoEditando {
   marca: string | null;
   fornecedor: string | null;
   sif: string | null;
+  codigo_barras?: string | null;
   origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
   estoque_minimo: number;
   custo_referencia: number | null;
@@ -57,6 +58,8 @@ export interface ProdutoModalSavePayload {
   marca: string;
   fornecedor: string | null;
   sif: string;
+  /** EAN/GTIN (somente dígitos) ou null. */
+  codigoBarras: string | null;
   origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
   estoqueMinimo: number;
   custoReferencia: number | null;
@@ -108,6 +111,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
     embalagemGrupoId: '',
     marca: '',
     fornecedorPreferencial: '',
+    codigoBarras: '',
     sif: '',
     origem: 'AMBOS' as 'COMPRA' | 'PRODUCAO' | 'AMBOS',
     estoqueMinimo: 0,
@@ -159,6 +163,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         embalagemGrupoId: produto.grupos[0]?.id || '',
         marca: produto.marca || '',
         fornecedorPreferencial: produto.fornecedor || '',
+        codigoBarras: produto.codigo_barras || '',
         sif: produto.sif || '',
         origem: produto.origem || 'AMBOS',
         estoqueMinimo: produto.estoque_minimo ?? 0,
@@ -188,6 +193,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         embalagemGrupoId: '',
         marca: '',
         fornecedorPreferencial: '',
+        codigoBarras: '',
         sif: '',
         origem: 'COMPRA',
         estoqueMinimo: 0,
@@ -251,6 +257,9 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         ? Math.max(0, Math.floor(Number(String(formData.producaoGramasDose).replace(',', '.')) || 0))
         : null;
 
+    const eanDigits = formData.codigoBarras.replace(/\D/g, '');
+    const codigoBarrasFinal = eanDigits.length >= 8 ? eanDigits : null;
+
     const produtoData = {
       nome: formData.nome,
       medida: formData.medida,
@@ -260,6 +269,7 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       marca: formData.marca,
       fornecedor: formData.fornecedorPreferencial.trim() || null,
       sif: formData.sif,
+      codigoBarras: codigoBarrasFinal,
       origem: origemFinal,
       estoqueMinimo: Math.max(0, Math.floor(Number(formData.estoqueMinimo) || 0)),
       custoReferencia: custoReferenciaNum,
@@ -497,6 +507,12 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
             {tipoCadastro === 'FORNECEDOR' ? (
               <>
                 <Input
+                  label="Código de barras (EAN/GTIN)"
+                  placeholder="Somente números, ex.: 789..."
+                  value={formData.codigoBarras}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, codigoBarras: e.target.value }))}
+                />
+                <Input
                   label="Fornecedor preferencial"
                   placeholder="Nome usual na compra (opcional)"
                   value={formData.fornecedorPreferencial}
@@ -539,6 +555,12 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
                   placeholder="Número do SIF"
                   value={formData.sif}
                   onChange={(e) => setFormData(prev => ({ ...prev, sif: e.target.value }))}
+                />
+                <Input
+                  label="Código de barras (EAN)"
+                  placeholder="Opcional — ex.: 789..."
+                  value={formData.codigoBarras}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, codigoBarras: e.target.value }))}
                 />
               </div>
             </div>

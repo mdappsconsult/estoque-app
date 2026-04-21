@@ -1,5 +1,70 @@
 # Log de Sessões
 
+### Sessão - 2026-04-21 - Registrar Compra: atalho para compra por foto da nota + deploy
+- **Pedido:** botão em **Registrar Compra** para abrir a página de foto/OCR; deploy em seguida.
+- **Mudança:** em `/entrada-compra`, link em destaque **Compra por foto da nota (OCR)** → `/entrada-compra-nota`; `CONTEXTO_ATUAL.md` atualizado.
+- **Validação:** `npm run lint`, `npm run build`; push em `main` para CI e deploy Railway.
+
+### Sessão - 2026-04-21 - Compra por foto NF: câmera em destaque no celular
+- **Pedido:** abrir câmera ao entrar na página (app mobile-first); fluxo rápido após bater a foto.
+- **Mudança:** em `/entrada-compra-nota`, em viewport ≤768px ou touch: `capture="environment"`, botão grande **Tirar foto**, **Escolher da galeria**, `useEffect` tenta `.click()` no input após ~450ms ao entrar na etapa (iOS pode bloquear sem gesto — texto de ajuda); desktop mantém input de arquivo clássico.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-21 - OCR nota fiscal: modelo Anthropic padrão atualizado (404 no modelo antigo)
+- **Problema:** API Anthropic retornava **404** `not_found_error` para `claude-3-5-sonnet-20241022` (modelo removido/descontinuado).
+- **Mudança:** padrão em `src/lib/nota-compra/ocr-extrair.ts` → **`claude-sonnet-4-6`**; `CONTEXTO_ATUAL.md` e `docs/CONTEXTO_AGENTE_REGISTRO_COMPRA_FOTO_NF.md` alinhados.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-21 - Documento de handoff: contexto para novo agente (compra por foto NF)
+- **Pedido:** consolidar contexto da conversa para iniciar outro agente sem repetir histórico.
+- **Mudança:** criado **`docs/CONTEXTO_AGENTE_REGISTRO_COMPRA_FOTO_NF.md`** (rotas, OCR Anthropic/OpenAI/mock, env vars, Storage, migrações, permissões, CI, pendências e texto sugerido para colar no próximo chat).
+- **Validação:** não aplicável (apenas documentação).
+
+### Sessão - 2026-04-21 - OCR nota fiscal: Claude (Anthropic) + provedor configurável
+- **Pedido:** usar Claude em vez de depender só da OpenAI.
+- **Mudança:** `src/lib/nota-compra/ocr-extrair.ts` chama **Anthropic Messages API** com imagem base64 quando `ANTHROPIC_API_KEY` existe (modo `auto` prefere Anthropic); `NOTA_COMPRA_OCR_PROVIDER=anthropic|openai|auto`; modelo `ANTHROPIC_NOTA_COMPRA_MODEL` (padrão `claude-3-5-sonnet-20241022`); parsing de JSON mais tolerante a texto ao redor; textos em `CONTEXTO_ATUAL.md`, home da tela nota.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Storage «notas-compra» aplicado via MCP Supabase
+- **Ação:** `apply_migration` no MCP (`storage_notas_compra_bucket`) com `INSERT` em `storage.buckets` (`notas-compra`, privado).
+- **Impacto:** upload da tela **Registrar compra (foto NF)** deve passar no projeto ligado ao MCP/`.env.local`.
+
+### Sessão - 2026-04-21 - Storage «notas-compra»: migração compatível + SQL manual + erro detalhado
+- **Problema:** upload da foto falhava ao criar bucket com colunas `file_size_limit` / `allowed_mime_types` em alguns projetos Supabase.
+- **Mudança:** migração **`20260421190000_storage_notas_compra.sql`** passa a inserir só `id`, `name`, `public`; SQL de apoio em **`docs/consultas-sql/storage-bucket-notas-compra.sql`**; API devolve **`detalhe`** com mensagem do Storage; tela de foto NF exibe o detalhe no erro.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-21 - Registrar compra por foto da nota (OCR + conferência)
+- **Pedido:** fluxo com foto da DANFE, checagem de qualidade, extração de campos, produtos faltantes com cadastro rápido e pré-tela única antes de gravar vários lotes na mesma NF.
+- **Mudança:** nova rota **`/entrada-compra-nota`**; API **`POST /api/operacional/extrair-nota-compra`** (validação operacional, upload **`notas-compra`**, OCR via OpenAI ou `NOTA_COMPRA_OCR_MODE=mock`); libs `src/lib/nota-compra/*`; **`ProdutoModal` + `/cadastros/produtos`:** persistem **`codigo_barras`**; permissões + atalhos Home/Sidebar; migração **`20260421190000_storage_notas_compra.sql`** (bucket).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Registrar Compra (indústria): filtrar produtos por receita + travar local
+- **Pedido:** usuários da indústria, em **Registrar Compra**, devem visualizar somente produtos da indústria.
+- **Mudança:** em `/entrada-compra`, para `OPERATOR_WAREHOUSE` e `OPERATOR_WAREHOUSE_DRIVER`, o select **Produto** passa a listar apenas produtos de compra (`origem` `COMPRA`/`AMBOS`) que estejam cadastrados como **insumos em receitas ativas** (`producao_receita_itens` → `producao_receitas.ativo`); o **Local de Entrada** fica **travado** no `usuario.local_padrao_id`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Etiquetas (indústria): limitar remessas recentes + remover “Atualizar lista”
+- **Pedido:** em **Etiquetas**, funcionário da indústria deve enxergar só os **10 últimos** registros de remessa e remover o botão **Atualizar lista**.
+- **Mudança:** em `/etiquetas`, quando o login é da indústria, o select de remessas limita para as **10 mais recentes** e o botão **Atualizar lista** não é exibido.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Relatório “Baldes” (indústria ↔ lojas)
+- **Pedido:** relatório para ver utilização de baldes na loja (chegou/foi baixado), saldo atual na indústria/lojas e em trânsito.
+- **Mudança:** nova tela **`/relatorios/baldes`** (ADMIN_MASTER/MANAGER) com filtros (período, loja, produto, armazém indústria) + opção “somente produtos com ‘balde’ no nome”, KPIs de saldo e **exportação CSV**; link no menu **Configurações** e atalho em `/relatorios`.
+- **Banco:** migração **`20260421160000_relatorio_baldes.sql`** cria RPC `relatorio_baldes` (itens produzidos `producao_id != null`), conta **em trânsito** por vínculo aberto mais recente por item (evita dupla contagem), e bloqueia retorno para perfis fora de Admin/Gerente (ou `service_role`).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Relatório “Baldes”: correção de filtro/escopo (dados zerados)
+- **Problema:** relatório zerava para produtos reais (ex.: “Açaí Balde 11L”) porque (1) `producao_id` vinha `NULL` em itens baixados/transferidos e (2) regex `\\mbalde\\M` não casou com nomes reais.
+- **Mudança:** RPC `relatorio_baldes` passou a **não exigir** `itens.producao_id` e o filtro “somente balde” passou a usar **`ILIKE '%balde%'`**; removida trava por `auth.uid()` que podia zerar em fluxos operacionais.
+- **Banco:** migrações `20260421170000_…`, `20260421173000_…`, `20260421174500_…` (redefine a função).
+
+### Sessão - 2026-04-21 - Etiquetas 60×30: imprimir token curto abaixo do QR
+- **Pedido:** quando o QR danifica na etiqueta 60×30 (estoque), precisar de um código para digitar manualmente.
+- **Mudança:** na etiqueta **60×30**, passou a imprimir o **token curto** logo abaixo do QR (fonte monoespaçada), facilitando digitação manual.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-21 - Home: remover expansão + menu “Configurações” como subpasta
 - **Pedido:** tirar “Expandir tudo / Recolher tudo / Recolher” da Home; e organizar ícones do grupo dentro do ícone de **Configurações**.
 - **Mudança:** na Home (`/`), removidos os controles de expandir/recolher e as seções ficam sempre abertas; removido também o bloco duplicado (logo/“Olá…”/“Açaí do Kim — operações”/texto de orientação) já exibido no header do sistema; na `Sidebar`, os itens de **Admin**, **Cadastros** e **Configurações** passaram a ficar dentro de um único grupo expansível **Configurações** (como subpasta).

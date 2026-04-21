@@ -540,14 +540,14 @@ export default function EtiquetasPage() {
         origemId: origemIdOpcoesRemessa,
         /** Indústria (Leonardo / logins 60×60): todas as remessas SEP da origem (`local_padrao_id`), como nas demais telas da indústria. */
       });
-      setOpcoesRemessa(opcoes);
+      setOpcoesRemessa(loginIndustriaEtiquetas ? opcoes.slice(0, 10) : opcoes);
     } catch (err: unknown) {
       setErroOpcoesRemessa(err instanceof Error ? err.message : 'Não foi possível listar remessas');
       setOpcoesRemessa([]);
     } finally {
       setCarregandoOpcoesRemessa(false);
     }
-  }, [origemIdOpcoesRemessa]);
+  }, [loginIndustriaEtiquetas, origemIdOpcoesRemessa]);
 
   useEffect(() => {
     void carregarOpcoesRemessa();
@@ -876,25 +876,27 @@ export default function EtiquetasPage() {
                 </option>
               ))}
             </select>
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0"
-              disabled={carregandoOpcoesRemessa}
-              onClick={() => void carregarOpcoesRemessa()}
-            >
-              {carregandoOpcoesRemessa ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  Atualizar lista
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Atualizar lista
-                </>
-              )}
-            </Button>
+            {!loginIndustriaEtiquetas && (
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={carregandoOpcoesRemessa}
+                onClick={() => void carregarOpcoesRemessa()}
+              >
+                {carregandoOpcoesRemessa ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Atualizar lista
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Atualizar lista
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </label>
         {erroOpcoesRemessa && (

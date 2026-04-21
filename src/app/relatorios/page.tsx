@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { FileText, Loader2 } from 'lucide-react';
 import Select from '@/components/ui/Select';
 import { supabase } from '@/lib/supabase';
@@ -162,6 +163,21 @@ export default function RelatoriosPage() {
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center"><FileText className="w-5 h-5 text-indigo-600" /></div>
         <h1 className="text-2xl font-bold text-gray-900">Relatórios</h1>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Relatório — Baldes</p>
+            <p className="text-xs text-gray-500 mt-1">Saldo agora (indústria/loja/trânsito) e utilizados (baixas) no período.</p>
+          </div>
+          <Link
+            href="/relatorios/baldes"
+            className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600"
+          >
+            Abrir
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">

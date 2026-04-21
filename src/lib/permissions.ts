@@ -7,6 +7,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/login': ['*'],
   '/qrcode': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
   '/entrada-compra': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
+  '/entrada-compra-nota': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao-previa-saldo-parcial': [
     'ADMIN_MASTER',
@@ -38,6 +39,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/rastreio-qr': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE'],
   '/dashboard-admin': ['ADMIN_MASTER', 'MANAGER'],
   '/relatorios': ['ADMIN_MASTER', 'MANAGER'],
+  '/relatorios/baldes': ['ADMIN_MASTER', 'MANAGER'],
   '/cadastros/produtos': ['ADMIN_MASTER', 'MANAGER'],
   '/cadastros/receitas-producao': ['ADMIN_MASTER', 'MANAGER'],
   '/cadastros/categorias': ['ADMIN_MASTER', 'MANAGER'],
@@ -72,6 +74,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/login', label: 'Login', section: 'Geral' },
   { path: '/qrcode', label: 'Scanner QR', section: 'Operações' },
   { path: '/entrada-compra', label: 'Registrar compra', section: 'Operações' },
+  { path: '/entrada-compra-nota', label: 'Registrar compra (foto NF)', section: 'Operações' },
   { path: '/producao', label: 'Produção', section: 'Operações' },
   {
     path: '/producao-previa-saldo-parcial',
@@ -95,6 +98,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/divergencias', label: 'Divergências', section: 'Administração' },
   { path: '/dashboard-admin', label: 'Dashboard admin', section: 'Administração' },
   { path: '/relatorios', label: 'Relatórios', section: 'Administração' },
+  { path: '/relatorios/baldes', label: 'Relatório — baldes', section: 'Administração' },
   { path: '/cadastros/produtos', label: 'Cadastro — produtos', section: 'Cadastros' },
   { path: '/cadastros/receitas-producao', label: 'Cadastro — receitas de produção', section: 'Cadastros' },
   { path: '/cadastros/categorias', label: 'Cadastro — categorias', section: 'Cadastros' },

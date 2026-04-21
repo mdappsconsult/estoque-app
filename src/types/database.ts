@@ -13,6 +13,7 @@ export type Database = {
           marca: string | null;
           fornecedor: string | null;
           sif: string | null;
+          codigo_barras: string | null;
           origem: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
           estoque_minimo: number;
           custo_referencia: number | null;
@@ -38,6 +39,7 @@ export type Database = {
           marca?: string | null;
           fornecedor?: string | null;
           sif?: string | null;
+          codigo_barras?: string | null;
           origem?: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
           estoque_minimo?: number;
           custo_referencia?: number | null;
@@ -63,6 +65,7 @@ export type Database = {
           marca?: string | null;
           fornecedor?: string | null;
           sif?: string | null;
+          codigo_barras?: string | null;
           origem?: 'COMPRA' | 'PRODUCAO' | 'AMBOS';
           estoque_minimo?: number;
           custo_referencia?: number | null;
@@ -940,6 +943,26 @@ export type Database = {
       ajustar_sequencia_balde_loja_ao_max_etiquetas: {
         Args: { p_local_destino_id: string };
         Returns: undefined;
+      };
+      relatorio_baldes: {
+        Args: {
+          p_data_ini: string;
+          p_data_fim: string;
+          p_loja_id?: string | null;
+          p_produto_id?: string | null;
+          p_apenas_nome_balde?: boolean;
+          p_local_industria_id?: string | null;
+        };
+        Returns: {
+          loja_id: string;
+          loja_nome: string;
+          produto_id: string;
+          produto_nome: string;
+          qtd_industria_em_estoque: number;
+          qtd_loja_em_estoque: number;
+          qtd_em_transferencia_para_loja: number;
+          qtd_utilizados_periodo: number;
+        }[];
       };
       reservar_sequencia_balde_loja: {
         Args: { p_local_destino_id: string; p_quantidade: number };

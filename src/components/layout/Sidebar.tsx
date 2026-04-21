@@ -6,6 +6,7 @@ import {
   Home, 
   QrCode, 
   PackagePlus,
+  FileImage,
   ChefHat,
   FlaskConical,
   Truck,
@@ -31,6 +32,7 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
   { name: 'Início', href: '/', icon: Home },
   { name: 'Scanner', href: '/qrcode', icon: QrCode },
   { name: 'Registrar Compra', href: '/entrada-compra', icon: PackagePlus },
+  { name: 'Compra (foto NF)', href: '/entrada-compra-nota', icon: FileImage },
   { name: 'Produção', href: '/producao', icon: ChefHat },
   {
     name: 'Prévia saldo parcial',
@@ -59,6 +61,7 @@ const menuExpandable = [
       { name: 'Divergências', href: '/divergencias' },
       { name: 'Dashboard', href: '/dashboard-admin' },
       { name: 'Acompanhamento de viagens', href: '/acompanhamento-viagens' },
+      { name: 'Relatório — Baldes', href: '/relatorios/baldes' },
 
       // Cadastros
       { name: 'Produtos', href: '/cadastros/produtos' },

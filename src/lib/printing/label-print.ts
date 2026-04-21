@@ -230,6 +230,7 @@ function gerarCelula60x30(
 ): string {
   const loja = escaparHtml((item.nomeLoja || '—').trim() || '—');
   const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 32));
+  const tokenCurto = escaparHtml((item.tokenShort || item.id.slice(0, 8).toUpperCase()).trim());
   const qrPx = pixelsQrParaImpressao(qrSizeMm);
 
   const rawValYmd = (item.dataValidade || '').trim().slice(0, 10);
@@ -254,6 +255,7 @@ function gerarCelula60x30(
         <div class="cel-loja">${loja}</div>
         <div class="cel-prod">${produto}</div>
         <img class="cel-qr" src="${qrDataUrl}" alt="" width="${qrPx}" height="${qrPx}" />
+        <div class="cel-code">${tokenCurto}</div>
         <div class="cel-footer">
           ${linhaBaldeRodape}
           <div class="cel-val">${escaparHtml(linhaValOuImp)}</div>
@@ -552,6 +554,20 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       max-width: ${qr}mm;
       object-fit: contain;
       margin: 0.15mm auto 0;
+      flex-shrink: 0;
+    }
+    .cel-code {
+      margin: 0.1mm auto 0;
+      font-size: 5.2pt;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      line-height: 1;
+      text-align: center;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       flex-shrink: 0;
     }
     .cel-footer {

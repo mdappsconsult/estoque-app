@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { PackageCheck, Loader2, CheckCircle, AlertTriangle, Pencil } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { PackageCheck, Loader2, CheckCircle, AlertTriangle, Pencil, Camera } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -27,6 +28,10 @@ interface GrupoEmbalagem {
   id: string;
   nome: string;
 }
+type ReceitaInsumoRow = {
+  produto_id: string;
+  receita?: { ativo: boolean } | { ativo: boolean }[] | null;
+};
 
 export default function EntradaCompraPage() {
   const { usuario } = useAuth();
@@ -35,9 +40,32 @@ export default function EntradaCompraPage() {
     select: '*',
     orderBy: { column: 'nome', ascending: true },
   });
-  const produtosCompra = produtos.filter(
-    (p) => !p.origem || p.origem === 'COMPRA' || p.origem === 'AMBOS'
-  );
+  const isUsuarioIndustria =
+    usuario?.perfil === 'OPERATOR_WAREHOUSE' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
+
+  const { data: receitaInsumos } = useRealtimeQuery<ReceitaInsumoRow>({
+    table: 'producao_receita_itens',
+    select: 'produto_id, receita:producao_receitas(ativo)',
+    orderBy: { column: 'produto_id', ascending: true },
+    preserveDataWhileRefetching: true,
+  });
+  const produtoIdsEmReceitasAtivas = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of receitaInsumos || []) {
+      if (!row?.produto_id) continue;
+      const receita = row.receita;
+      const ativo = Array.isArray(receita) ? receita[0]?.ativo : receita?.ativo;
+      if (ativo === false) continue;
+      set.add(row.produto_id);
+    }
+    return set;
+  }, [receitaInsumos]);
+
+  const produtosCompra = useMemo(() => {
+    const base = produtos.filter((p) => !p.origem || p.origem === 'COMPRA' || p.origem === 'AMBOS');
+    if (!isUsuarioIndustria) return base;
+    return base.filter((p) => produtoIdsEmReceitasAtivas.has(p.id));
+  }, [isUsuarioIndustria, produtoIdsEmReceitasAtivas, produtos]);
   const { data: locais } = useRealtimeQuery<Local>({
     table: 'locais',
     orderBy: { column: 'nome', ascending: true },
@@ -61,7 +89,13 @@ export default function EntradaCompraPage() {
       maxRows: 50,
     });
 
-  const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
+  const warehouses = useMemo(() => locais.filter((l) => l.tipo === 'WAREHOUSE'), [locais]);
+  const warehousesPermitidos = useMemo(() => {
+    if (!isUsuarioIndustria) return warehouses;
+    const localId = usuario?.local_padrao_id;
+    if (!localId) return [];
+    return warehouses.filter((w) => w.id === localId);
+  }, [isUsuarioIndustria, usuario?.local_padrao_id, warehouses]);
 
   const [form, setForm] = useState({
     produto_id: '',
@@ -115,6 +149,13 @@ export default function EntradaCompraPage() {
     familia_id: '',
     embalagem_grupo_id: '',
   });
+
+  useEffect(() => {
+    if (!isUsuarioIndustria) return;
+    const localId = usuario?.local_padrao_id;
+    if (!localId) return;
+    setForm((prev) => (prev.local_id ? prev : { ...prev, local_id: localId }));
+  }, [isUsuarioIndustria, usuario?.local_padrao_id]);
 
   const produtoSelecionado = useMemo(
     () => produtos.find((p) => p.id === form.produto_id) || null,
@@ -641,6 +682,14 @@ export default function EntradaCompraPage() {
         </div>
       </div>
 
+      <Link
+        href="/entrada-compra-nota"
+        className="mb-6 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-900 shadow-sm transition-colors hover:bg-violet-100 active:bg-violet-100 touch-manipulation"
+      >
+        <Camera className="h-5 w-5 shrink-0" aria-hidden />
+        Compra por foto da nota (OCR)
+      </Link>
+
       {resultado && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
           <CheckCircle className="w-6 h-6 text-green-500" />
@@ -665,6 +714,11 @@ export default function EntradaCompraPage() {
           value={form.produto_id}
           onChange={(e) => void handleProdutoChange(e.target.value)}
         />
+        {isUsuarioIndustria && receitaInsumos.length === 0 && (
+          <p className="text-sm text-amber-700">
+            Nenhuma receita de produção encontrada. Cadastre receitas/insumos para liberar produtos de compra na indústria.
+          </p>
+        )}
         <div className="flex justify-end gap-2 flex-wrap">
           {form.produto_id && (
             <Button
@@ -887,10 +941,19 @@ export default function EntradaCompraPage() {
         <Select
           label="Local de Entrada"
           required
-          options={[{ value: '', label: 'Selecione...' }, ...warehouses.map(l => ({ value: l.id, label: l.nome }))]}
+          options={[
+            { value: '', label: 'Selecione...' },
+            ...warehousesPermitidos.map((l) => ({ value: l.id, label: l.nome })),
+          ]}
           value={form.local_id}
           onChange={(e) => setForm({ ...form, local_id: e.target.value })}
+          disabled={isUsuarioIndustria}
         />
+        {isUsuarioIndustria && !usuario?.local_padrao_id && (
+          <p className="text-sm text-amber-700">
+            Seu usuário da indústria está sem <strong>local padrão</strong>. Defina o armazém em Cadastros → Usuários e relogue.
+          </p>
+        )}
         <Input
           label={produtoExigeValidade ? 'Data de Validade' : 'Data de Validade (opcional)'}
           type="date"
