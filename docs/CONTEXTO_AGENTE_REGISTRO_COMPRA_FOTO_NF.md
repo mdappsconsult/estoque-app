@@ -15,13 +15,13 @@ Documento de **handoff** resumindo decisões, implementação e pendências dest
 | Peça | Caminho / observação |
 |------|----------------------|
 | Tela | [`src/app/entrada-compra-nota/page.tsx`](src/app/entrada-compra-nota/page.tsx) — foto → qualidade → senha operacional → extrair → conferência → resumo → `criarLoteCompra` por linha |
-| API | [`POST /api/operacional/extrair-nota-compra`](src/app/api/operacional/extrair-nota-compra/route.ts) — valida login/senha operacional (mesmo padrão de outras rotas operacionais), upload Storage, chama OCR, auditoria `EXTRAIR_NOTA_COMPRA_IMAGEM` |
+| API | [`POST /api/operacional/extrair-nota-compra`](src/app/api/operacional/extrair-nota-compra/route.ts) — valida **sessão** (`Authorization: Bearer` = access token Supabase), upload Storage, chama OCR, auditoria `EXTRAIR_NOTA_COMPRA_IMAGEM` |
 | OCR | [`src/lib/nota-compra/ocr-extrair.ts`](src/lib/nota-compra/ocr-extrair.ts) |
 | Qualidade (cliente) | [`src/lib/nota-compra/qualidade-imagem.ts`](src/lib/nota-compra/qualidade-imagem.ts) |
 | Match produto | [`src/lib/nota-compra/match-produto.ts`](src/lib/nota-compra/match-produto.ts) |
 | Lançamento | [`src/lib/services/lotes-compra.ts`](src/lib/services/lotes-compra.ts) — `criarLoteCompra` (igual entrada manual) |
 
-**Autenticação na API:** `login` + `senha` no body; usuário precisa de **`login_operacional`** cadastrado.
+**Autenticação na API:** header `Authorization: Bearer` + access token Supabase (mesma sessão do app após login). Não usa senha operacional no body.
 
 ---
 

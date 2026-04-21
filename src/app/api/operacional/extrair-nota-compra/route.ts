@@ -2,22 +2,13 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createSupabaseAdmin } from '@/lib/supabase/admin';
 import { errMessage } from '@/lib/errMessage';
-import { validarCredencialOperacional } from '@/lib/services/operacional-auth-server';
+import { resolverUsuarioPorBearer } from '@/lib/auth/resolve-usuario-bearer';
 import { extrairNotaCompraDeImagem } from '@/lib/nota-compra/ocr-extrair';
-
-const PERFIS = new Set([
-  'ADMIN_MASTER',
-  'MANAGER',
-  'OPERATOR_WAREHOUSE',
-  'OPERATOR_WAREHOUSE_DRIVER',
-]);
 
 const MAX_BASE64_CHARS = 11_500_000;
 const MIME_OK = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type Body = {
-  login?: string;
-  senha?: string;
   imageBase64?: string;
   mimeType?: string;
 };
@@ -44,8 +35,6 @@ function validarImagemBuffer(buf: Buffer, mimeType: string): { ok: true } | { ok
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
-    const login = body.login ?? '';
-    const senha = body.senha ?? '';
     const imageBase64 = String(body.imageBase64 ?? '').replace(/\s/g, '');
     const mimeType = String(body.mimeType ?? 'image/jpeg').toLowerCase();
 
@@ -56,12 +45,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Imagem muito grande.' }, { status: 400 });
     }
 
-    const auth = await validarCredencialOperacional(login, senha);
+    const auth = await resolverUsuarioPorBearer(req.headers.get('authorization'));
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
-    }
-    if (!PERFIS.has(auth.usuario.perfil)) {
-      return NextResponse.json({ error: 'Sem permissão para extrair nota de compra.' }, { status: 403 });
     }
 
     let buf: Buffer;

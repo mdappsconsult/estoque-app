@@ -1,17 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   FileImage,
   Loader2,
-  CheckCircle,
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
   UserPlus,
   Camera,
-  ImageIcon,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -131,7 +129,6 @@ export default function EntradaCompraNotaPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [qualidadeMsg, setQualidadeMsg] = useState<string | null>(null);
   const [qualidadeOk, setQualidadeOk] = useState(false);
-  const [senhaExtrair, setSenhaExtrair] = useState('');
   const [extraindo, setExtraindo] = useState(false);
   const [erroExtrair, setErroExtrair] = useState<string | null>(null);
   const [modoOcr, setModoOcr] = useState<string | null>(null);
@@ -149,34 +146,6 @@ export default function EntradaCompraNotaPage() {
   const [modalRapidoAberto, setModalRapidoAberto] = useState(false);
   const [linhaCadastroKey, setLinhaCadastroKey] = useState<string | null>(null);
   const [salvandoRapido, setSalvandoRapido] = useState(false);
-
-  /** Celular / tablet touch: UI com câmera em destaque (evita mismatch SSR). */
-  const [uiMobileCamera, setUiMobileCamera] = useState(false);
-  const inputCameraRef = useRef<HTMLInputElement>(null);
-  const inputGaleriaRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const sync = () => setUiMobileCamera(mq.matches || navigator.maxTouchPoints > 0);
-    sync();
-    mq.addEventListener('change', sync);
-    return () => mq.removeEventListener('change', sync);
-  }, []);
-
-  /**
-   * No celular, tenta abrir o seletor de arquivo com `capture` logo ao entrar na etapa.
-   * Alguns navegadores (ex.: Safari iOS) exigem gesto do usuário — aí o botão grande cobre o caso.
-   */
-  useEffect(() => {
-    if (!uiMobileCamera || etapa !== 'foto' || arquivo) return;
-    const t = window.setTimeout(() => inputCameraRef.current?.click(), 450);
-    return () => window.clearTimeout(t);
-  }, [uiMobileCamera, etapa, arquivo]);
-
-  const onInputArquivoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    void onEscolherArquivo(e.target.files?.[0] ?? null);
-    e.target.value = '';
-  };
   const [formRapido, setFormRapido] = useState({
     nome: '',
     familia_id: '',
@@ -185,6 +154,45 @@ export default function EntradaCompraNotaPage() {
     unidade_medida: 'un',
     estoque_minimo: '0',
   });
+
+  const inputCameraRef = useRef<HTMLInputElement>(null);
+  const inputGaleriaRef = useRef<HTMLInputElement>(null);
+  const videoWebcamRef = useRef<HTMLVideoElement | null>(null);
+  const streamWebcamRef = useRef<MediaStream | null>(null);
+
+  const [webcamAberta, setWebcamAberta] = useState(false);
+
+  /** Prévia ok, aguardando o operador confirmar antes de chamar o OCR. */
+  const emRevisaoFoto = Boolean(etapa === 'foto' && arquivo && qualidadeOk && !extraindo);
+
+  /**
+   * Tenta abrir o seletor/câmera ao entrar (celular, Mac, etc.).
+   * Alguns navegadores bloqueiam sem gesto — use os botões abaixo.
+   */
+  useEffect(() => {
+    if (etapa !== 'foto' || arquivo || extraindo) return;
+    const t = window.setTimeout(() => inputCameraRef.current?.click(), 350);
+    return () => window.clearTimeout(t);
+  }, [etapa, arquivo, extraindo]);
+
+  useEffect(() => {
+    return () => {
+      streamWebcamRef.current?.getTracks().forEach((tr) => tr.stop());
+      streamWebcamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!webcamAberta || !videoWebcamRef.current || !streamWebcamRef.current) return;
+    const v = videoWebcamRef.current;
+    v.srcObject = streamWebcamRef.current;
+    void v.play().catch(() => {});
+  }, [webcamAberta]);
+
+  const onInputArquivoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void onEscolherArquivo(e.target.files?.[0] ?? null);
+    e.target.value = '';
+  };
 
   useEffect(() => {
     if (!isUsuarioIndustria) return;
@@ -213,6 +221,89 @@ export default function EntradaCompraNotaPage() {
     return [...produtosCompra, ...extra];
   }, [produtosCompra, produtos, linhas]);
 
+  const executarExtracaoNota = useCallback(
+    async (arquivoLocal: File) => {
+      if (!usuario) {
+        alert('Faça login.');
+        return;
+      }
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        alert('Sessão expirada. Saia e entre de novo no sistema.');
+        return;
+      }
+
+      setExtraindo(true);
+      setErroExtrair(null);
+      try {
+        const dataUrl = await fileToDataUrl(arquivoLocal);
+        const parsed = dataUrlToBase64AndMime(dataUrl);
+        if (!parsed) {
+          throw new Error('Não foi possível codificar a imagem.');
+        }
+
+        const res = await fetch('/api/operacional/extrair-nota-compra', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            imageBase64: parsed.base64,
+            mimeType: parsed.mimeType,
+          }),
+        });
+        const body = (await res.json()) as {
+          error?: string;
+          detalhe?: string;
+          extracao?: NotaCompraExtraida;
+          storagePath?: string;
+          modoOcr?: string;
+        };
+        if (!res.ok) {
+          const extra = body.detalhe ? `\n\nDetalhe: ${body.detalhe}` : '';
+          throw new Error((body.error || 'Falha na extração') + extra);
+        }
+        if (!body.extracao?.linhas?.length) {
+          throw new Error(
+            'Nenhuma linha de produto foi reconhecida. Tente outra foto ou use entrada manual.'
+          );
+        }
+
+        setStoragePath(body.storagePath ?? null);
+        setModoOcr(body.modoOcr ?? null);
+        setNotaFiscal((body.extracao.nota_fiscal || '').trim().toUpperCase());
+        setFornecedor((body.extracao.fornecedor || '').trim());
+
+        const draft: LinhaDraft[] = body.extracao.linhas.map((l) => {
+          const pid = sugerirProdutoId(produtos, l.ean, l.descricao);
+          const p = produtos.find((x) => x.id === pid);
+          return {
+            key: crypto.randomUUID(),
+            descricaoOcr: l.descricao,
+            ean: l.ean,
+            quantidade: l.quantidade != null && Number.isFinite(l.quantidade) ? String(l.quantidade) : '',
+            custoUnitario:
+              l.valor_unitario != null && Number.isFinite(l.valor_unitario)
+                ? String(l.valor_unitario)
+                : '',
+            produtoId: pid,
+            dataValidade: sugerirDataValidade(p),
+            incluir: true,
+          };
+        });
+        setLinhas(draft);
+        setEtapa('conferencia');
+      } catch (e: unknown) {
+        setErroExtrair(errMessage(e, 'Erro ao extrair'));
+      } finally {
+        setExtraindo(false);
+      }
+    },
+    [usuario, produtos]
+  );
+
   const onEscolherArquivo = async (f: File | null) => {
     setErroExtrair(null);
     setQualidadeOk(false);
@@ -232,95 +323,70 @@ export default function EntradaCompraNotaPage() {
 
     setArquivo(f);
     setPreviewUrl(URL.createObjectURL(f));
-    setQualidadeMsg('Imagem aprovada para processamento.');
     setQualidadeOk(true);
+    setQualidadeMsg(null);
+    /* Confirmação visual: «Usar esta foto» dispara o OCR. */
   };
 
-  const extrairDados = async () => {
-    if (!usuario) {
-      alert('Faça login.');
-      return;
-    }
-    if (!arquivo || !qualidadeOk) {
-      alert('Selecione uma foto aprovada pela checagem de qualidade.');
-      return;
-    }
-    const loginOp = usuario.login_operacional?.trim() || '';
-    if (!loginOp) {
-      alert(
-        'Seu usuário não tem login operacional. Cadastre em Usuários ou use uma conta com login.'
-      );
-      return;
-    }
-    if (!senhaExtrair) {
-      alert('Informe sua senha operacional para processar a imagem no servidor.');
-      return;
-    }
+  const confirmarUsarFotoELer = () => {
+    if (!arquivo) return;
+    void executarExtracaoNota(arquivo);
+  };
 
-    setExtraindo(true);
-    setErroExtrair(null);
+  const fecharWebcam = () => {
+    streamWebcamRef.current?.getTracks().forEach((tr) => tr.stop());
+    streamWebcamRef.current = null;
+    setWebcamAberta(false);
+  };
+
+  const abrirWebcam = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert('Este navegador não acessa a webcam. Use «Escolher arquivo».');
+      return;
+    }
     try {
-      const dataUrl = await fileToDataUrl(arquivo);
-      const parsed = dataUrlToBase64AndMime(dataUrl);
-      if (!parsed) {
-        throw new Error('Não foi possível codificar a imagem.');
-      }
-
-      const res = await fetch('/api/operacional/extrair-nota-compra', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          login: loginOp,
-          senha: senhaExtrair,
-          imageBase64: parsed.base64,
-          mimeType: parsed.mimeType,
-        }),
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1920 } },
+        audio: false,
       });
-      const body = (await res.json()) as {
-        error?: string;
-        detalhe?: string;
-        extracao?: NotaCompraExtraida;
-        storagePath?: string;
-        modoOcr?: string;
-      };
-      if (!res.ok) {
-        const extra = body.detalhe ? `\n\nDetalhe: ${body.detalhe}` : '';
-        throw new Error((body.error || 'Falha na extração') + extra);
-      }
-      if (!body.extracao?.linhas?.length) {
-        throw new Error('Nenhuma linha de produto foi reconhecida. Tente outra foto ou use entrada manual.');
-      }
-
-      setStoragePath(body.storagePath ?? null);
-      setModoOcr(body.modoOcr ?? null);
-      setNotaFiscal((body.extracao.nota_fiscal || '').trim().toUpperCase());
-      setFornecedor((body.extracao.fornecedor || '').trim());
-
-      const draft: LinhaDraft[] = body.extracao.linhas.map((l) => {
-        const pid = sugerirProdutoId(produtos, l.ean, l.descricao);
-        const p = produtos.find((x) => x.id === pid);
-        return {
-          key: crypto.randomUUID(),
-          descricaoOcr: l.descricao,
-          ean: l.ean,
-          quantidade: l.quantidade != null && Number.isFinite(l.quantidade) ? String(l.quantidade) : '',
-          custoUnitario:
-            l.valor_unitario != null && Number.isFinite(l.valor_unitario)
-              ? String(l.valor_unitario)
-              : '',
-          produtoId: pid,
-          dataValidade: sugerirDataValidade(p),
-          incluir: true,
-        };
-      });
-      setLinhas(draft);
-      setEtapa('conferencia');
-      setSenhaExtrair('');
-    } catch (e: unknown) {
-      setErroExtrair(errMessage(e, 'Erro ao extrair'));
-    } finally {
-      setExtraindo(false);
+      streamWebcamRef.current = stream;
+      setWebcamAberta(true);
+    } catch {
+      alert(
+        'Não foi possível usar a webcam. No Mac: Preferências do Sistema → Privacidade e segurança → Câmera — autorize o navegador (Chrome/Safari).'
+      );
     }
+  };
+
+  const capturarFrameWebcam = () => {
+    const video = videoWebcamRef.current;
+    if (!video?.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const file = new File([blob], `nota-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        fecharWebcam();
+        void onEscolherArquivo(file);
+      },
+      'image/jpeg',
+      0.92
+    );
+  };
+
+  const descartarFotoETentarDeNovo = () => {
+    setErroExtrair(null);
+    setQualidadeOk(false);
+    setQualidadeMsg(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setArquivo(null);
+    window.setTimeout(() => inputCameraRef.current?.click(), 350);
   };
 
   const atualizarLinha = (key: string, patch: Partial<LinhaDraft>) => {
@@ -522,6 +588,7 @@ export default function EntradaCompraNotaPage() {
   };
 
   const resetFluxo = () => {
+    fecharWebcam();
     setEtapa('foto');
     setArquivo(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -554,16 +621,13 @@ export default function EntradaCompraNotaPage() {
             <FileImage className="w-5 h-5 text-violet-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Registrar compra (foto da nota)</h1>
-            <p className="text-sm text-gray-500">
-              Foto da DANFE → checagem de qualidade → leitura automática (OCR) → conferência → um OK final.
-              Provedor: com <code className="text-xs bg-gray-100 px-1 rounded">ANTHROPIC_API_KEY</code> usa <strong>Claude</strong>
-              ; senão <code className="text-xs bg-gray-100 px-1 rounded">OPENAI_API_KEY</code>. Opcional:{' '}
-              <code className="text-xs bg-gray-100 px-1 rounded">NOTA_COMPRA_OCR_PROVIDER=anthropic|openai|auto</code>,{' '}
-              <code className="text-xs bg-gray-100 px-1 rounded">NOTA_COMPRA_OCR_MODE=mock</code> (demo).
+            <h1 className="text-2xl font-bold text-gray-900">Foto da nota</h1>
+            <p className="text-sm text-gray-600">
+              Abre a câmera, tire a foto e confira se ficou legível. Depois toque em <strong>Usar esta foto</strong> para ler a
+              nota.
             </p>
             <Link href="/entrada-compra" className="text-sm text-red-600 hover:underline mt-1 inline-block">
-              Entrada manual (sem foto)
+              Prefiro lançar na mão (sem foto)
             </Link>
           </div>
         </div>
@@ -571,7 +635,6 @@ export default function EntradaCompraNotaPage() {
 
       {etapa === 'foto' && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 space-y-4">
-          {/* Inputs: câmera (traseira no mobile) vs galeria */}
           <input
             ref={inputCameraRef}
             id="entrada-nota-capture"
@@ -590,85 +653,92 @@ export default function EntradaCompraNotaPage() {
             onChange={onInputArquivoChange}
           />
 
-          {uiMobileCamera ? (
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-gray-800">Foto da nota fiscal</p>
-              <p className="text-xs text-gray-500">
-                No celular, a câmera pode abrir sozinha ao entrar na página. Se não abrir, toque em{' '}
-                <strong>Tirar foto</strong>. Use a galeria só se já tiver a imagem salva.
-              </p>
-              <label
-                htmlFor="entrada-nota-capture"
-                className="flex items-center justify-center gap-3 w-full min-h-[52px] rounded-xl bg-violet-600 text-white text-base font-semibold shadow-sm active:bg-violet-700 px-4 py-4 cursor-pointer touch-manipulation"
-              >
-                <Camera className="w-7 h-7 shrink-0" aria-hidden />
-                Tirar foto da nota
-              </label>
-              <button
-                type="button"
-                onClick={() => inputGaleriaRef.current?.click()}
-                className="flex items-center justify-center gap-2 w-full min-h-[48px] rounded-xl border border-gray-300 bg-white text-gray-800 text-sm font-medium touch-manipulation"
-              >
-                <ImageIcon className="w-5 h-5 text-gray-600" aria-hidden />
-                Escolher da galeria
-              </button>
+          {extraindo ? (
+            <div className="flex flex-col items-center justify-center gap-4 py-10 px-2 text-center">
+              <Loader2 className="h-14 w-14 text-violet-600 animate-spin shrink-0" aria-hidden />
+              <div>
+                <p className="text-lg font-semibold text-gray-900">Lendo a nota…</p>
+                <p className="text-sm text-gray-500 mt-1">Aguarde uns segundos.</p>
+              </div>
+              {previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewUrl}
+                  alt=""
+                  className="max-h-36 rounded-lg border border-gray-200 opacity-90"
+                />
+              )}
+            </div>
+          ) : emRevisaoFoto ? (
+            <div className="space-y-5">
+              <p className="text-center text-base font-medium text-gray-800">Confira se a foto ficou boa</p>
+              {previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewUrl}
+                  alt="Prévia da nota fiscal"
+                  className="w-full max-h-[min(55vh,420px)] object-contain rounded-xl border border-gray-200 bg-gray-50 mx-auto"
+                />
+              )}
+              {erroExtrair && (
+                <div className="text-sm text-red-800 bg-red-50 rounded-lg p-3 border border-red-100">{erroExtrair}</div>
+              )}
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                <Button
+                  type="button"
+                  className="w-full sm:min-w-[200px] sm:w-auto min-h-[52px] text-base"
+                  onClick={confirmarUsarFotoELer}
+                >
+                  {erroExtrair ? 'Tentar ler de novo' : 'Usar esta foto'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:min-w-[200px] sm:w-auto min-h-[52px] text-base"
+                  onClick={descartarFotoETentarDeNovo}
+                >
+                  Tirar outra foto
+                </Button>
+              </div>
             </div>
           ) : (
             <>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="entrada-nota-galeria-desktop">
-                Foto da nota fiscal
-              </label>
-              <input
-                id="entrada-nota-galeria-desktop"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="block w-full text-sm text-gray-600"
-                onChange={onInputArquivoChange}
-              />
+              <div className="space-y-3">
+                <label
+                  htmlFor="entrada-nota-capture"
+                  className="flex items-center justify-center gap-3 w-full min-h-[56px] rounded-xl bg-violet-600 text-white text-lg font-semibold shadow-md active:bg-violet-700 px-4 py-4 cursor-pointer touch-manipulation"
+                >
+                  <Camera className="w-8 h-8 shrink-0" aria-hidden />
+                  Tirar foto
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void abrirWebcam()}
+                  className="flex items-center justify-center gap-2 w-full min-h-[48px] rounded-xl border border-violet-200 bg-white text-violet-900 text-base font-medium touch-manipulation"
+                >
+                  <Camera className="w-5 h-5 shrink-0" aria-hidden />
+                  Usar webcam (Mac / PC)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => inputGaleriaRef.current?.click()}
+                  className="text-sm text-gray-500 underline w-full text-center py-2 touch-manipulation"
+                >
+                  Escolher arquivo na pasta (JPEG, PNG…)
+                </button>
+                <p className="text-xs text-gray-500 text-center leading-snug">
+                  No Mac com Chrome/Safari, «Tirar foto» pode abrir o seletor de arquivos. Use{' '}
+                  <strong>Usar webcam</strong> para filmar a nota com a câmera do computador.
+                </p>
+              </div>
+              {qualidadeMsg && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span>{qualidadeMsg}</span>
+                </div>
+              )}
             </>
           )}
-          {previewUrl && (
-            // Prévia local (blob:); next/image não aplica bem a URLs efêmeras sem domínio configurado.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="Prévia" className="max-h-64 rounded-lg border border-gray-200" />
-          )}
-          {qualidadeMsg && (
-            <div
-              className={`flex items-start gap-2 rounded-lg p-3 text-sm ${
-                qualidadeOk ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900'
-              }`}
-            >
-              {qualidadeOk ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
-              <span>{qualidadeMsg}</span>
-            </div>
-          )}
-          <Input
-            type="password"
-            label="Senha operacional (para processar no servidor)"
-            value={senhaExtrair}
-            onChange={(e) => setSenhaExtrair(e.target.value)}
-            autoComplete="current-password"
-          />
-          {erroExtrair && (
-            <div className="text-sm text-red-600 bg-red-50 rounded-lg p-3">{erroExtrair}</div>
-          )}
-          <Button
-            className="w-full sm:w-auto"
-            onClick={() => void extrairDados()}
-            disabled={!qualidadeOk || extraindo}
-          >
-            {extraindo ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Processando…
-              </>
-            ) : (
-              <>
-                Extrair dados da nota
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </>
-            )}
-          </Button>
         </div>
       )}
 
@@ -880,6 +950,32 @@ export default function EntradaCompraNotaPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={webcamAberta}
+        onClose={fecharWebcam}
+        title="Fotografar a nota"
+        subtitle="Aponte a câmera para a nota e toque em Capturar foto."
+        size="lg"
+      >
+        <div className="p-4 space-y-4">
+          <video
+            ref={videoWebcamRef}
+            className="w-full max-h-[min(60vh,480px)] rounded-lg bg-black object-contain"
+            playsInline
+            muted
+            autoPlay
+          />
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button variant="secondary" type="button" onClick={fecharWebcam}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={capturarFrameWebcam}>
+              Capturar foto
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={modalRapidoAberto}

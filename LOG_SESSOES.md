@@ -1,5 +1,20 @@
 # Log de Sessões
 
+### Sessão - 2026-04-21 - Foto da NF: Mac/localhost — webcam + mesma UI em todo lugar
+- **Problema:** em Mac no `localhost` a câmera não abria (fluxo só «mobile» + desktop só com seletor de arquivo).
+- **Mudança:** auto-tentativa de abrir o input para todos; botões únicos: **Tirar foto**, **Usar webcam (Mac/PC)** (`getUserMedia` + modal Capturar), **Escolher arquivo**; texto explicando que no Mac o navegador pode abrir arquivos em vez da câmera.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Foto da NF: prévia + «Usar esta foto» antes do OCR
+- **Pedido:** fluxo como na operação real — câmera ao entrar, ver a foto embaixo, **Usar esta foto** ou **Tirar outra**; só depois seguir a leitura.
+- **Mudança:** `/entrada-compra-nota` não chama mais o OCR ao receber o arquivo; estado **revisão** com prévia grande, botões **Usar esta foto** / **Tirar outra foto** (e **Tentar ler de novo** se a API falhar). `CONTEXTO_ATUAL.md` ajustado.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-21 - Foto da NF: fluxo simples (sessão + leitura automática)
+- **Pedido:** ao abrir a tela, foco na câmera; sem senha operacional na leitura; processo mais fácil para quem tem pouca familiaridade com tecnologia.
+- **Mudança:** `POST /api/operacional/extrair-nota-compra` valida **`Authorization: Bearer`** (Supabase) via `src/lib/auth/resolve-usuario-bearer.ts`; cliente envia token de sessão. Página `/entrada-compra-nota`: após foto aprovada na qualidade, **dispara OCR sozinho**; UI reduzida (título curto, «Lendo a nota…», galeria como link secundário). `CONTEXTO_ATUAL.md` e `docs/CONTEXTO_AGENTE_REGISTRO_COMPRA_FOTO_NF.md` atualizados.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-21 - Registrar Compra: atalho para compra por foto da nota + deploy
 - **Pedido:** botão em **Registrar Compra** para abrir a página de foto/OCR; deploy em seguida.
 - **Mudança:** em `/entrada-compra`, link em destaque **Compra por foto da nota (OCR)** → `/entrada-compra-nota`; `CONTEXTO_ATUAL.md` atualizado.
