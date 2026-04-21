@@ -11,9 +11,36 @@ import {
   type ProdutoComGruposLista,
 } from '@/lib/services/produtos-cadastro-lista';
 import { supabase } from '@/lib/supabase';
+import { errMessage } from '@/lib/errMessage';
 
 /** Alias local — mesmo formato esperado pelo `ProdutoModal`. */
 type ProdutoComGrupos = ProdutoComGruposLista;
+
+/**
+ * Inclui colunas de massa só quando o operador ativa o modo ou quando precisa desligar no banco.
+ * Assim, projetos Supabase ainda sem `20260420140000_producao_consumo_massa.sql` continuam salvando
+ * produtos que nunca tiveram consumo por massa (colunas ausentes não entram no PATCH).
+ */
+function patchColunasProducaoMassa(
+  produtoData: ProdutoModalSavePayload,
+  produtoEditando: ProdutoComGrupos | null
+): Record<string, unknown> {
+  if (produtoData.producaoConsumoPorMassa) {
+    return {
+      producao_consumo_por_massa: true,
+      producao_gramas_por_embalagem: produtoData.producaoGramasPorEmbalagem,
+      producao_gramas_por_dose: produtoData.producaoGramasPorDose ?? 0,
+    };
+  }
+  if (produtoEditando?.producao_consumo_por_massa === true) {
+    return {
+      producao_consumo_por_massa: false,
+      producao_gramas_por_embalagem: null,
+      producao_gramas_por_dose: null,
+    };
+  }
+  return {};
+}
 
 const LABEL_ORIGEM: Record<string, string> = {
   COMPRA: 'Compra',
@@ -140,6 +167,7 @@ export default function ProdutosPage() {
   const handleSalvarProduto = async (produtoData: ProdutoModalSavePayload) => {
     try {
       if (produtoEditando) {
+        const massa = patchColunasProducaoMassa(produtoData, produtoEditando);
         const { error: updateError } = await supabase
           .from('produtos')
           .update({
@@ -160,21 +188,31 @@ export default function ProdutosPage() {
             contagem_do_dia: produtoData.contagemDoDia,
             escopo_reposicao: produtoData.escopoReposicao ?? 'loja',
             updated_at: new Date().toISOString(),
+            ...massa,
           })
           .eq('id', produtoEditando.id);
         if (updateError) throw updateError;
 
-        await supabase.from('produto_grupos').delete().eq('produto_id', produtoEditando.id);
+        const { error: delPgErr } = await supabase
+          .from('produto_grupos')
+          .delete()
+          .eq('produto_id', produtoEditando.id);
+        if (delPgErr) throw delPgErr;
         const embIds: string[] = produtoData.embalagemGrupoIds || [];
         if (embIds.length > 0) {
-          await supabase.from('produto_grupos').insert(
+          const { error: insPgErr } = await supabase.from('produto_grupos').insert(
             embIds.map((grupoId: string) => ({ produto_id: produtoEditando.id, grupo_id: grupoId }))
           );
+          if (insPgErr) throw insPgErr;
         }
 
-        await supabase.from('conservacoes').delete().eq('produto_id', produtoEditando.id);
+        const { error: delConsErr } = await supabase
+          .from('conservacoes')
+          .delete()
+          .eq('produto_id', produtoEditando.id);
+        if (delConsErr) throw delConsErr;
         if (produtoData.conservacoes?.length > 0) {
-          await supabase.from('conservacoes').insert(
+          const { error: insConsErr } = await supabase.from('conservacoes').insert(
             produtoData.conservacoes.map((c) => ({
               produto_id: produtoEditando.id,
               tipo: c.tipo,
@@ -184,8 +222,10 @@ export default function ProdutosPage() {
               minutos: c.minutos,
             }))
           );
+          if (insConsErr) throw insConsErr;
         }
       } else {
+        const massa = patchColunasProducaoMassa(produtoData, null);
         const { data: novoProduto, error: insertError } = await supabase
           .from('produtos')
           .insert({
@@ -205,19 +245,22 @@ export default function ProdutosPage() {
             exibir_horario_etiqueta: produtoData.exibirHorarioEtiqueta,
             contagem_do_dia: produtoData.contagemDoDia,
             escopo_reposicao: produtoData.escopoReposicao ?? 'loja',
+            ...massa,
           })
           .select()
           .single();
         if (insertError) throw insertError;
+        if (!novoProduto?.id) throw new Error('Resposta inválida ao criar produto.');
 
         const embNovos: string[] = produtoData.embalagemGrupoIds || [];
         if (embNovos.length > 0) {
-          await supabase.from('produto_grupos').insert(
+          const { error: insPgErr } = await supabase.from('produto_grupos').insert(
             embNovos.map((grupoId: string) => ({ produto_id: novoProduto.id, grupo_id: grupoId }))
           );
+          if (insPgErr) throw insPgErr;
         }
         if (produtoData.conservacoes?.length > 0) {
-          await supabase.from('conservacoes').insert(
+          const { error: insConsErr } = await supabase.from('conservacoes').insert(
             produtoData.conservacoes.map((c) => ({
               produto_id: novoProduto.id,
               tipo: c.tipo,
@@ -227,15 +270,20 @@ export default function ProdutosPage() {
               minutos: c.minutos,
             }))
           );
+          if (insConsErr) throw insConsErr;
         }
-        await supabase.from('estoque').insert({ produto_id: novoProduto.id, quantidade: 0 });
+        const { error: estoqueErr } = await supabase
+          .from('estoque')
+          .insert({ produto_id: novoProduto.id, quantidade: 0 });
+        if (estoqueErr) throw estoqueErr;
       }
 
       setModalOpen(false);
       await carregar({ silent: true });
     } catch (error) {
-      console.error('Erro ao salvar produto:', error);
-      alert('Erro ao salvar produto');
+      const msg = errMessage(error, 'Erro ao salvar produto');
+      console.error('Erro ao salvar produto:', msg, error);
+      alert(msg);
     }
   };
 

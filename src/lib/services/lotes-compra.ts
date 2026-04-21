@@ -374,6 +374,45 @@ export async function emitirUnidadesCompraFifo(
   return itensCriados;
 }
 
+/**
+ * Unidades ainda não emitidas como QR nos lotes de compra deste produto/local (soma dos lotes, FEFO no consumo).
+ * Na tela de Produção o operador pode ver 0 «com QR» e ainda assim ter saldo aqui — `garantirItensDisponiveisNoLocal` emite ao registrar.
+ */
+export async function contarUnidadesLivresLotesCompra(
+  produtoId: string,
+  localId: string
+): Promise<number> {
+  const { data: lotes, error: lotesError } = await supabase
+    .from('lotes_compra')
+    .select('id, quantidade')
+    .eq('produto_id', produtoId)
+    .eq('local_id', localId)
+    .order('created_at', { ascending: true });
+  if (lotesError) throw lotesError;
+
+  const loteIds = (lotes || []).map((l) => l.id);
+  const mintCountByLote = new Map<string, number>();
+  if (loteIds.length > 0) {
+    const { data: mintRows, error: mintErr } = await supabase
+      .from('itens')
+      .select('lote_compra_id')
+      .in('lote_compra_id', loteIds);
+    if (mintErr) throw mintErr;
+    for (const row of mintRows || []) {
+      if (row.lote_compra_id) {
+        mintCountByLote.set(row.lote_compra_id, (mintCountByLote.get(row.lote_compra_id) || 0) + 1);
+      }
+    }
+  }
+
+  let total = 0;
+  for (const lote of lotes || []) {
+    const minted = mintCountByLote.get(lote.id) || 0;
+    total += Math.max(0, lote.quantidade - minted);
+  }
+  return total;
+}
+
 /** Garante pelo menos `quantidadeNecessaria` itens EM_ESTOQUE no local, emitindo QR a partir de compras se faltar. */
 export async function garantirItensDisponiveisNoLocal(input: {
   produtoId: string;

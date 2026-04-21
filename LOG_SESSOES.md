@@ -1,5 +1,128 @@
 # Log de Sessões
 
+### Sessão - 2026-04-21 - Home: remover expansão + menu “Configurações” como subpasta
+- **Pedido:** tirar “Expandir tudo / Recolher tudo / Recolher” da Home; e organizar ícones do grupo dentro do ícone de **Configurações**.
+- **Mudança:** na Home (`/`), removidos os controles de expandir/recolher e as seções ficam sempre abertas; removido também o bloco duplicado (logo/“Olá…”/“Açaí do Kim — operações”/texto de orientação) já exibido no header do sistema; na `Sidebar`, os itens de **Admin**, **Cadastros** e **Configurações** passaram a ficar dentro de um único grupo expansível **Configurações** (como subpasta).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Produção: insumos com expandir/recolher
+- **Pedido:** muitos cards de insumo; queria expandir só quando necessário.
+- **Mudança:** em `/producao`, insumos podem ser **retraídos** e expandidos por linha. **Padrão:** todos começam recolhidos (sem “expandir tudo” / “recolher tudo”).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Produção: receita trava edição de insumos
+- **Pedido:** ao selecionar receitas (“Açaí do Kim”, “Cupuaçu do Kim”…), não permitir alterar/deletar insumos na Produção; isso deve ser feito no cadastro da receita.
+- **Mudança:** em `/producao`, com **Receita selecionada** os insumos ficam **somente leitura**: sem **Adicionar**, sem **Remover linha**, e campos desabilitados; aviso orienta editar em **Cadastros → Receitas de produção**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Receitas produção: excluir só ADMIN_MASTER + aviso migração inteligente
+- **Pedido:** opção de excluir somente administrador; e não confundir com aviso de migração quando já está aplicado.
+- **Mudança:** em `/cadastros/receitas-producao`, botão **Excluir** aparece só para `ADMIN_MASTER` (e handler bloqueia também); aviso de migração só aparece quando o erro indica tabela ausente.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Acompanhamento de viagens/entregas (visão gerencial)
+- **Pedido:** acompanhar em um lugar só se a remessa chegou na loja e se a sequência da viagem foi concluída.
+- **Mudança:** nova tela `/acompanhamento-viagens` (ADMIN_MASTER/MANAGER) com filtros por período/destino e agregação por status das remessas; regra: **chegou** = `DELIVERED`, **concluída** = todas `DELIVERED`/`DIVERGENCE`. Link no menu **Admin**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Home: seções recolhíveis (evitar muitos cards)
+- **Pedido:** ao entrar na Home, “expande um monte de card”; queria opção para manter retraído.
+- **Mudança:** na Home (`/`), cada seção ganhou botão **Expandir/Recolher** + ações **Expandir tudo** / **Recolher tudo**; persistência do estado no navegador (`localStorage`).
+- **Impacto:** reduz poluição visual e facilita encontrar o que precisa sem rolar listas longas.
+
+### Sessão - 2026-04-21 - Produção: insumos mobile first (cards)
+- **Pedido:** priorizar celular na visualização dos insumos.
+- **Mudança:** em `/producao`, cada insumo vira **card** empilhado (cabeçalho + lixeira 44px), select e campo de quantidade **largura total**, texto curto de ajuda (doses/kg ou QR), **resumo** em caixa branca com títulos «Consumo estimado» / «Disponível no local» (massa) ou lista em duas linhas (QR vs compra); sem `whitespace-nowrap` no resumo.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Produção: consumo (g) mais claro em insumos por massa
+- **Problema:** valor digitado (kg/doses) confundia com o disponível em gramas.
+- **Mudança:** em `/producao`, insumo com massa mostra **Consumo: X g (Y kg/doses × g/dose)** e **Disponível: Z g** em linhas separadas, com números formatados pt-BR.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Receitas produção: editar após salvar (UX)
+- **Mudança:** botões **Editar** / **Excluir** com texto na tabela; texto de ajuda no topo; ao editar, estado **Carregando insumos…** até o Supabase devolver itens; **Salvar alterações** no modal; fechar modal limpa estado de carga.
+
+### Sessão - 2026-04-21 - Receitas produção: campos de massa iguais à Produção
+- **Problema:** no cadastro de receitas o insumo por massa não espelhava doses/kg da tela Produção.
+- **Mudança:** `select` explícito com colunas de massa; input `type="number"` + `step`/`placeholder` como `/producao`; texto de ajuda; prévia «→ X g na produção» (`previewGramasInsumo` em `producao-receitas.ts`); `sm:items-end` na linha.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-21 - Produção: receitas pré-configuradas (insumos)
+- **Mudança:** tabelas `producao_receitas` e `producao_receita_itens` (migração **`20260421100000_producao_receitas.sql`**); serviço [`producao-receitas.ts`](src/lib/services/producao-receitas.ts); em **`/producao`**, select **Receita** aplica linhas (confirm se já houver dados); cadastro **`/cadastros/receitas-producao`** (Admin/Gerente); menu, home e permissões; exemplo SQL em [`docs/consultas-sql/receita-producao-acai-exemplo.sql`](docs/consultas-sql/receita-producao-acai-exemplo.sql). Migração aplicada no Supabase via MCP no ambiente ligado ao projeto.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: insumos pela família «Insumo Industria»
+- **Pedido:** listar em **Insumos gastos** os produtos da família **Insumo Industria** (ex.: açúcar, bases, polpas da lista operacional), incluindo origem **PRODUCAO** quando aplicável.
+- **Mudança:** filtro por `familia_id` resolvido via nome da categoria (`Insumo Industria` / `Insumo Indústria`); carga de `familias` na página; aviso se a categoria não existir; `garantirInsumosFamiliaProducao` em `registrarProducaoComItens`. Módulo `src/lib/producao-insumos-familia.ts`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: removido filtro «insumo indústria» (escopo)
+- **Pedido:** filtro por `escopo_reposicao` em **Insumos gastos** não atendeu na prática.
+- **Mudança:** insumos voltam a **ativos** com origem **compra** ou **ambos**; removidos `participaInsumoProducao` e `garantirInsumosProducaoIndustria`.
+
+### Sessão - 2026-04-20 - Produção: insumos = produto insumo indústria
+- **Pedido:** em **Insumos gastos**, só **produto insumo indústria** (cadastro «Produto da indústria», não confundir com item só de reposição de loja).
+- **Mudança:** `participaInsumoProducao` (`escopo_reposicao === 'industria'` + origem COMPRA ou AMBOS); textos com esse nome; `registrarProducaoComItens` valida igual.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: revertido filtro insumos por escopo indústria
+- **Pedido:** desfazer alteração que limitava **Insumos gastos** a `escopo_reposicao === 'industria'`.
+- **Mudança:** insumos voltam a **ativos** com origem **compra** ou **ambos**; removidos `participaInsumoProducao` e validação em `registrarProducaoComItens`; textos da tela e contexto restaurados.
+
+### Sessão - 2026-04-20 - Produção: Disp. insumo QR + saldo só em lote de compra
+- **Problema:** polpa (ex.: Cupuaçu) com estoque em **compra sem QR** aparecia **Disp.: 0** porque só contava `itens` EM_ESTOQUE.
+- **Mudança:** `disponivelInsumoQrLote` agora exibe **`X QR · Y compra`** (tooltip explicando); texto de ajuda dos insumos; serviço `contarUnidadesLivresLotesCompra` já integrado ao `useEffect`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Produção: desfazer filtro «acabado só escopo indústria»
+- **Pedido:** desconsiderar alteração que limitava **Produto acabado** a `escopo_reposicao === 'industria'`.
+- **Mudança:** acabado volta a listar por **origem** `PRODUCAO` ou `AMBOS` (como antes); removido `useEffect` que limpava seleção pelo escopo; texto de lista vazia original. Insumos inalterados (compra/ambos ativos).
+
+### Sessão - 2026-04-20 - Produção: insumos = compra/ambos (correção «insumo indústria»)
+- **Pedido:** não confundir insumo usado na indústria com «produto escopo indústria» no cadastro.
+- **Mudança:** **Insumos gastos** voltam a listar só **ativos** com origem **COMPRA** ou **AMBOS**; acabado segue **escopo indústria**. Textos de ajuda ajustados.
+
+### Sessão - 2026-04-20 - Produção: insumos também só escopo indústria
+- **Nota:** revertido na sessão seguinte (critério errado para matéria-prima).
+
+### Sessão - 2026-04-20 - Produção: «Produto acabado» só escopo indústria
+- **Mudança:** em `/producao`, o select do acabado lista apenas produtos **ativos** com `escopo_reposicao === 'industria'`. Limpa seleção se o acabado deixar de ser elegível.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-20 - Supabase: migração `producao_consumo_massa` via MCP
+- **Ação:** `apply_migration` (MCP `user-supabase`) com o SQL de `20260420140000_producao_consumo_massa.sql` (publicação realtime em bloco `DO … EXCEPTION WHEN duplicate_object`).
+- **Impacto:** colunas `produtos.producao_*`, `lotes_compra.gramas_consumidas_acumulado`, tabela `producao_consumo_massa`, `resumo_estoque_agrupado` atualizada no projeto ligado ao MCP/`.env.local`.
+
+### Sessão - 2026-04-20 - Cadastro produtos: «modo massa» mais visível no modal
+- **Problema:** operadores não achavam consumo por massa — bloco só existia para «Produto de fornecedor» e ficava no fim da seção cinza.
+- **Mudança:** card **«Modo massa na produção»** logo após o tipo de cadastro (fornecedor); aviso âmbar se **Produto da indústria** explicando que massa é só em fornecedor; ao trocar para indústria, zera checkbox de massa.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-20 - Cadastro produtos: salvamento sem migração de massa + mensagem de erro
+- **Problema:** «Erro ao salvar produto» com `{}` no console — patch sempre enviava `producao_*` (falha se colunas não existem); `Error` do PostgREST não mostra bem em alguns logs.
+- **Mudança:** `patchColunasProducaoMassa` só inclui colunas de massa ao ativar o modo ou ao desligar produto que já tinha massa no banco; demais saves compatíveis com Supabase pré-`20260420140000_…`. `errMessage` agrega `details`/`hint`/`code` de `Error`. Checagem de `error` em `produto_grupos`, `conservacoes`, `estoque`. Alert com texto útil.
+- **Validação:** `npm run lint`.
+
+### Sessão - 2026-04-20 - Produção oficial: consumo por massa + saldo parcial (persistência)
+- **Pedido:** colocar em produção o fluxo alinhado à prévia (gramas / doses / kg, FIFO em lotes de compra).
+- **Mudança:** `registrarProducaoComItens` aceita `consumosMassa`, consome via `consumirMassaProducaoFifo`, insere `producao_consumo_massa`; validação de saldo com `obterGramasDisponiveisMassa`; histórico conta insumos QR + linhas de massa; `estoque-sync` com bulk por massa; tipos em `database.ts`; **`/producao`** com campo **Doses** ou **Kg** conforme cadastro; **`ProdutoModal`** + **`/cadastros/produtos`** gravam flags de massa (fornecedor). Migração repo: **`20260420140000_producao_consumo_massa.sql`** — **aplicar no Supabase do deploy** antes de usar (SQL Editor / `supabase db push` / MCP).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Prévia saldo parcial: cards sem ruído quando não há pacote aberto
+- **Mudança:** bloco «pacote aberto» só aparece quando `saldoAcumuladoGramas > 0` (após lançamento com resto na embalagem); antes só **embalagens fechadas** + regra da embalagem.
+
+### Sessão - 2026-04-20 - Prévia saldo parcial: cadastro de insumos (gramas, dose, estoque)
+- **Pedido:** na prévia, poder cadastrar produtos com gramas, quantidade, etc.
+- **Mudança:** tabela **Cadastro (demo)** — nome, embalagem (g), g/dose (0 = lançamento em kg), estoque (un.); **Adicionar** / **Carregar exemplo** / remover linha; cards e lançamento seguem a lista dinâmica. [`insumo-previa-types.ts`](src/lib/producao-previa/insumo-previa-types.ts). `CONTEXTO_ATUAL.md`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-20 - Prévia UI: consumo por massa + saldo parcial (sem persistência)
+- **Pedido:** nova tela isolada para ver o fluxo antes de misturar com Produção; após aprovação, migrar.
+- **Mudança:** rota [`/producao-previa-saldo-parcial`](src/app/producao-previa-saldo-parcial/page.tsx) (demo: Guaraná 350 g/dose, caixa 800 g; base 25 kg/saco); simulação pura [`src/lib/producao-previa/aplicar-consumo-massa.ts`](src/lib/producao-previa/aplicar-consumo-massa.ts); item **Prévia saldo parcial** no [`Sidebar`](src/components/layout/Sidebar.tsx); [`ROUTE_PERMISSIONS` / `ROUTE_UI_META`](src/lib/permissions.ts). `CONTEXTO_ATUAL.md`.
+- **Impacto:** nenhum dado de produção/estoque alterado; só UX de prova de conceito.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-20 - Deploy: push `main` (Railway)
 - **Ação:** `npm run lint` e `npm run build` OK; commit das alterações locais (histórico produção, script `test:historico-producao`, docs) + `git push origin main` para disparar deploy Railpack no Railway (evitar segundo `railway up` logo após o push).
 

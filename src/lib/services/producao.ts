@@ -6,10 +6,22 @@ import { EtiquetaInsert, Item } from '@/types/database';
 import { recalcularEstoqueProduto, recalcularEstoqueProdutos } from './estoque-sync';
 import { garantirItensDisponiveisNoLocal } from './lotes-compra';
 import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
+import {
+  consumirMassaProducaoFifo,
+  obterGramasDisponiveisMassa,
+  type DetalheLoteMassa,
+} from '@/lib/services/producao-massa';
+import { familiaNomeEhInsumoProducao } from '@/lib/producao-insumos-familia';
 
 export interface ConsumoProducaoLinha {
   produtoId: string;
   quantidade: number;
+}
+
+export interface ConsumoProducaoMassaLinha {
+  produtoId: string;
+  /** Gramas totais a consumir (já convertidas no front: doses×g/dose ou kg×1000). */
+  gramas: number;
 }
 
 interface RegistrarProducaoInput {
@@ -18,6 +30,7 @@ interface RegistrarProducaoInput {
   numBaldes: number;
   localId: string;
   consumos: ConsumoProducaoLinha[];
+  consumosMassa?: ConsumoProducaoMassaLinha[];
   dataValidade?: string | null;
   diasValidade?: number | null;
   observacoes?: string | null;
@@ -156,19 +169,29 @@ async function contarInsumosPorProducaoIds(producaoIds: string[]): Promise<{
   for (let i = 0; i < ids.length; i += HISTORICO_IN_CHUNK) {
     const slice = ids.slice(i, i + HISTORICO_IN_CHUNK);
     try {
-      const { data, error } = await supabase
-        .from('producao_consumo_itens')
-        .select('producao_id')
-        .in('producao_id', slice);
+      const [{ data, error }, { data: massRows, error: massErr }] = await Promise.all([
+        supabase.from('producao_consumo_itens').select('producao_id').in('producao_id', slice),
+        supabase.from('producao_consumo_massa').select('producao_id').in('producao_id', slice),
+      ]);
       if (error) {
         console.warn('[historico-producao] consumo_itens:', error.message);
         contagemInsumoDisponivel = false;
-        continue;
+      } else {
+        for (const row of data || []) {
+          const pid = (row as { producao_id?: string | null }).producao_id;
+          if (!pid) continue;
+          insumosPorProducao.set(pid, (insumosPorProducao.get(pid) || 0) + 1);
+        }
       }
-      for (const row of data || []) {
-        const pid = (row as { producao_id?: string | null }).producao_id;
-        if (!pid) continue;
-        insumosPorProducao.set(pid, (insumosPorProducao.get(pid) || 0) + 1);
+      if (massErr) {
+        console.warn('[historico-producao] consumo_massa:', massErr.message);
+        contagemInsumoDisponivel = false;
+      } else {
+        for (const row of massRows || []) {
+          const pid = (row as { producao_id?: string | null }).producao_id;
+          if (!pid) continue;
+          insumosPorProducao.set(pid, (insumosPorProducao.get(pid) || 0) + 1);
+        }
       }
     } catch (e) {
       console.warn('[historico-producao] consumo_itens rede:', e);
@@ -245,6 +268,16 @@ function mergeConsumos(linhas: ConsumoProducaoLinha[]): ConsumoProducaoLinha[] {
   return [...map.entries()].map(([produtoId, quantidade]) => ({ produtoId, quantidade }));
 }
 
+function mergeConsumosMassa(linhas: ConsumoProducaoMassaLinha[]): ConsumoProducaoMassaLinha[] {
+  const map = new Map<string, number>();
+  for (const linha of linhas) {
+    const g = linha.gramas;
+    if (!linha.produtoId || !Number.isFinite(g) || g <= 0) continue;
+    map.set(linha.produtoId, (map.get(linha.produtoId) || 0) + Math.floor(g));
+  }
+  return [...map.entries()].map(([produtoId, gramas]) => ({ produtoId, gramas }));
+}
+
 async function selecionarItensFefo(
   produtoId: string,
   localId: string,
@@ -269,14 +302,57 @@ async function selecionarItensFefo(
   return rows.map((r) => r.id);
 }
 
+function nomeFamiliaEmbed(
+  familia: { nome: string } | { nome: string }[] | null | undefined
+): string | null {
+  if (!familia) return null;
+  if (Array.isArray(familia)) return familia[0]?.nome ?? null;
+  return familia.nome ?? null;
+}
+
+async function garantirInsumosFamiliaProducao(produtoIds: string[]): Promise<void> {
+  const ids = [...new Set(produtoIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return;
+
+  const { data, error } = await supabase
+    .from('produtos')
+    .select('id, nome, familia:familias(nome)')
+    .in('id', ids);
+  if (error) throw error;
+
+  type Row = { id: string; nome: string; familia: { nome: string } | { nome: string }[] | null };
+  const rows = (data ?? []) as Row[];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) {
+      throw new Error(`Produto insumo não encontrado (id ${id.slice(0, 8)}…).`);
+    }
+    const nomeFam = nomeFamiliaEmbed(row.familia);
+    if (!familiaNomeEhInsumoProducao(nomeFam)) {
+      throw new Error(
+        `«${row.nome}» não está na família Insumo Industria. Ajuste a família do produto em Cadastros.`
+      );
+    }
+  }
+}
+
 export async function registrarProducaoComItens(input: RegistrarProducaoInput): Promise<EtiquetaGeradaProducao[]> {
   if (input.numBaldes <= 0 || !Number.isInteger(input.numBaldes)) {
     throw new Error('Número de baldes deve ser um inteiro maior que zero');
   }
 
   const consumosMerged = mergeConsumos(input.consumos);
-  if (consumosMerged.length === 0) {
-    throw new Error('Informe ao menos um insumo com quantidade utilizada (unidades com QR)');
+  const consumosMassaMerged = mergeConsumosMassa(input.consumosMassa ?? []);
+  if (consumosMerged.length === 0 && consumosMassaMerged.length === 0) {
+    throw new Error('Informe ao menos um insumo (unidades com QR ou consumo em gramas).');
+  }
+
+  for (const c of consumosMassaMerged) {
+    if (consumosMerged.some((q) => q.produtoId === c.produtoId)) {
+      throw new Error('Não combine QR e consumo por massa para o mesmo insumo no mesmo lançamento.');
+    }
   }
 
   for (const c of consumosMerged) {
@@ -284,6 +360,16 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
       throw new Error('Não use o produto acabado como insumo da mesma produção');
     }
   }
+  for (const c of consumosMassaMerged) {
+    if (c.produtoId === input.produtoId) {
+      throw new Error('Não use o produto acabado como insumo da mesma produção');
+    }
+  }
+
+  await garantirInsumosFamiliaProducao([
+    ...consumosMerged.map((c) => c.produtoId),
+    ...consumosMassaMerged.map((c) => c.produtoId),
+  ]);
 
   const dataValidadeCalculada =
     input.dataValidade ||
@@ -305,15 +391,31 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     });
   }
 
-  const selecoesPorProduto = await Promise.all(
-    consumosMerged.map(async (c) => ({
-      produtoId: c.produtoId,
-      itemIds: await selecionarItensFefo(c.produtoId, input.localId, c.quantidade),
-    }))
-  );
+  for (const c of consumosMassaMerged) {
+    const { gramas: disp } = await obterGramasDisponiveisMassa(c.produtoId, input.localId);
+    if (disp < c.gramas) {
+      throw new Error(
+        'Saldo em massa insuficiente para um dos insumos neste local (gramas disponíveis: ' +
+          disp +
+          '). Verifique compras e consumo parcial já registrado.'
+      );
+    }
+  }
+
+  const selecoesPorProduto =
+    consumosMerged.length === 0
+      ? []
+      : await Promise.all(
+          consumosMerged.map(async (c) => ({
+            produtoId: c.produtoId,
+            itemIds: await selecionarItensFefo(c.produtoId, input.localId, c.quantidade),
+          }))
+        );
 
   const todosItemIdsConsumidos = selecoesPorProduto.flatMap((s) => s.itemIds);
-  const produtosInsumos = [...new Set(consumosMerged.map((c) => c.produtoId))];
+  const produtosInsumos = [
+    ...new Set([...consumosMerged.map((c) => c.produtoId), ...consumosMassaMerged.map((m) => m.produtoId)]),
+  ];
 
   const { data: rpcNumero, error: rpcLoteErr } = await supabase.rpc('reservar_numero_lote_producao', {
     p_produto_id: input.produtoId,
@@ -354,28 +456,52 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
   const producaoId = producaoRow.id;
   const dataLoteProducaoIso = String((producaoRow as { created_at?: string }).created_at || '');
 
-  const { error: updErr } = await supabase
-    .from('itens')
-    .update({ estado: 'BAIXADO' })
-    .in('id', todosItemIdsConsumidos);
-  if (updErr) throw updErr;
+  const massaGravacao: { produtoId: string; gramas: number; detalhes: DetalheLoteMassa[] }[] = [];
+  for (const linha of consumosMassaMerged) {
+    const { detalhes } = await consumirMassaProducaoFifo({
+      produtoId: linha.produtoId,
+      localId: input.localId,
+      gramas: linha.gramas,
+    });
+    massaGravacao.push({ produtoId: linha.produtoId, gramas: linha.gramas, detalhes });
+  }
 
-  const baixasPayload = todosItemIdsConsumidos.map((itemId) => ({
-    item_id: itemId,
-    local_id: input.localId,
-    usuario_id: input.usuarioId,
-    producao_id: producaoId,
-  }));
+  if (massaGravacao.length > 0) {
+    const { error: pcmErr } = await supabase.from('producao_consumo_massa').insert(
+      massaGravacao.map((r) => ({
+        producao_id: producaoId,
+        produto_id: r.produtoId,
+        gramas_consumidas: r.gramas,
+        detalhes_lotes: r.detalhes,
+      }))
+    );
+    if (pcmErr) throw pcmErr;
+  }
 
-  const { error: baixasErr } = await supabase.from('baixas').insert(baixasPayload);
-  if (baixasErr) throw baixasErr;
+  if (todosItemIdsConsumidos.length > 0) {
+    const { error: updErr } = await supabase
+      .from('itens')
+      .update({ estado: 'BAIXADO' })
+      .in('id', todosItemIdsConsumidos);
+    if (updErr) throw updErr;
 
-  const consumoPayload = todosItemIdsConsumidos.map((itemId) => ({
-    producao_id: producaoId,
-    item_id: itemId,
-  }));
-  const { error: consumoErr } = await supabase.from('producao_consumo_itens').insert(consumoPayload);
-  if (consumoErr) throw consumoErr;
+    const baixasPayload = todosItemIdsConsumidos.map((itemId) => ({
+      item_id: itemId,
+      local_id: input.localId,
+      usuario_id: input.usuarioId,
+      producao_id: producaoId,
+    }));
+
+    const { error: baixasErr } = await supabase.from('baixas').insert(baixasPayload);
+    if (baixasErr) throw baixasErr;
+
+    const consumoPayload = todosItemIdsConsumidos.map((itemId) => ({
+      producao_id: producaoId,
+      item_id: itemId,
+    }));
+    const { error: consumoErr } = await supabase.from('producao_consumo_itens').insert(consumoPayload);
+    if (consumoErr) throw consumoErr;
+  }
 
   await recalcularEstoqueProdutos(produtosInsumos);
 
@@ -445,6 +571,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
       dias_validade: input.diasValidade ?? null,
       data_validade: dataValidadeCalculada,
       consumos: consumosMerged.map((c) => ({ produto_id: c.produtoId, quantidade: c.quantidade })),
+      consumos_massa: consumosMassaMerged.map((c) => ({ produto_id: c.produtoId, gramas: c.gramas })),
       itens_consumidos: todosItemIdsConsumidos.length,
     },
   });

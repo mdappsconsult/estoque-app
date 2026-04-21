@@ -42,6 +42,9 @@ interface ProdutoEditando {
   /** Tipos de embalagem (`grupos`) */
   grupos: { id: string; nome: string; cor: string }[];
   conservacoes: { id: string; tipo: string; status: string | null; dias: number; horas: number; minutos: number }[];
+  producao_consumo_por_massa?: boolean;
+  producao_gramas_por_embalagem?: number | null;
+  producao_gramas_por_dose?: number | null;
 }
 
 /** Payload enviado por `onSave` (cadastro de produto). */
@@ -64,6 +67,9 @@ export interface ProdutoModalSavePayload {
   exibirHorarioEtiqueta: boolean;
   contagemDoDia: boolean;
   escopoReposicao: 'loja' | 'industria';
+  producaoConsumoPorMassa: boolean;
+  producaoGramasPorEmbalagem: number | null;
+  producaoGramasPorDose: number | null;
 }
 
 interface ProdutoModalProps {
@@ -113,6 +119,9 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
     validadeMinutos: 0,
     exibirHorarioEtiqueta: false,
     contagemDoDia: false,
+    producaoConsumoPorMassa: false,
+    producaoGramasEmbalagem: '',
+    producaoGramasDose: '0',
   });
 
   useEffect(() => {
@@ -161,6 +170,13 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         validadeMinutos: produto.validade_minutos,
         exibirHorarioEtiqueta: produto.exibir_horario_etiqueta,
         contagemDoDia: produto.contagem_do_dia,
+        producaoConsumoPorMassa: produto.producao_consumo_por_massa ?? false,
+        producaoGramasEmbalagem:
+          produto.producao_gramas_por_embalagem != null
+            ? String(produto.producao_gramas_por_embalagem)
+            : '',
+        producaoGramasDose:
+          produto.producao_gramas_por_dose != null ? String(produto.producao_gramas_por_dose) : '0',
       });
     } else {
       setTipoCadastro('FORNECEDOR');
@@ -183,6 +199,9 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
         validadeMinutos: 0,
         exibirHorarioEtiqueta: false,
         contagemDoDia: false,
+        producaoConsumoPorMassa: false,
+        producaoGramasEmbalagem: '',
+        producaoGramasDose: '0',
       });
     }
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -210,10 +229,27 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
           ? 'AMBOS'
           : 'PRODUCAO';
 
+    if (tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa) {
+      const gEmb = Math.floor(Number(String(formData.producaoGramasEmbalagem).replace(',', '.')) || 0);
+      if (gEmb <= 0) {
+        alert('Informe gramas por embalagem de compra (inteiro ≥ 1) para consumo por massa na produção.');
+        return;
+      }
+    }
+
     const validadeFornecedor = tipoCadastro === 'FORNECEDOR';
     const validadeDiasFinal = validadeFornecedor ? 0 : formData.validadeDias;
     const validadeHorasFinal = validadeFornecedor ? 0 : formData.validadeHoras;
     const validadeMinutosFinal = validadeFornecedor ? 0 : formData.validadeMinutos;
+
+    const gEmbFinal =
+      tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa
+        ? Math.max(1, Math.floor(Number(String(formData.producaoGramasEmbalagem).replace(',', '.')) || 0))
+        : null;
+    const gDoseFinal =
+      tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa
+        ? Math.max(0, Math.floor(Number(String(formData.producaoGramasDose).replace(',', '.')) || 0))
+        : null;
 
     const produtoData = {
       nome: formData.nome,
@@ -240,6 +276,11 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
       exibirHorarioEtiqueta: formData.exibirHorarioEtiqueta,
       contagemDoDia: formData.contagemDoDia,
       escopoReposicao: (tipoCadastro === 'INDUSTRIA' ? 'industria' : 'loja') as ProdutoModalSavePayload['escopoReposicao'],
+      producaoConsumoPorMassa: tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa,
+      producaoGramasPorEmbalagem:
+        tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa ? gEmbFinal : null,
+      producaoGramasPorDose:
+        tipoCadastro === 'FORNECEDOR' && formData.producaoConsumoPorMassa ? gDoseFinal : null,
     };
 
     onSave(produtoData);
@@ -296,6 +337,9 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
                   setFormData((prev) => ({
                     ...prev,
                     origem: prev.origem === 'AMBOS' ? 'AMBOS' : 'PRODUCAO',
+                    producaoConsumoPorMassa: false,
+                    producaoGramasEmbalagem: '',
+                    producaoGramasDose: '0',
                   }));
                 }}
                 className={`rounded-lg border px-3 py-2 text-sm ${
@@ -329,7 +373,66 @@ export default function ProdutoModal({ isOpen, onClose, produto, onSave }: Produ
               <strong>contagem da loja</strong>. <strong>Produto da indústria</strong> fica com a outra equipe e não
               aparece nessas telas.
             </p>
+            {tipoCadastro === 'INDUSTRIA' && (
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                <strong>Onde está o «modo massa»?</strong> Ele <strong>só aparece</strong> quando você escolhe{' '}
+                <strong>Produto de fornecedor</strong> acima — serve para insumos de compra (saco, caixa) que na{' '}
+                <strong>Produção</strong> serão baixados em <strong>gramas</strong> (doses ou kg), não só por QR.
+              </p>
+            )}
           </div>
+
+          {tipoCadastro === 'FORNECEDOR' && (
+            <div
+              id="cadastro-producao-massa"
+              className="rounded-xl border-2 border-amber-200 bg-amber-50/80 p-4 space-y-3 shadow-sm"
+            >
+              <h3 className="text-sm font-semibold text-gray-900">
+                Modo massa na produção <span className="text-amber-800 font-normal">(opcional)</span>
+              </h3>
+              <p className="text-xs text-gray-700">
+                Marque se este insumo entra na receita por <strong>peso</strong> (ex.: polpa, cupuaçu). Na tela{' '}
+                <strong>Produção</strong>, o operador informará <strong>doses</strong> ou <strong>kg</strong> em vez de
+                só «quantidade de QR».
+              </p>
+              <label className="flex items-center gap-2 text-sm text-gray-800 font-medium">
+                <input
+                  type="checkbox"
+                  checked={formData.producaoConsumoPorMassa}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, producaoConsumoPorMassa: e.target.checked }))
+                  }
+                  className="rounded border-gray-300 size-4"
+                />
+                Usar baixa por gramas na produção (além de QR, quando aplicável)
+              </label>
+              {formData.producaoConsumoPorMassa && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <Input
+                    label="Gramas por embalagem de compra"
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={formData.producaoGramasEmbalagem}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, producaoGramasEmbalagem: e.target.value }))
+                    }
+                  />
+                  <Input
+                    label="Gramas por dose (0 = operador informa kg na Produção)"
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={formData.producaoGramasDose}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, producaoGramasDose: e.target.value }))
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Estoque / compra */}
           <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 space-y-4">

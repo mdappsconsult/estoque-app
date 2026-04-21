@@ -11,7 +11,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
-import { LogoKim } from '@/components/branding/LogoKim';
 import { PerfilUsuario } from '@/types/database';
 
 type HomeFeature = {
@@ -49,6 +48,14 @@ const features: HomeFeature[] = [
   { title: 'Dashboard Admin', description: 'Visão gerencial.', icon: BarChart3, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/dashboard-admin' },
   { title: 'Relatórios', description: 'Exportar dados.', icon: FileText, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/relatorios' },
   { title: 'Produtos', description: 'Cadastro.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/produtos' },
+  {
+    title: 'Receitas de produção',
+    description: 'Insumos pré-configurados para a tela Produção.',
+    icon: Boxes,
+    iconBg: 'bg-green-50',
+    iconColor: 'text-green-700',
+    href: '/cadastros/receitas-producao',
+  },
   { title: 'Tipos de Embalagem', description: 'Caixa, balde, pote etc.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/embalagens' },
   { title: 'Reposição de estoque por loja', description: 'Mínimos por loja (só produtos de escopo loja).', icon: Store, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/cadastros/reposicao-loja' },
   {
@@ -91,7 +98,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
     },
   ],
   MANAGER: [
@@ -114,7 +121,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Cadastros',
-      items: ['/cadastros/produtos', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
+      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
     },
   ],
   OPERATOR_WAREHOUSE: [
@@ -179,21 +186,6 @@ export default function Home() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <LogoKim className="max-h-12 w-auto shrink-0 rounded-md" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {usuario ? `Olá, ${usuario.nome}` : 'Home'}
-              </h1>
-              <p className="text-gray-500 text-sm mt-0.5">Açaí do Kim — operações</p>
-            </div>
-          </div>
-          <p className="text-gray-500 text-sm">Navegação organizada por prioridade de trabalho</p>
-        </div>
-      </div>
-
       <div className="space-y-8">
         {sections.map((section) => {
           const sectionFeatures = section.items
@@ -209,9 +201,15 @@ export default function Home() {
 
           return (
             <section key={section.title}>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">
-                {section.title}
-              </h2>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                  {section.title}
+                  <span className="ml-2 text-[11px] font-medium normal-case text-gray-400">
+                    ({sectionFeatures.length})
+                  </span>
+                </h2>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {sectionFeatures.map((f) => (
                   <Link key={f.href} href={f.href} className="block">

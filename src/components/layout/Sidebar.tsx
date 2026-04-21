@@ -6,7 +6,8 @@ import {
   Home, 
   QrCode, 
   PackagePlus,
-  ChefHat, 
+  ChefHat,
+  FlaskConical,
   Truck,
   Store,
   Repeat2,
@@ -14,8 +15,6 @@ import {
   Archive,
   Search,
   AlertTriangle,
-  BarChart3,
-  Database,
   Settings,
   ChevronDown
 } from 'lucide-react';
@@ -33,6 +32,12 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
   { name: 'Scanner', href: '/qrcode', icon: QrCode },
   { name: 'Registrar Compra', href: '/entrada-compra', icon: PackagePlus },
   { name: 'Produção', href: '/producao', icon: ChefHat },
+  {
+    name: 'Prévia saldo parcial',
+    href: '/producao-previa-saldo-parcial',
+    icon: FlaskConical,
+    badge: 'demo',
+  },
   { name: 'Separar por Loja', href: '/separar-por-loja', icon: Truck },
   { name: 'Viagem / Aceite', href: '/viagem-aceite', icon: Truck },
   { name: 'Receber Entrega', href: '/recebimento', icon: Store },
@@ -47,29 +52,24 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
 
 const menuExpandable = [
   { 
-    name: 'Admin', 
-    icon: BarChart3,
+    name: 'Configurações',
+    icon: Settings,
     items: [
+      // Admin / Gestão
       { name: 'Divergências', href: '/divergencias' },
       { name: 'Dashboard', href: '/dashboard-admin' },
-    ]
-  },
-  { 
-    name: 'Cadastros', 
-    icon: Database,
-    items: [
+      { name: 'Acompanhamento de viagens', href: '/acompanhamento-viagens' },
+
+      // Cadastros
       { name: 'Produtos', href: '/cadastros/produtos' },
+      { name: 'Receitas de produção', href: '/cadastros/receitas-producao' },
       { name: 'Categorias', href: '/cadastros/categorias' },
       { name: 'Tipos de Embalagem', href: '/cadastros/embalagens' },
       { name: 'Reposição de estoque por loja', href: '/cadastros/reposicao-loja' },
       { name: 'Locais', href: '/cadastros/locais' },
       { name: 'Usuários', href: '/cadastros/usuarios' },
-    ]
-  },
-  { 
-    name: 'Configurações', 
-    icon: Settings,
-    items: [
+
+      // Preferências / sistema
       { name: 'Perfil', href: '/configuracoes/perfil' },
       { name: 'Impressoras (Pi)', href: '/configuracoes/impressoras' },
       { name: 'Permissões', href: '/configuracoes/permissoes' },

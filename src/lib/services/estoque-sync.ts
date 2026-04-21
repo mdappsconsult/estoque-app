@@ -18,9 +18,21 @@ export async function recalcularEstoqueProduto(
     .eq('estado', 'EM_ESTOQUE');
   if (countError) throw countError;
 
+  const { data: produtoRow, error: prodRowErr } = await client
+    .from('produtos')
+    .select('producao_consumo_por_massa, producao_gramas_por_embalagem')
+    .eq('id', produtoId)
+    .single();
+  if (prodRowErr) throw prodRowErr;
+
+  const gramasPorEmbalagemMassa =
+    produtoRow?.producao_consumo_por_massa && produtoRow.producao_gramas_por_embalagem
+      ? Math.max(0, Math.floor(Number(produtoRow.producao_gramas_por_embalagem) || 0))
+      : 0;
+
   const { data: lotes, error: lotesError } = await client
     .from('lotes_compra')
-    .select('id, quantidade')
+    .select('id, quantidade, gramas_consumidas_acumulado')
     .eq('produto_id', produtoId);
   if (lotesError) throw lotesError;
 
@@ -42,7 +54,15 @@ export async function recalcularEstoqueProduto(
   let bulkTotal = 0;
   for (const l of lotes || []) {
     const minted = mintByLote.get(l.id) || 0;
-    bulkTotal += Math.max(0, l.quantidade - minted);
+    const pacotesLivres = Math.max(0, l.quantidade - minted);
+    if (gramasPorEmbalagemMassa > 0) {
+      const maxGramas = pacotesLivres * gramasPorEmbalagemMassa;
+      const ja = Math.max(0, Math.floor(Number(l.gramas_consumidas_acumulado) || 0));
+      const restGramas = Math.max(0, maxGramas - ja);
+      bulkTotal += Math.ceil(restGramas / gramasPorEmbalagemMassa);
+    } else {
+      bulkTotal += pacotesLivres;
+    }
   }
 
   const quantidade = (itemCount ?? 0) + bulkTotal;

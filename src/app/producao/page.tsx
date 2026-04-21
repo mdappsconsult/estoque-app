@@ -1,11 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChefHat, Loader2, CheckCircle, Plus, Trash2, Server, Eye, History } from 'lucide-react';
+import {
+  ChefHat,
+  Loader2,
+  CheckCircle,
+  Plus,
+  Trash2,
+  Server,
+  Eye,
+  History,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpRight,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Modal from '@/components/ui/Modal';
+import Link from 'next/link';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -14,10 +27,12 @@ import {
   registrarProducaoComItens,
   type ProducaoHistoricoResumo,
 } from '@/lib/services/producao';
+import { obterGramasDisponiveisMassa } from '@/lib/services/producao-massa';
 import { errMessage } from '@/lib/errMessage';
 import { contarItensDisponiveisLocal } from '@/lib/services/itens';
+import { contarUnidadesLivresLotesCompra } from '@/lib/services/lotes-compra';
 import { supabase } from '@/lib/supabase';
-import { Produto, Local } from '@/types/database';
+import { Produto, Local, Familia } from '@/types/database';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import {
   abrirPreviaEtiquetasEmJanela,
@@ -28,13 +43,31 @@ import {
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
 import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
+import { idsFamiliasInsumoProducao } from '@/lib/producao-insumos-familia';
+import {
+  linhasInsumoAPartirDaReceita,
+  listarReceitasAtivasParaProducao,
+  novaLinhaInsumoVazia,
+  type ProducaoReceitaComItens,
+} from '@/lib/services/producao-receitas';
 
-function novaLinhaInsumo() {
-  return {
-    key: typeof crypto !== 'undefined' ? crypto.randomUUID() : `k-${Date.now()}-${Math.random()}`,
-    produto_id: '',
-    quantidade: '',
-  };
+function produtoInsumoUsaMassa(p: Produto | undefined): boolean {
+  return Boolean(p?.producao_consumo_por_massa);
+}
+
+function gramasPorDoseCadastro(p: Produto): number {
+  const n = Math.floor(Number(p.producao_gramas_por_dose) || 0);
+  return n > 0 ? n : 0;
+}
+
+/** Gramas a consumir para linha em modo massa; `null` se inválido. */
+function gramasInformadasLinha(linha: { massa_valor: string }, produto: Produto): number | null {
+  const raw = String(linha.massa_valor).trim().replace(',', '.');
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const gd = gramasPorDoseCadastro(produto);
+  if (gd > 0) return Math.floor(n * gd);
+  return Math.floor(n * 1000);
 }
 
 export default function ProducaoPage() {
@@ -44,18 +77,46 @@ export default function ProducaoPage() {
     available: piPrintAvailable,
     connection: piConnection,
   } = usePiPrintBridgeConfig({ papel: 'industria' });
-  const { data: produtos, loading } = useRealtimeQuery<Produto>({
+  const { data: produtos, loading: loadingProdutos } = useRealtimeQuery<Produto>({
     table: 'produtos',
     orderBy: { column: 'nome', ascending: true },
   });
-  const produtosProducao = produtos.filter(
-    (p) => !p.origem || p.origem === 'PRODUCAO' || p.origem === 'AMBOS'
+  const { data: familias, loading: loadingFamilias } = useRealtimeQuery<Familia>({
+    table: 'familias',
+    select: 'id, nome',
+    orderBy: { column: 'nome', ascending: true },
+  });
+  const insumoFamiliaIds = useMemo(() => idsFamiliasInsumoProducao(familias), [familias]);
+  /** Acabado: origem produção ou ambos. Insumos: ativos na família «Insumo Industria» (Cadastros → Categorias). */
+  const produtosProducao = useMemo(
+    () =>
+      produtos.filter((p) => !p.origem || p.origem === 'PRODUCAO' || p.origem === 'AMBOS'),
+    [produtos]
   );
-  const produtosInsumo = produtos.filter(
-    (p) => !p.origem || p.origem === 'COMPRA' || p.origem === 'AMBOS'
+  const produtosInsumo = useMemo(
+    () =>
+      produtos.filter(
+        (p) =>
+          p.status === 'ativo' &&
+          Boolean(p.familia_id) &&
+          insumoFamiliaIds.has(p.familia_id as string)
+      ),
+    [produtos, insumoFamiliaIds]
   );
+  const produtoElegivelInsumoFamilia = useMemo(() => {
+    return (p: Produto) =>
+      p.status === 'ativo' && Boolean(p.familia_id) && insumoFamiliaIds.has(p.familia_id as string);
+  }, [insumoFamiliaIds]);
+
   const { data: locais } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const warehouses = locais.filter((l) => l.tipo === 'WAREHOUSE');
+  const defaultWarehouseId = useMemo(() => {
+    if (warehouses.length === 0) return '';
+    const byUser = usuario?.local_padrao_id?.trim();
+    if (byUser && warehouses.some((w) => w.id === byUser)) return byUser;
+    const industria = warehouses.find((w) => /ind[uú]stria/i.test(w.nome));
+    return industria?.id ?? warehouses[0]!.id;
+  }, [warehouses, usuario?.local_padrao_id]);
 
   const filtroHistoricoLocal = useMemo(() => {
     if (!usuario) return undefined;
@@ -90,8 +151,18 @@ export default function ProducaoPage() {
     dias_validade: '',
     observacoes: '',
   });
-  const [linhasInsumo, setLinhasInsumo] = useState(() => [novaLinhaInsumo()]);
-  const [disponivelPorProduto, setDisponivelPorProduto] = useState<Record<string, number>>({});
+  const [linhasInsumo, setLinhasInsumo] = useState(() => [novaLinhaInsumoVazia()]);
+  const [insumosExpanded, setInsumosExpanded] = useState<Set<string>>(() => new Set());
+  const [receitasProducao, setReceitasProducao] = useState<ProducaoReceitaComItens[]>([]);
+  const [receitaSelectId, setReceitaSelectId] = useState('');
+  const receitaSelecionadaTravada = Boolean(receitaSelectId);
+  /** Por insumo (modo QR): já com QR no local + saldo só em lote de compra (sem QR ainda). */
+  const [disponivelInsumoQrLote, setDisponivelInsumoQrLote] = useState<
+    Record<string, { qr: number; lote: number }>
+  >({});
+  const [disponivelMassaPorProduto, setDisponivelMassaPorProduto] = useState<
+    Record<string, { gramas: number; gramasPorEmbalagem: number }>
+  >({});
   const [saving, setSaving] = useState(false);
   const [resultado, setResultado] = useState<{ itens: number; baldes: number } | null>(null);
   const [etiquetasPendentesImpressao, setEtiquetasPendentesImpressao] = useState<Array<{
@@ -134,27 +205,86 @@ export default function ProducaoPage() {
   );
 
   useEffect(() => {
+    setLinhasInsumo((rows) => {
+      let changed = false;
+      const next = rows.map((r) => {
+        if (!r.produto_id || produtosInsumo.some((p) => p.id === r.produto_id)) return r;
+        changed = true;
+        return { ...r, produto_id: '', quantidade: '', massa_valor: '' };
+      });
+      return changed ? next : rows;
+    });
+  }, [produtosInsumo]);
+
+  useEffect(() => {
+    if (linhasInsumo.length === 0) {
+      setInsumosExpanded(new Set());
+      return;
+    }
+    setInsumosExpanded((prev) => {
+      const validKeys = new Set(linhasInsumo.map((l) => l.key));
+      return new Set([...prev].filter((k) => validKeys.has(k)));
+    });
+  }, [linhasInsumo]);
+
+  useEffect(() => {
+    if (!defaultWarehouseId) return;
+    setForm((prev) => (prev.local_id ? prev : { ...prev, local_id: defaultWarehouseId }));
+  }, [defaultWarehouseId]);
+
+  useEffect(() => {
     let cancel = false;
     (async () => {
-      if (!form.local_id || !produtosInsumoIdsChave) {
-        if (!cancel) setDisponivelPorProduto({});
-        return;
-      }
-      const ids = produtosInsumoIdsChave.split(',').filter(Boolean);
-      const next: Record<string, number> = {};
-      for (const pid of ids) {
-        try {
-          next[pid] = await contarItensDisponiveisLocal(pid, form.local_id);
-        } catch {
-          next[pid] = 0;
-        }
-      }
-      if (!cancel) setDisponivelPorProduto(next);
+      const { receitas, error } = await listarReceitasAtivasParaProducao(form.produto_id || null);
+      if (cancel) return;
+      setReceitasProducao(receitas);
+      if (error) console.warn('[producao] receitas:', error.message);
     })();
     return () => {
       cancel = true;
     };
-  }, [form.local_id, produtosInsumoIdsChave]);
+  }, [form.produto_id]);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!form.local_id || !produtosInsumoIdsChave) {
+        if (!cancel) {
+          setDisponivelInsumoQrLote({});
+          setDisponivelMassaPorProduto({});
+        }
+        return;
+      }
+      const ids = produtosInsumoIdsChave.split(',').filter(Boolean);
+      const nextQrLote: Record<string, { qr: number; lote: number }> = {};
+      const nextMassa: Record<string, { gramas: number; gramasPorEmbalagem: number }> = {};
+      for (const pid of ids) {
+        const p = produtos.find((x) => x.id === pid);
+        try {
+          if (produtoInsumoUsaMassa(p)) {
+            const m = await obterGramasDisponiveisMassa(pid, form.local_id);
+            nextMassa[pid] = { gramas: m.gramas, gramasPorEmbalagem: m.gramasPorEmbalagem };
+          } else {
+            const [qr, lote] = await Promise.all([
+              contarItensDisponiveisLocal(pid, form.local_id),
+              contarUnidadesLivresLotesCompra(pid, form.local_id),
+            ]);
+            nextQrLote[pid] = { qr, lote };
+          }
+        } catch {
+          if (produtoInsumoUsaMassa(p)) nextMassa[pid] = { gramas: 0, gramasPorEmbalagem: 0 };
+          else nextQrLote[pid] = { qr: 0, lote: 0 };
+        }
+      }
+      if (!cancel) {
+        setDisponivelInsumoQrLote(nextQrLote);
+        setDisponivelMassaPorProduto(nextMassa);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [form.local_id, produtosInsumoIdsChave, produtos]);
 
   useEffect(() => {
     if (!piConnection?.wsUrl) {
@@ -167,12 +297,34 @@ export default function ProducaoPage() {
 
   const consumosParaServico = useMemo(() => {
     return linhasInsumo
-      .map((l) => ({
-        produtoId: l.produto_id,
-        quantidade: Math.floor(Number(l.quantidade)),
-      }))
-      .filter((c) => c.produtoId && Number.isFinite(c.quantidade) && c.quantidade > 0);
-  }, [linhasInsumo]);
+      .map((l) => {
+        const p = produtos.find((x) => x.id === l.produto_id);
+        if (produtoInsumoUsaMassa(p)) return null;
+        return {
+          produtoId: l.produto_id,
+          quantidade: Math.floor(Number(l.quantidade)),
+        };
+      })
+      .filter(
+        (c): c is { produtoId: string; quantidade: number } =>
+          c != null && Boolean(c.produtoId) && Number.isFinite(c.quantidade) && c.quantidade > 0
+      );
+  }, [linhasInsumo, produtos]);
+
+  const consumosMassaParaServico = useMemo(() => {
+    const out: { produtoId: string; gramas: number }[] = [];
+    for (const l of linhasInsumo) {
+      if (!l.produto_id) continue;
+      const p = produtos.find((x) => x.id === l.produto_id);
+      if (!produtoInsumoUsaMassa(p) || !p) continue;
+      const g = gramasInformadasLinha(l, p);
+      if (g != null && g > 0) out.push({ produtoId: l.produto_id, gramas: g });
+    }
+    return out;
+  }, [linhasInsumo, produtos]);
+
+  const temInsumoValido =
+    consumosParaServico.length > 0 || consumosMassaParaServico.length > 0;
 
   const numBaldesInt = Math.floor(Number(form.num_baldes));
   const formularioValido =
@@ -182,7 +334,56 @@ export default function ProducaoPage() {
     Boolean(form.local_id) &&
     Number.isInteger(diasValidadeNumero) &&
     diasValidadeNumero > 0 &&
-    consumosParaServico.length > 0;
+    temInsumoValido;
+
+  const receitaSelecionadaObj = useMemo(
+    () => receitasProducao.find((r) => r.id === receitaSelectId),
+    [receitasProducao, receitaSelectId]
+  );
+  const avisoReceitaAcabadoDivergente = Boolean(
+    receitaSelecionadaObj?.produto_acabado_id &&
+      form.produto_id &&
+      receitaSelecionadaObj.produto_acabado_id !== form.produto_id
+  );
+
+  const aoEscolherReceita = (receitaId: string) => {
+    if (!receitaId) {
+      setReceitaSelectId('');
+      return;
+    }
+    const rec = receitasProducao.find((r) => r.id === receitaId);
+    if (!rec) return;
+
+    const temPreenchido = linhasInsumo.some(
+      (l) =>
+        (Boolean(l.produto_id) && String(l.quantidade).trim() !== '') ||
+        (Boolean(l.produto_id) && String(l.massa_valor).trim() !== '')
+    );
+    if (temPreenchido && !window.confirm('Substituir os insumos atuais pelos da receita selecionada?')) {
+      return;
+    }
+    const { linhas, avisos } = linhasInsumoAPartirDaReceita(
+      rec.producao_receita_itens ?? [],
+      produtos,
+      produtoElegivelInsumoFamilia
+    );
+    if (avisos.length) {
+      alert(avisos.join('\n'));
+    }
+    setLinhasInsumo(linhas.length > 0 ? linhas : [novaLinhaInsumoVazia()]);
+    // Mantém tudo recolhido (usuário expande só o que precisar).
+    setInsumosExpanded(new Set());
+    setReceitaSelectId(receitaId);
+  };
+
+  const toggleInsumoExpanded = (key: string) => {
+    setInsumosExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleSubmit = async (): Promise<boolean> => {
     if (!usuario) {
@@ -190,7 +391,9 @@ export default function ProducaoPage() {
       return false;
     }
     if (!formularioValido) {
-      setErroConfirmacao('Preencha todos os campos obrigatórios (acabado, baldes, local, validade em dias e insumo com quantidade).');
+      setErroConfirmacao(
+        'Preencha todos os campos obrigatórios (acabado, baldes, local, validade em dias e ao menos um insumo com quantidade QR ou massa).'
+      );
       return false;
     }
     setErroConfirmacao('');
@@ -202,6 +405,7 @@ export default function ProducaoPage() {
         numBaldes: numBaldesInt,
         localId: form.local_id,
         consumos: consumosParaServico,
+        consumosMassa: consumosMassaParaServico.length > 0 ? consumosMassaParaServico : undefined,
         diasValidade: diasValidadeNumero,
         observacoes: form.observacoes || null,
         usuarioId: usuario.id,
@@ -235,8 +439,10 @@ export default function ProducaoPage() {
         dias_validade: '',
         observacoes: '',
       });
-      setLinhasInsumo([novaLinhaInsumo()]);
-      setDisponivelPorProduto({});
+      setLinhasInsumo([novaLinhaInsumoVazia()]);
+      setInsumosExpanded(new Set());
+      setReceitaSelectId('');
+      setDisponivelInsumoQrLote({});
       return true;
     } catch (err: unknown) {
       const msg = errMessage(err, 'Erro ao registrar produção');
@@ -390,7 +596,7 @@ export default function ProducaoPage() {
     }
   };
 
-  if (loading) {
+  if (loadingProdutos || loadingFamilias) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
@@ -407,7 +613,7 @@ export default function ProducaoPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Produção</h1>
           <p className="text-sm text-gray-500">
-            Declare insumos gastos (unidades com QR), baldes produzidos e validade do acabado
+            Declare insumos (QR ou consumo por massa, conforme cadastro), baldes e validade do acabado
           </p>
         </div>
       </div>
@@ -509,7 +715,8 @@ export default function ProducaoPage() {
         />
         {produtosProducao.length === 0 && (
           <p className="text-sm text-amber-600">
-            Nenhum produto marcado para produção. Cadastre com origem &quot;Produção&quot; ou &quot;Compra e produção&quot;.
+            Nenhum produto marcado para produção. Cadastre com origem &quot;Produção&quot; ou &quot;Compra e
+            produção&quot;.
           </p>
         )}
         <Input
@@ -530,33 +737,144 @@ export default function ProducaoPage() {
           options={[{ value: '', label: 'Selecione...' }, ...warehouses.map((l) => ({ value: l.id, label: l.nome }))]}
           value={form.local_id}
           onChange={(e) => setForm({ ...form, local_id: e.target.value })}
+          disabled={Boolean(defaultWarehouseId)}
         />
 
         <div className="border-t border-gray-100 pt-4 space-y-3">
+          <div className="flex items-end justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <Select
+                label="Receita (preencher insumos)"
+                options={[
+                  { value: '', label: 'Manual (sem receita)' },
+                  ...receitasProducao.map((r) => ({ value: r.id, label: r.nome })),
+                ]}
+                value={receitaSelectId}
+                onChange={(e) => aoEscolherReceita(e.target.value)}
+              />
+            </div>
+            <Link href="/cadastros/receitas-producao" className="shrink-0">
+              <Button type="button" variant="outline" title="Abrir a tela de cadastro/edição de receitas">
+                Abrir receitas
+                <ArrowUpRight className="w-4 h-4 ml-2" />
+              </Button>
+            </Link>
+          </div>
+          <p className="text-xs text-gray-500 -mt-2">
+            Cadastre receitas em <strong>Cadastros → Receitas de produção</strong>. Ao escolher uma receita, as linhas de
+            insumo são substituídas pelos valores salvos (confirmação se já houver dados).
+          </p>
+          {receitaSelecionadaTravada && (
+            <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              Receita selecionada: os insumos ficam <strong>travados</strong> na Produção. Para alterar ou remover itens,
+              edite a receita em <strong>Cadastros → Receitas de produção</strong>.
+            </p>
+          )}
+          {avisoReceitaAcabadoDivergente && (
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Esta receita foi cadastrada para <strong>outro produto acabado</strong>. Confira se o acabado selecionado
+              está correto antes de registrar.
+            </p>
+          )}
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-gray-900">Insumos gastos (unidades com QR)</h2>
-            <Button
-              type="button"
-              variant="ghost"
-              className="shrink-0 text-green-700"
-              onClick={() => setLinhasInsumo((rows) => [...rows, novaLinhaInsumo()])}
-            >
-              <Plus className="w-4 h-4 mr-1" />
-              Adicionar
-            </Button>
+            <h2 className="text-sm font-semibold text-gray-900">Insumos gastos</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="shrink-0 text-green-700"
+                disabled={receitaSelecionadaTravada}
+                onClick={() => {
+                  const nova = novaLinhaInsumoVazia();
+                  setLinhasInsumo((rows) => [...rows, nova]);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Adicionar
+              </Button>
+            </div>
           </div>
           <p className="text-xs text-gray-500">
-            Informe quantas unidades de cada insumo serão baixadas neste local (FIFO pela data de entrada).
+            Só aparecem produtos <strong>ativos</strong> com família <strong>Insumo Industria</strong> em{' '}
+            <strong>Cadastros → Categorias</strong> (campo família no produto). Inclui origem{' '}
+            <strong>compra</strong>, <strong>ambos</strong> ou <strong>produção</strong> quando for o caso. Por padrão,{' '}
+            <strong>unidades com QR</strong> (FIFO). Com <strong>consumo por massa</strong> no cadastro, use{' '}
+            <strong>doses</strong> ou <strong>kg</strong> (g por dose; 0 = kg). <strong>Disp.</strong> em modo QR soma o
+            que já está com QR no local e o que ainda está só no lote de compra (NF); ao confirmar, o sistema pode emitir
+            QR por FIFO.
           </p>
+          {!loadingFamilias && insumoFamiliaIds.size === 0 && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Não foi encontrada categoria <strong>Insumo Industria</strong> em{' '}
+              <strong>Cadastros → Categorias</strong>. Crie ou renomeie a família para esse nome (ou{' '}
+              <strong>Insumo Indústria</strong>) para listar insumos aqui.
+            </p>
+          )}
+          {produtosInsumo.length === 0 && insumoFamiliaIds.size > 0 && (
+            <p className="text-sm text-amber-600">
+              Nenhum produto <strong>ativo</strong> na família <strong>Insumo Industria</strong>. Vincule a família no{' '}
+              <strong>Cadastros → Produtos</strong>.
+            </p>
+          )}
           <div className="space-y-3">
-            {linhasInsumo.map((linha, index) => (
+            {linhasInsumo.map((linha, index) => {
+              const prodInsumo = produtos.find((p) => p.id === linha.produto_id);
+              const usaMassa = produtoInsumoUsaMassa(prodInsumo);
+              const doseG = prodInsumo ? gramasPorDoseCadastro(prodInsumo) : 0;
+              const gramasConsumo =
+                usaMassa && prodInsumo ? gramasInformadasLinha(linha, prodInsumo) : null;
+              const isExpanded = insumosExpanded.has(linha.key);
+              return (
               <div
                 key={linha.key}
-                className="flex flex-col sm:flex-row sm:items-end gap-2 p-3 rounded-lg bg-gray-50 border border-gray-100"
+                className="rounded-xl border border-gray-200 bg-gray-50/90 p-3 sm:p-4 space-y-3 shadow-sm"
               >
-                <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  {index > 0 ? (
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 pt-1">
+                      Insumo {index + 1}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 pt-1">
+                      Insumo
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="shrink-0 inline-flex items-center gap-2 min-h-10 px-3 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-white/70 active:bg-white"
+                      onClick={() => toggleInsumoExpanded(linha.key)}
+                      aria-expanded={isExpanded}
+                      title={isExpanded ? 'Recolher insumo' : 'Expandir insumo'}
+                    >
+                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      <span className="text-xs font-medium">{isExpanded ? 'Recolher' : 'Expandir'}</span>
+                    </button>
+                    {!receitaSelecionadaTravada && (
+                      <button
+                        type="button"
+                        className="shrink-0 inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 active:bg-red-100"
+                        aria-label="Remover linha"
+                        onClick={() => {
+                          setLinhasInsumo((rows) =>
+                            rows.length <= 1 ? rows : rows.filter((r) => r.key !== linha.key)
+                          );
+                          setInsumosExpanded((prev) => {
+                            const next = new Set(prev);
+                            next.delete(linha.key);
+                            return next;
+                          });
+                        }}
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
                   <Select
-                    label={index === 0 ? 'Insumo' : undefined}
+                    label={index === 0 ? 'Produto' : undefined}
                     options={[
                       { value: '', label: 'Produto...' },
                       ...produtosInsumo
@@ -564,51 +882,150 @@ export default function ProducaoPage() {
                         .map((p) => ({ value: p.id, label: p.nome })),
                     ]}
                     value={linha.produto_id}
+                    disabled={receitaSelecionadaTravada}
                     onChange={(e) => {
+                      if (receitaSelecionadaTravada) return;
                       const v = e.target.value;
                       setLinhasInsumo((rows) =>
-                        rows.map((r) => (r.key === linha.key ? { ...r, produto_id: v } : r))
+                        rows.map((r) =>
+                          r.key === linha.key ? { ...r, produto_id: v, quantidade: '', massa_valor: '' } : r
+                        )
                       );
+                      setInsumosExpanded((prev) => new Set([...prev, linha.key]));
                     }}
                   />
+                  {isExpanded && (
+                    <>
+                      {usaMassa && prodInsumo ? (
+                        <div className="space-y-1">
+                          <Input
+                            label={index === 0 ? (doseG > 0 ? 'Quantidade (doses)' : 'Quantidade (kg)') : undefined}
+                            type="number"
+                            min="0"
+                            step={doseG > 0 ? '1' : 'any'}
+                            placeholder={doseG > 0 ? '0' : 'ex.: 60'}
+                            value={linha.massa_valor}
+                            disabled={receitaSelecionadaTravada}
+                            onChange={(e) => {
+                              if (receitaSelecionadaTravada) return;
+                              const v = e.target.value;
+                              setLinhasInsumo((rows) =>
+                                rows.map((r) => (r.key === linha.key ? { ...r, massa_valor: v } : r))
+                              );
+                              setInsumosExpanded((prev) => new Set([...prev, linha.key]));
+                            }}
+                          />
+                          <p className="text-[11px] text-gray-500 leading-snug">
+                            {doseG > 0
+                              ? `Cadastro: ${doseG.toLocaleString('pt-BR')} g por dose. Na produção, isso vira gramas (doses × g/dose).`
+                              : 'Cadastro em kg: o sistema converte para gramas (kg × 1.000) ao registrar.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <Input
+                            label={index === 0 ? 'Quantidade (QR)' : undefined}
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder="0"
+                            value={linha.quantidade}
+                            disabled={receitaSelecionadaTravada}
+                            onChange={(e) => {
+                              if (receitaSelecionadaTravada) return;
+                              const v = e.target.value;
+                              setLinhasInsumo((rows) =>
+                                rows.map((r) => (r.key === linha.key ? { ...r, quantidade: v } : r))
+                              );
+                              setInsumosExpanded((prev) => new Set([...prev, linha.key]));
+                            }}
+                          />
+                          <p className="text-[11px] text-gray-500 leading-snug">
+                            Unidades com QR neste local + saldo emitível pela compra (FIFO).
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                <div className="w-full sm:w-28">
-                  <Input
-                    label={index === 0 ? 'Qtd' : undefined}
-                    type="number"
-                    min="1"
-                    step="1"
-                    placeholder="0"
-                    value={linha.quantidade}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setLinhasInsumo((rows) =>
-                        rows.map((r) => (r.key === linha.key ? { ...r, quantidade: v } : r))
-                      );
-                    }}
-                  />
-                </div>
-                <div className="flex items-center gap-2 pb-1">
-                  {linha.produto_id && form.local_id ? (
-                    <span className="text-xs text-gray-600 whitespace-nowrap">
-                      Disp.: {disponivelPorProduto[linha.produto_id] ?? '…'}
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
-                    aria-label="Remover linha"
-                    onClick={() =>
-                      setLinhasInsumo((rows) =>
-                        rows.length <= 1 ? rows : rows.filter((r) => r.key !== linha.key)
-                      )
-                    }
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+
+                {isExpanded && linha.produto_id && form.local_id ? (
+                  usaMassa ? (
+                    <div
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-[13px] sm:text-xs text-gray-700 space-y-2.5"
+                      title="Resumo para conferência antes de registrar."
+                    >
+                      <div>
+                        <p className="font-semibold text-gray-900 text-xs uppercase tracking-wide mb-1">
+                          Consumo estimado
+                        </p>
+                        <p className="break-words leading-relaxed">
+                          {gramasConsumo != null && gramasConsumo > 0 ? (
+                            <>
+                              <span className="font-medium text-gray-900">
+                                {gramasConsumo.toLocaleString('pt-BR')} g
+                              </span>
+                              {doseG > 0 ? (
+                                <span className="text-gray-600 block sm:inline sm:ml-1">
+                                  ({linha.massa_valor || '0'} doses × {doseG.toLocaleString('pt-BR')} g/dose)
+                                </span>
+                              ) : (
+                                <span className="text-gray-600 block sm:inline sm:ml-1">
+                                  ({linha.massa_valor || '0'} kg)
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-500">Informe a quantidade acima.</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="border-t border-gray-100 pt-2">
+                        <p className="font-semibold text-gray-900 text-xs uppercase tracking-wide mb-1">
+                          Disponível no local
+                        </p>
+                        <p
+                          className="break-words text-gray-700"
+                          title="Gramas nos lotes de compra neste armazém (já descontado consumo parcial)."
+                        >
+                          {disponivelMassaPorProduto[linha.produto_id] != null
+                            ? `${disponivelMassaPorProduto[linha.produto_id].gramas.toLocaleString('pt-BR')} g`
+                            : '…'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-[13px] sm:text-xs text-gray-700 space-y-2"
+                      title="QR = unidades já emitidas no local. Compra = saldo no lote de NF ainda sem QR."
+                    >
+                      <p className="font-semibold text-gray-900 text-xs uppercase tracking-wide">
+                        Disponível
+                      </p>
+                      <ul className="space-y-1.5 break-words">
+                        <li>
+                          <span className="text-gray-500">No local (QR): </span>
+                          <span className="font-medium text-gray-900">
+                            {disponivelInsumoQrLote[linha.produto_id] != null
+                              ? disponivelInsumoQrLote[linha.produto_id].qr.toLocaleString('pt-BR')
+                              : '…'}
+                          </span>
+                        </li>
+                        <li>
+                          <span className="text-gray-500">Só na compra (sem QR): </span>
+                          <span className="font-medium text-gray-900">
+                            {disponivelInsumoQrLote[linha.produto_id] != null
+                              ? disponivelInsumoQrLote[linha.produto_id].lote.toLocaleString('pt-BR')
+                              : '…'}
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
+                  )
+                ) : null}
               </div>
-            ))}
+            );
+            })}
           </div>
         </div>
 
@@ -638,8 +1055,8 @@ export default function ProducaoPage() {
               {(!Number.isInteger(diasValidadeNumero) || diasValidadeNumero < 1) && (
                 <li>Informe validade em dias (número inteiro ≥ 1)</li>
               )}
-              {consumosParaServico.length === 0 && (
-                <li>Adicione pelo menos um insumo com quantidade a baixar</li>
+              {!temInsumoValido && (
+                <li>Adicione pelo menos um insumo com quantidade (QR ou massa) a baixar</li>
               )}
             </ul>
           </div>
@@ -666,8 +1083,8 @@ export default function ProducaoPage() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Produções registradas</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Cada balde corresponde a 1 QR do acabado. A coluna «QRs acabado» deve ser igual a «Baldes»; «Insumos
-              (QR)» é o total de unidades de insumo baixadas neste lançamento (FEFO no local).
+              Cada balde corresponde a 1 QR do acabado. «QRs acabado» = «Baldes». «Insumos» soma linhas de baixa por QR
+              mais linhas de consumo por massa (gramas) no mesmo lançamento.
             </p>
             {filtroHistoricoLocal && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 mt-2">
@@ -712,7 +1129,7 @@ export default function ProducaoPage() {
                   <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Baldes</th>
                   <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Qtd gravada</th>
                   <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">QRs acabado</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Insumos (QR)</th>
+                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Insumos</th>
                   <th className="py-2 pr-3 font-medium whitespace-nowrap">Conferência</th>
                   <th className="py-2 font-medium">Resp.</th>
                 </tr>
@@ -816,7 +1233,12 @@ export default function ProducaoPage() {
                 {consumosParaServico.map((c) => (
                   <li key={c.produtoId}>
                     {produtos.find((p) => p.id === c.produtoId)?.nome ?? c.produtoId.slice(0, 8)} — {c.quantidade}{' '}
-                    unidade(s)
+                    unidade(s) QR
+                  </li>
+                ))}
+                {consumosMassaParaServico.map((c) => (
+                  <li key={`m-${c.produtoId}`}>
+                    {produtos.find((p) => p.id === c.produtoId)?.nome ?? c.produtoId.slice(0, 8)} — {c.gramas} g
                   </li>
                 ))}
               </ul>

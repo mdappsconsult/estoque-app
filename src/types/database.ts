@@ -24,6 +24,9 @@ export type Database = {
           escopo_reposicao: 'loja' | 'industria';
           familia_id: string | null;
           status: 'ativo' | 'inativo';
+          producao_consumo_por_massa: boolean;
+          producao_gramas_por_embalagem: number | null;
+          producao_gramas_por_dose: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -46,6 +49,9 @@ export type Database = {
           escopo_reposicao?: 'loja' | 'industria';
           familia_id?: string | null;
           status?: 'ativo' | 'inativo';
+          producao_consumo_por_massa?: boolean;
+          producao_gramas_por_embalagem?: number | null;
+          producao_gramas_por_dose?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -68,6 +74,9 @@ export type Database = {
           escopo_reposicao?: 'loja' | 'industria';
           familia_id?: string | null;
           status?: 'ativo' | 'inativo';
+          producao_consumo_por_massa?: boolean;
+          producao_gramas_por_embalagem?: number | null;
+          producao_gramas_por_dose?: number | null;
           updated_at?: string;
         };
       };
@@ -275,6 +284,84 @@ export type Database = {
           id?: string;
           producao_id?: string;
           item_id?: string;
+        };
+      };
+      producao_consumo_massa: {
+        Row: {
+          id: string;
+          producao_id: string;
+          produto_id: string;
+          gramas_consumidas: number;
+          detalhes_lotes: unknown;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          producao_id: string;
+          produto_id: string;
+          gramas_consumidas: number;
+          detalhes_lotes?: unknown;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          producao_id?: string;
+          produto_id?: string;
+          gramas_consumidas?: number;
+          detalhes_lotes?: unknown;
+        };
+      };
+      producao_receitas: {
+        Row: {
+          id: string;
+          nome: string;
+          ativo: boolean;
+          produto_acabado_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          ativo?: boolean;
+          produto_acabado_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          nome?: string;
+          ativo?: boolean;
+          produto_acabado_id?: string | null;
+          updated_at?: string;
+        };
+      };
+      producao_receita_itens: {
+        Row: {
+          id: string;
+          receita_id: string;
+          ordem: number;
+          produto_id: string;
+          qtd_qr: number | null;
+          massa_valor: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          receita_id: string;
+          ordem?: number;
+          produto_id: string;
+          qtd_qr?: number | null;
+          massa_valor?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          receita_id?: string;
+          ordem?: number;
+          produto_id?: string;
+          qtd_qr?: number | null;
+          massa_valor?: string | null;
         };
       };
       contagens: {
@@ -584,6 +671,7 @@ export type Database = {
           local_id: string;
           data_validade: string | null;
           registrado_por: string | null;
+          gramas_consumidas_acumulado: number;
           created_at: string;
         };
         Insert: {
@@ -599,6 +687,7 @@ export type Database = {
           local_id: string;
           data_validade?: string | null;
           registrado_por?: string | null;
+          gramas_consumidas_acumulado?: number;
           created_at?: string;
         };
         Update: {
@@ -614,6 +703,7 @@ export type Database = {
           local_id?: string;
           data_validade?: string | null;
           registrado_por?: string | null;
+          gramas_consumidas_acumulado?: number;
         };
       };
       itens: {
@@ -885,6 +975,10 @@ export type RecebimentoInsert = Database['public']['Tables']['recebimentos']['In
 
 export type Producao = Database['public']['Tables']['producoes']['Row'];
 export type ProducaoInsert = Database['public']['Tables']['producoes']['Insert'];
+export type ProducaoReceita = Database['public']['Tables']['producao_receitas']['Row'];
+export type ProducaoReceitaInsert = Database['public']['Tables']['producao_receitas']['Insert'];
+export type ProducaoReceitaItem = Database['public']['Tables']['producao_receita_itens']['Row'];
+export type ProducaoReceitaItemInsert = Database['public']['Tables']['producao_receita_itens']['Insert'];
 export type ProducaoConsumoItem = Database['public']['Tables']['producao_consumo_itens']['Row'];
 export type ProducaoConsumoItemInsert = Database['public']['Tables']['producao_consumo_itens']['Insert'];
 
