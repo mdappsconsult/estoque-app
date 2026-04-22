@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
   FileImage,
   Loader2,
@@ -628,13 +627,6 @@ export default function EntradaCompraNotaPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Foto da nota</h1>
-            <p className="text-sm text-gray-600">
-              Abre a câmera, tire a foto e confira se ficou legível. Depois toque em <strong>Usar esta foto</strong> para ler a
-              nota.
-            </p>
-            <Link href="/entrada-compra" className="text-sm text-red-600 hover:underline mt-1 inline-block">
-              Prefiro lançar na mão (sem foto)
-            </Link>
           </div>
         </div>
       </div>
@@ -710,20 +702,24 @@ export default function EntradaCompraNotaPage() {
           ) : (
             <>
               <div className="space-y-3">
-                <label
-                  htmlFor="entrada-nota-capture"
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Mobile: usa o seletor nativo (capture). Desktop: tenta webcam direta.
+                    if (navigator.maxTouchPoints > 0) {
+                      inputCameraRef.current?.click();
+                      return;
+                    }
+                    if (typeof navigator.mediaDevices?.getUserMedia === 'function') {
+                      void abrirWebcam();
+                      return;
+                    }
+                    inputCameraRef.current?.click();
+                  }}
                   className="flex items-center justify-center gap-3 w-full min-h-[56px] rounded-xl bg-violet-600 text-white text-lg font-semibold shadow-md active:bg-violet-700 px-4 py-4 cursor-pointer touch-manipulation"
                 >
                   <Camera className="w-8 h-8 shrink-0" aria-hidden />
                   Tirar foto
-                </label>
-                <button
-                  type="button"
-                  onClick={() => void abrirWebcam()}
-                  className="flex items-center justify-center gap-2 w-full min-h-[48px] rounded-xl border border-violet-200 bg-white text-violet-900 text-base font-medium touch-manipulation"
-                >
-                  <Camera className="w-5 h-5 shrink-0" aria-hidden />
-                  Usar webcam (Mac / PC)
                 </button>
                 <button
                   type="button"
@@ -732,10 +728,6 @@ export default function EntradaCompraNotaPage() {
                 >
                   Escolher arquivo na pasta (JPEG, PNG…)
                 </button>
-                <p className="text-xs text-gray-500 text-center leading-snug">
-                  No Mac com Chrome/Safari, «Tirar foto» pode abrir o seletor de arquivos. Use{' '}
-                  <strong>Usar webcam</strong> para filmar a nota com a câmera do computador.
-                </p>
               </div>
               {qualidadeMsg && (
                 <div className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
