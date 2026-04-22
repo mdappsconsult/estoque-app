@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { PackageCheck, Loader2, CheckCircle, AlertTriangle, Pencil, Camera } from 'lucide-react';
+import { PackageCheck, Loader2, CheckCircle, AlertTriangle, Pencil, Camera, ChevronDown } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -80,14 +80,50 @@ export default function EntradaCompraPage() {
     select: 'id, nome',
     orderBy: { column: 'nome', ascending: true },
   });
-  const { data: lotesRecentes, loading: loadLotesRecentes, refetch: refetchLotesRecentes } =
-    useRealtimeQuery<LoteCompraCompleto>({
-      table: 'lotes_compra',
-      select:
-        '*, produto:produtos(id, nome, validade_dias, validade_horas, validade_minutos), local:locais(id, nome)',
-      orderBy: { column: 'created_at', ascending: false },
-      maxRows: 50,
-    });
+  const [correcoesAbertas, setCorrecoesAbertas] = useState(false);
+  const [lotesRecentes, setLotesRecentes] = useState<LoteCompraCompleto[]>([]);
+  const [loadLotesRecentes, setLoadLotesRecentes] = useState(false);
+  const [lotesOffset, setLotesOffset] = useState(0);
+  const [lotesHasMore, setLotesHasMore] = useState(false);
+  const LOTES_PAGE_SIZE = 10;
+
+  const fetchLotesPage = useCallback(async (offset: number, replace: boolean) => {
+    setLoadLotesRecentes(true);
+    try {
+      const { data, error } = await supabase
+        .from('lotes_compra')
+        .select('*, produto:produtos(id, nome, validade_dias, validade_horas, validade_minutos), local:locais(id, nome)')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + LOTES_PAGE_SIZE - 1);
+      if (error) throw error;
+      const page = (data || []) as LoteCompraCompleto[];
+      setLotesRecentes((prev) => (replace ? page : [...prev, ...page]));
+      setLotesOffset(offset + page.length);
+      setLotesHasMore(page.length === LOTES_PAGE_SIZE);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Não foi possível carregar lançamentos recentes'));
+      if (replace) {
+        setLotesRecentes([]);
+        setLotesOffset(0);
+        setLotesHasMore(false);
+      }
+    } finally {
+      setLoadLotesRecentes(false);
+    }
+  }, []);
+
+  const refetchLotesRecentes = useCallback(async () => {
+    setLotesRecentes([]);
+    setLotesOffset(0);
+    setLotesHasMore(false);
+    await fetchLotesPage(0, true);
+  }, [fetchLotesPage]);
+
+  useEffect(() => {
+    if (!correcoesAbertas) return;
+    if (lotesRecentes.length > 0) return;
+    void fetchLotesPage(0, true);
+  }, [correcoesAbertas, fetchLotesPage, lotesRecentes.length]);
 
   const warehouses = useMemo(() => locais.filter((l) => l.tipo === 'WAREHOUSE'), [locais]);
   const warehousesPermitidos = useMemo(() => {
@@ -675,10 +711,6 @@ export default function EntradaCompraPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Registrar Compra</h1>
-          <p className="text-sm text-gray-500">
-            O lote guarda <strong>unidades rastreáveis</strong> (cada uma → até um QR na separação). Caixa com muitas peças
-            internas: conte <strong>caixas</strong>, não peças — veja o aviso abaixo no formulário.
-          </p>
         </div>
       </div>
 
@@ -714,11 +746,6 @@ export default function EntradaCompraPage() {
           value={form.produto_id}
           onChange={(e) => void handleProdutoChange(e.target.value)}
         />
-        {isUsuarioIndustria && receitaInsumos.length === 0 && (
-          <p className="text-sm text-amber-700">
-            Nenhuma receita de produção encontrada. Cadastre receitas/insumos para liberar produtos de compra na indústria.
-          </p>
-        )}
         <div className="flex justify-end gap-2 flex-wrap">
           {form.produto_id && (
             <Button
@@ -771,11 +798,6 @@ export default function EntradaCompraPage() {
             + Novo produto de fornecedor
           </Button>
         </div>
-        {produtosCompra.length === 0 && (
-          <p className="text-sm text-amber-600">
-            Nenhum produto para compra. Cadastre com origem &quot;Compra&quot; ou &quot;Compra e produção&quot;.
-          </p>
-        )}
         {hintCompra && form.produto_id && (
           <div
             className={`rounded-lg border p-3 text-sm ${
@@ -791,13 +813,10 @@ export default function EntradaCompraPage() {
               Estoque atual: <span className="tabular-nums">{hintCompra.qtdEmEstoque}</span> unidades (QR) no armazém
             </p>
             <p className="mt-1 text-xs opacity-90">
-              Estoque mínimo cadastrado: <span className="tabular-nums font-medium">{hintCompra.estoqueMinimo}</span>
+              Mínimo: <span className="tabular-nums font-medium">{hintCompra.estoqueMinimo}</span>
               {hintCompra.qtdEmEstoque <= hintCompra.estoqueMinimo && hintCompra.estoqueMinimo > 0
-                ? ' — abaixo ou no limite; considere repor.'
+                ? ' — abaixo/no limite'
                 : null}
-            </p>
-            <p className="mt-2 text-xs opacity-90 border-t border-black/5 pt-2">
-              O mínimo e este saldo contam <strong>unidades com QR</strong> (ex.: se o produto é «caixa fechada», cada caixa = 1).
             </p>
           </div>
         )}
@@ -821,29 +840,16 @@ export default function EntradaCompraPage() {
             }}
           />
           {form.unidade_compra === 'UN' ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-              <p>
-                Cada <strong>unidade comprada</strong> vira 1 linha no lote e, na separação, até <strong>1 QR</strong>. Se a
-                unidade física for uma <strong>caixa inteira</strong>, a quantidade é o número de caixas (não o de tampas
-                dentro).
-              </p>
-            </div>
+            <div />
           ) : (
-            <div className="space-y-1.5">
-              <Input
-                label="Unidades rastreáveis por embalagem"
-                type="number"
-                min="1"
-                value={form.itens_por_embalagem}
-                onChange={(e) => setForm({ ...form, itens_por_embalagem: e.target.value })}
-                required
-              />
-              <p className="text-xs text-gray-600 leading-relaxed">
-                Quantas <strong>unidades do lote</strong> (e futuros QRs) cada caixa/fardo representa. Só um adesivo na
-                embalagem fechada → use <strong>1</strong>. O total de peças dentro (ex.: 700 tampas) pode ficar só no{' '}
-                <strong>nome do produto</strong>, não aqui.
-              </p>
-            </div>
+            <Input
+              label="Unidades rastreáveis por embalagem"
+              type="number"
+              min="1"
+              value={form.itens_por_embalagem}
+              onChange={(e) => setForm({ ...form, itens_por_embalagem: e.target.value })}
+              required
+            />
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -904,9 +910,6 @@ export default function EntradaCompraPage() {
           value={form.fornecedor}
           onChange={(e) => setForm({ ...form, fornecedor: e.target.value })}
         />
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-          O lote interno desta compra será gerado automaticamente no salvamento para rastreio de QRs e relatórios.
-        </div>
         <label className="flex items-center gap-2 text-sm text-gray-600">
           <input
             type="checkbox"
@@ -961,11 +964,6 @@ export default function EntradaCompraPage() {
           onChange={(e) => setForm({ ...form, data_validade: e.target.value })}
           required={produtoExigeValidade}
         />
-        {!produtoExigeValidade && (
-          <p className="text-xs text-gray-500 -mt-2">
-            Este produto está sem regra de validade no cadastro; o campo pode ficar em branco.
-          </p>
-        )}
 
         <Button
           variant="primary"
@@ -991,76 +989,113 @@ export default function EntradaCompraPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Corrigir lançamentos recentes</h2>
-        <p className="text-xs text-gray-600 leading-relaxed">
-          Ajuste quantidade, custo, nota, fornecedor ou validade de uma <strong>entrada já salva</strong>. O sistema não
-          permite deixar a quantidade do lote menor que o número de <strong>QR já emitidos</strong> a partir dele
-          (separação/produção).
-        </p>
-        {loadLotesRecentes ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
-          </div>
-        ) : lotesRecentes.length === 0 ? (
-          <p className="text-sm text-gray-500">Nenhum lote de compra encontrado.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 text-gray-600">
-                  <th className="py-2 pr-2 font-medium">Data</th>
-                  <th className="py-2 pr-2 font-medium">Produto</th>
-                  <th className="py-2 pr-2 font-medium">Local</th>
-                  <th className="py-2 pr-2 font-medium tabular-nums">Qtd</th>
-                  <th className="py-2 pr-2 font-medium">Lote</th>
-                  <th className="py-2 pr-2 font-medium">NF</th>
-                  <th className="py-2 pl-2 font-medium w-24" />
-                </tr>
-              </thead>
-              <tbody>
-                {lotesRecentes.map((l) => {
-                  const dt = l.created_at ? new Date(l.created_at) : null;
-                  const dataStr = dt && !Number.isNaN(dt.getTime()) ? dt.toLocaleString('pt-BR') : '—';
-                  const nomeProd = l.produto && typeof l.produto === 'object' && 'nome' in l.produto
-                    ? (l.produto as { nome: string }).nome
-                    : '—';
-                  const nomeLoc = l.local && typeof l.local === 'object' && 'nome' in l.local
-                    ? (l.local as { nome: string }).nome
-                    : '—';
-                  const nf = l.sem_nota_fiscal ? 'S/NF' : (l.nota_fiscal || '—');
-                  return (
-                    <tr key={l.id} className="border-b border-gray-100">
-                      <td className="py-2 pr-2 whitespace-nowrap text-gray-700">{dataStr}</td>
-                      <td className="py-2 pr-2 max-w-[140px] truncate" title={nomeProd}>
-                        {nomeProd}
-                      </td>
-                      <td className="py-2 pr-2 max-w-[100px] truncate" title={nomeLoc}>
-                        {nomeLoc}
-                      </td>
-                      <td className="py-2 pr-2 tabular-nums font-medium">{l.quantidade}</td>
-                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[100px]" title={l.lote_fornecedor}>
-                        {l.lote_fornecedor}
-                      </td>
-                      <td className="py-2 pr-2 truncate max-w-[80px]" title={nf}>
-                        {nf}
-                      </td>
-                      <td className="py-2 pl-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="!px-2 !py-1 text-xs"
-                          onClick={() => void abrirEdicaoLote(l)}
-                        >
-                          <Pencil className="w-3.5 h-3.5 mr-1" />
-                          Editar
-                        </Button>
-                      </td>
+        <button
+          type="button"
+          className="w-full flex items-center justify-between gap-3 text-left"
+          onClick={() => {
+            setCorrecoesAbertas((open) => {
+              const next = !open;
+              if (!next) fecharEdicaoLote();
+              return next;
+            });
+          }}
+          aria-expanded={correcoesAbertas}
+        >
+          <h2 className="text-lg font-semibold text-gray-900">Corrigir lançamentos recentes</h2>
+          <ChevronDown
+            className={`w-5 h-5 text-gray-500 transition-transform ${correcoesAbertas ? 'rotate-180' : ''}`}
+            aria-hidden
+          />
+        </button>
+
+        {correcoesAbertas ? (
+          loadLotesRecentes ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+            </div>
+          ) : lotesRecentes.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhum lote de compra encontrado.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-gray-600">
+                      <th className="py-2 pr-2 font-medium">Data</th>
+                      <th className="py-2 pr-2 font-medium">Produto</th>
+                      <th className="py-2 pr-2 font-medium">Local</th>
+                      <th className="py-2 pr-2 font-medium tabular-nums">Qtd</th>
+                      <th className="py-2 pr-2 font-medium">Lote</th>
+                      <th className="py-2 pr-2 font-medium">NF</th>
+                      <th className="py-2 pl-2 font-medium w-24" />
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {lotesRecentes.map((l) => {
+                      const dt = l.created_at ? new Date(l.created_at) : null;
+                      const dataStr = dt && !Number.isNaN(dt.getTime()) ? dt.toLocaleString('pt-BR') : '—';
+                      const nomeProd =
+                        l.produto && typeof l.produto === 'object' && 'nome' in l.produto
+                          ? (l.produto as { nome: string }).nome
+                          : '—';
+                      const nomeLoc =
+                        l.local && typeof l.local === 'object' && 'nome' in l.local
+                          ? (l.local as { nome: string }).nome
+                          : '—';
+                      const nf = l.sem_nota_fiscal ? 'S/NF' : (l.nota_fiscal || '—');
+                      return (
+                        <tr key={l.id} className="border-b border-gray-100">
+                          <td className="py-2 pr-2 whitespace-nowrap text-gray-700">{dataStr}</td>
+                          <td className="py-2 pr-2 max-w-[140px] truncate" title={nomeProd}>
+                            {nomeProd}
+                          </td>
+                          <td className="py-2 pr-2 max-w-[100px] truncate" title={nomeLoc}>
+                            {nomeLoc}
+                          </td>
+                          <td className="py-2 pr-2 tabular-nums font-medium">{l.quantidade}</td>
+                          <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[100px]" title={l.lote_fornecedor}>
+                            {l.lote_fornecedor}
+                          </td>
+                          <td className="py-2 pr-2 truncate max-w-[80px]" title={nf}>
+                            {nf}
+                          </td>
+                          <td className="py-2 pl-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="!px-2 !py-1 text-xs"
+                              onClick={() => void abrirEdicaoLote(l)}
+                            >
+                              <Pencil className="w-3.5 h-3.5 mr-1" />
+                              Editar
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-gray-500 tabular-nums">
+                  Mostrando {lotesRecentes.length} lançamento(s)
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="!px-3 !py-1.5 text-xs"
+                  disabled={!lotesHasMore || loadLotesRecentes}
+                  onClick={() => void fetchLotesPage(lotesOffset, false)}
+                >
+                  {loadLotesRecentes ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  Carregar mais
+                </Button>
+              </div>
+            </div>
+          )
+        ) : (
+          <p className="text-xs text-gray-500">Toque para abrir.</p>
         )}
       </div>
 
@@ -1161,11 +1196,6 @@ export default function EntradaCompraPage() {
                 onChange={(e) => setFormLoteEdicao((f) => ({ ...f, data_validade: e.target.value }))}
                 required={produtoLoteEdicaoExigeValidade}
               />
-              {!produtoLoteEdicaoExigeValidade && (
-                <p className="text-xs text-gray-500 -mt-2">
-                  Produto sem regra de validade no cadastro — pode deixar em branco.
-                </p>
-              )}
               <div className="flex gap-2 pt-2">
                 <Button
                   variant="outline"
@@ -1223,7 +1253,7 @@ export default function EntradaCompraPage() {
               onChange={(e) => setNovoProduto((p) => ({ ...p, unidade_medida: e.target.value }))}
             />
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 flex items-center">
-              Validade e quantidade entram no momento de registrar a compra.
+              &nbsp;
             </div>
           </div>
           <Input
@@ -1275,9 +1305,6 @@ export default function EntradaCompraPage() {
               Editar tipo selecionado
             </Button>
           </div>
-          <p className="text-xs text-gray-500 -mt-2">
-            Família em <strong>Cadastros → Categorias</strong>. Caixa, balde, pote em <strong>Cadastros → Tipos de embalagem</strong>.
-          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Estoque mínimo"
@@ -1295,9 +1322,6 @@ export default function EntradaCompraPage() {
               onChange={(e) => setNovoProduto((p) => ({ ...p, custo_referencia: e.target.value }))}
             />
           </div>
-          <p className="text-xs text-gray-500">
-            Depois de criar, o produto já fica selecionado aqui para você continuar a compra.
-          </p>
           <Button
             variant="primary"
             className="w-full"

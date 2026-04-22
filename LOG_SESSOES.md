@@ -1,5 +1,123 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Etiquetas: 7 remessas no select + Carregar mais (páginação)
+- **Pedido:** carregar as últimas 7 remessas e paginar o restante.
+- **Código:** `src/app/etiquetas/page.tsx` — `opcoesRemessaTodas` (lista completa da API), exibição fatiada com `REMESSAS_SEP_POR_PAGINA = 7` e botão **Carregar mais**; meta da remessa a partir de todas as opções; contador X de Y. Removido o corte em 10 itens no fetch da indústria. `CONTEXTO_ATUAL.md` ajustado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Etiquetas: operador indústria só vê remessas SEP da própria origem
+- **Pedido:** funcionário da indústria não deve ver lançamentos do armazém central — só remessas relacionadas à indústria (origem = `local_padrao_id`).
+- **Código:** `src/app/etiquetas/page.tsx` — `OPERATOR_WAREHOUSE` / `OPERATOR_WAREHOUSE_DRIVER` com o mesmo critério de origem fixa que antes valia só para logins Zebra 60×60; sem `local_padrao_id`, não consulta lista global; textos de lista vazia corrigidos (tinham menção errada a «criado por este login»). `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - SEP → etiquetas 60×60 indústria: preencher lote de produção (itens + producoes)
+- **Problema:** na **60×60**, remessas **Separar por loja** (22/04) não exibiam **Lote N · k/N** junto à validade — metadados vinham nulos em `etiquetas` quando a linha SEP era criada sem copiar o lançamento.
+- **Código:** `src/lib/services/etiquetas.ts` — `carregarMetadadosLoteProducaoPorItemIds`, `aplicarMetadadosLoteProducaoNasRows`; enriquecimento no **upsert** SEP antes de gravar; `src/app/etiquetas/page.tsx` — prévia, impressão navegador e **Pi** aplicam metadados na lista antes do HTML; linhas fantasma pós-busca em `itens`.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Impressão: lote de produção (k/N) exibido junto à validade (60×30 e 60×60)
+- **Pedido:** nas etiquetas do lote industrial, mostrar o **número do balde no lançamento** ligado ao **lote de produção** e à **validade** (ex.: lote **1/70**).
+- **Código:** `src/lib/printing/label-print.ts` — função `textoLoteBaldeProducaoAcopladoValidade`; 60×30: bloco no rodapé abaixo de «Val.»; 60×60: stack sob o valor da validade. Dados já vêm de `etiquetas` / payload (`lote_producao_numero`, `sequencia_no_lote_producao`, `num_baldes_lote_producao`). Demonstração 60×30 ganhou metadados fictícios para teste.
+- **Validação:** `npm run lint` (OK).
+
+### Sessão - 2026-04-22 - Separar por Loja (Indústria, 22/04 BR): validade 28/04 em todas as remessas do dia
+- **Pedido:** corrigir **todos** os baldes das remessas criadas hoje na indústria para as lojas — não só Delivery.
+- **Banco:** quatro `WAREHOUSE_STORE` com origem **Indústria** e `created_at` BR = **2026-04-22** — **Delivery** (30), **Loja JK** (10), **Loja Santa Cruz** (10), **Loja Jardim Paraíso** (10) = **60** unidades **Açaí Balde 11L**. `data_validade` → **2026-04-28 00:00 America/Sao_Paulo** em **`itens`** (só produto acabado) e em **`etiquetas`** (por `id` do item + por `lote` `SEP-{viagem}` dos quatro envios).
+- **Nota:** a produção do dia tem **70** QRs (`L260422893`); neste recorte **60** já estavam em remessa — **10** podem seguir na indústria sem separação no mesmo instante.
+- **Validação:** por destino, `min/max` validade BR = 2026-04-28; 60 etiquetas `SEP-…` açaí nos quatro lotes coerentes.
+
+### Sessão - 2026-04-22 - SEP Delivery (balde 270+): validade 28/04 no lote `MO0L566H`
+- **Caso:** etiqueta **PEQNCB** / `QR-MO0L566H-QUEM2C` (Delivery, balde nº 270) ainda aparecia com validade **20/04** na chapa; usuário associou ao “lote da produção de hoje”.
+- **Diagnóstico:** o prefixo **`MO0L566H`** é lote **antigo** no sistema (`data_producao` **15/04**); a produção **22/04** usa QRs **`MOAISN0…`** e lote **`L260422893`**. A remessa **SEP-c4558f73…** → Delivery (30 açaís, baldes **270–299**) puxou esse estoque por **FEFO**.
+- **Banco:** `data_validade` (meia-noite **America/Sao_Paulo**, offset **-03**) ajustada para **2026-04-28** em todos os **46** itens `QR-MO0L566H-%` + etiquetas correspondentes; reforço por `lote = SEP-c4558f73…` (30 linhas). Alinha impressão/prévia a **28/04/26**; **reimprimir** chapa se a física foi gerada antes.
+- **Validação:** contagens e `min(val)` BR = 2026-04-28 no conjunto atualizado.
+
+### Sessão - 2026-04-22 - Açaí balde (produção do dia): validade etiquetas + itens ajustada para 28/04
+- **Pedido:** etiquetas geradas hoje (indústria / envio às lojas) com validade no **dia 28** (BR).
+- **Banco:** no snapshot não havia `SEP-%` de **Açaí Balde 11L** com `created_at` BR = 22/04; o lote do dia é produção **`L260422893`** (70 etiquetas) + **70** `itens` da produção **`8767529c-…`**. Ambos estavam com validade **29/04**; atualizados para **`2026-04-28 00:00:00 America/Sao_Paulo`** (`timestamptz` com offset **-03**). Incluído `UPDATE` idempotente para `SEP-%` + mesmo produto + criado BR 22/04 (0 linhas no momento).
+- **Impacto:** impressão/prévia passa a exibir **28/04/26**; rastreio e QR alinhados ao item.
+- **Validação:** `count` 70 + 70; `min(val)` BR = 2026-04-28.
+
+### Sessão - 2026-04-22 - Entrada forçada: remessas balde Indústria → loja com SEP antes de 22/04
+- **Pedido:** dar recebimento completo nas lojas de destino para separações de balde vindas da indústria com data anterior a **22/04/2026** (equivalente ao fluxo de **Separar por loja** / CEP, quando a loja não conseguia concluir o recebimento).
+- **Banco (Supabase):** critério — `transferencias.tipo = WAREHOUSE_STORE`, `origem_id` = Indústria, `created_at` em **America/Sao_Paulo** com data **antes de 2026-04-22**, `status` não `DELIVERED`/`CANCELLED`, produto `nome ILIKE '%balde%'`. **Resultado:** **1** remessa (`7acb7c1e-…`, **20/04**, Indústria → **Delivery**, 3× Cupuaçu balde 11L, `IN_TRANSIT`); transação SQL alinhada a `receberTransferencia` + `viagens.status = COMPLETED` (única remessa da viagem). Pós-operação: **0** remessas no mesmo filtro.
+- **Auditoria:** `RECEBER_TRANSFERENCIA` com `usuario_id` admin (Marco); `detalhes.nota` registra correção operacional.
+- **Validação:** queries antes/depois (pendentes = 0); `CONTEXTO_ATUAL.md` atualizado.
+
+### Sessão - 2026-04-22 - Diagnóstico: «validade errada» em SEP — itens são FEFO (não são a produção do dia)
+- **Caso:** etiqueta Açaí Delivery **PEQNCB** / balde nº **270** mostra validade **20/04/26**.
+- **Banco:** o item tem **data produção 15/04/2026 (BR)** e validade coerente; **não** tem `producao_id` da produção **8767529c** (70 baldes **22/04**). Remessa **SEP-c4558f73-…** para Delivery (**22/04 ~17:44**) inclui **30** açaís, todos com produção **15/04** ou mistura **15–18/04** nas outras viagens do dia — **nenhum** item da produção **22/04** consta ainda em `transferencia_itens`.
+- **Conclusão:** **Separar por Loja** está puxando **estoque mais antigo primeiro** (FEFO); o rótulo reflete o **QR real**. Para enviar o lote novo, é preciso **incluir explicitamente** os baldes da produção de hoje (modo manual / leitura dos QRs novos) ou só separar açaí quando os antigos não estiverem mais na origem.
+
+### Sessão - 2026-04-22 - Separar por Loja: validade nas etiquetas SEP (YYYY-MM-DD → UTC errado)
+- **Problema:** etiquetas `SEP-…` criadas em 22/04/2026 com `data_validade`/`data_producao` defasadas em relação a `itens` (mesma causa da produção: só data → Postgres = meia-noite UTC).
+- **Dados:** `UPDATE etiquetas … FROM itens` para as 76 linhas `SEP-%` com `created_at` BR = 2026-04-22, alinhando validade e produção ao item.
+- **Código:** `normalizarDataValidadeSomenteDataParaTimestamptzBr` em `validade-producao-br.ts`; `validadeItemParaEtiqueta` em `etiquetas.ts` usa essa normalização antes do upsert.
+- **Validação:** query pós-update (`ainda_diff` = 0); `eslint` nos arquivos alterados.
+
+### Sessão - 2026-04-22 - Etiquetas: validade na prévia (fuso BR) + SEP sem misturar destinos na mesma viagem
+- **Problema:** prévia/impressão mostravam **validade errada** quando `data_validade` vinha como `timestamptz` (prefixo `YYYY-MM-DD` em UTC ≠ dia civil no BR). Em remessas **`SEP-{viagem}`** com **várias** transferências `WAREHOUSE_STORE` (destinos diferentes), a lista juntava **todos** os `item_id` da viagem → risco de misturar lojas na mesma folha.
+- **Mudança:** `formatarValidadeDdMmAaEtiquetaBr` (`validade-producao-br.ts`) formata ISO com hora pelo fuso **America/Sao_Paulo**. `listarItemIdsRemessaSepOrdenados` aceita `destinoLocalId` e filtra transferências; `/etiquetas` passa o destino da meta da opção. Prévia do modal **Produção** usa `calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos` (igual ao gravado). Removido import não usado em `producao.ts`.
+- **Validação:** `eslint` nos arquivos alterados; **`npm run lint`** e **`npm run build`** (OK).
+
+### Sessão - 2026-04-22 - Produção (Indústria): corrigir validade gravada dos baldes (fuso/data)
+- **Problema:** produção lançada hoje (~17h) de **Açaí Balde 11L** (70 baldes) ficou com `data_validade` gravada antes do esperado ao exibir em BR (normalização/UTC), afetando QR para impressão.
+- **Ação:** ajuste pontual no Supabase para a produção `8767529c-2e3c-4544-b422-a98d43f247bb`: atualizar `itens.data_validade` e `etiquetas.data_validade` para **(data_producao em BR)::date + 7 dias**, à meia-noite BR.
+- **Impacto:** os 70 QRs dessa produção passam a imprimir/mostrar validade **29/04** (BR).
+- **Validação:** query conferindo `validade_esperada_data_br = 2026-04-29` e `item_val/etiqueta_val` em BR = `2026-04-29 00:00:00` para os 70 itens.
+
+### Sessão - 2026-04-22 - Produção: corrigir origem do bug de validade (timestamptz + YYYY-MM-DD)
+- **Causa raiz:** `calcularDataValidadeYmdAposDiasCorridosBr` retornava `YYYY-MM-DD`; ao gravar em colunas `timestamptz`, o Postgres interpreta como meia-noite **UTC** → no Brasil vira **dia anterior 21:00**, aparecendo “2 dias a menos” no calendário.
+- **Mudança:** `src/lib/datas/validade-producao-br.ts` ganhou `calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos` (ISO completo em meia-noite BR). `src/lib/services/producao.ts` passou a gravar esse ISO ao usar “dias de validade”.
+- **Impacto:** novas produções passam a gravar/mostrar validade correta em BR sem precisar correção manual.
+
+### Sessão - 2026-04-22 - Viagem / Aceite: remover aviso «remessa com outro status»
+- **Pedido:** tirar o texto explicativo âmbar no histórico (viagem em trânsito com remessa em outro status).
+- **Mudança:** `src/app/viagem-aceite/page.tsx` — removidos `remessasNaoTransito` e o bloco de aviso; mantido só o aviso «Sem remessa vinculada…» quando aplicável.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Viagem / Aceite: menos texto + histórico em páginas de 5
+- **Pedido:** remover textos explicativos; no histórico, ao expandir, carregar 5 consultas e paginar.
+- **Mudança:** `src/app/viagem-aceite/page.tsx` — cabeçalho e modal sem parágrafos longos; removido bloco «Motorista» no estado vazio; remessas das viagens **pendentes** continuam sendo buscadas juntas; **Histórico** só busca `transferencias` para as **5** primeiras viagens visíveis (e mais 5 a cada **Carregar mais**), em vez de carregar todas de uma vez.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Remoção das rotas `/aceites-pendentes` e `/cadastros/industria`
+- **Pedido:** eliminar as rotas (sem utilidade operacional).
+- **Mudança:** apagados `src/app/aceites-pendentes/page.tsx` e `src/app/cadastros/industria/page.tsx`; removidos `CadastrosIndustriaDiaPainel`, `cadastros-hoje-separacao.ts` e `filtrarAceitesPorOperadorLoja` em `operador-loja-scope.ts`. Ajuste em `permissions.ts` (`ROUTE_PERMISSIONS` e `ROUTE_UI_META`), `Sidebar`, texto de ajuda em **Usuários**, `CONTEXTO_ATUAL.md`.
+- **Impacto:** quem tinha URL favoritada recebe 404; matriz de permissões no `localStorage` ignora chaves inexistentes na mescla. Fluxo de remessas (Viagem / Aceite, Recebimento, Separar) permanece.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Home: remover Aceites Pendentes e Cadastros — Indústria
+- **Pedido:** tirar da home o botão/card **Cadastros — Indústria** e **Aceites Pendentes**.
+- **Mudança:** em `src/app/page.tsx`, removidos os itens do array `features` e das listas `homeSectionsByProfile` que apontavam para `/cadastros/industria` e `/aceites-pendentes`; import `Factory` (lucide) removido.
+- **Impacto:** telas continuam acessíveis por URL e pela sidebar (onde já existiam); só deixam de aparecer como atalhos na página inicial.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Registrar Compra: remover textos explicativos (UX mais limpa)
+- **Pedido:** tirar textos explicativos e alinhar UX na tela de registrar compra.
+- **Mudança:** em `/entrada-compra`, removidos blocos de ajuda/descrição no cabeçalho, formulário e “Corrigir lançamentos recentes”; mantidos apenas avisos realmente acionáveis (ex.: muitos QRs).
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Registrar Compra: “Corrigir lançamentos recentes” retraído + lazy load
+- **Pedido:** deixar a seção retraída e só buscar dados ao expandir.
+- **Mudança:** em `/entrada-compra`, “Corrigir lançamentos recentes” inicia fechado e a query de `lotes_compra` só roda quando a seção é aberta (`enabled`); ao recolher, fecha modal de edição.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Registrar Compra: correções recentes com paginação (10 por vez)
+- **Pedido:** mostrar só os 10 últimos lançamentos e paginar o restante.
+- **Mudança:** em `/entrada-compra`, “Corrigir lançamentos recentes” carrega 10 itens por vez (mais recentes) e traz o restante sob demanda via “Carregar mais”.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Etiquetas: remover textos e adicionar “Voltar” na prévia
+- **Pedido:** tirar textos explicativos; na aba de “Ver prévia” criar um caminho de volta para não conflitar com o PWA.
+- **Mudança:** em `/etiquetas`, removidos textos explicativos (mantendo só contagem e alertas acionáveis). Na prévia aberta em nova aba, a faixa do topo ficou minimalista e ganhou botões **Voltar** (abre `/etiquetas`) e **Fechar**.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja: remover “Atualizar” + menos textos + envios paginados (10 por vez)
+- **Pedido:** remover botão atualizar e textos explicativos; em “Envios já registrados” mostrar 10 últimos e paginar o restante.
+- **Mudança:** em `/separar-por-loja`, removido botão **Atualizar** e textos de ajuda; “Envios já registrados” agora carrega **10 por vez** e traz o restante sob demanda com **Carregar mais**.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-21 - Foto da NF: Mac/localhost — webcam + mesma UI em todo lugar
 - **Problema:** em Mac no `localhost` a câmera não abria (fluxo só «mobile» + desktop só com seletor de arquivo).
 - **Mudança:** auto-tentativa de abrir o input para todos; botões únicos: **Tirar foto**, **Usar webcam (Mac/PC)** (`getUserMedia` + modal Capturar), **Escolher arquivo**; texto explicando que no Mac o navegador pode abrir arquivos em vez da câmera.

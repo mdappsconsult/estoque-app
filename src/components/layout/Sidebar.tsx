@@ -44,7 +44,6 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
   { name: 'Viagem / Aceite', href: '/viagem-aceite', icon: Truck },
   { name: 'Receber Entrega', href: '/recebimento', icon: Store },
   { name: 'Transf. Loja → Loja', href: '/transferencia-loja', icon: Repeat2 },
-  { name: 'Aceites Pendentes', href: '/aceites-pendentes', icon: ClipboardCheck },
   { name: 'Baixa Diária', href: '/baixa-diaria', icon: Archive },
   { name: 'Declarar estoque (loja)', href: '/contagem-loja', icon: ClipboardCheck },
   { name: 'Perdas', href: '/perdas', icon: AlertTriangle },

@@ -5,7 +5,7 @@ import { gerarLote } from './etiquetas';
 import { EtiquetaInsert, Item } from '@/types/database';
 import { recalcularEstoqueProduto, recalcularEstoqueProdutos } from './estoque-sync';
 import { garantirItensDisponiveisNoLocal } from './lotes-compra';
-import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
+import { calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos } from '@/lib/datas/validade-producao-br';
 import {
   consumirMassaProducaoFifo,
   obterGramasDisponiveisMassa,
@@ -374,7 +374,7 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
   const dataValidadeCalculada =
     input.dataValidade ||
     (typeof input.diasValidade === 'number'
-      ? calcularDataValidadeYmdAposDiasCorridosBr(input.diasValidade)
+      ? calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos(input.diasValidade)
       : null);
   if (!dataValidadeCalculada) {
     throw new Error('Informe a data de validade ou os dias de validade');

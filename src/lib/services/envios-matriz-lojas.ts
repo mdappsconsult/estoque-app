@@ -31,9 +31,11 @@ const CHUNK_ITEM_IDS = 250;
 export async function buscarEnviosRecentesMatrizParaLojas(opts: {
   origemId?: string;
   destinoId?: string;
-  limiteTransferencias?: number;
+  pageSize?: number;
+  offset?: number;
 }): Promise<EnvioMatrizLojaResumo[]> {
-  const lim = Math.min(Math.max(opts.limiteTransferencias ?? 25, 1), 60);
+  const lim = Math.min(Math.max(opts.pageSize ?? 25, 1), 60);
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
 
   let q = supabase
     .from('transferencias')
@@ -51,7 +53,7 @@ export async function buscarEnviosRecentesMatrizParaLojas(opts: {
     )
     .eq('tipo', 'WAREHOUSE_STORE')
     .order('created_at', { ascending: false })
-    .limit(lim);
+    .range(offset, offset + lim - 1);
 
   if (opts.origemId) q = q.eq('origem_id', opts.origemId);
   if (opts.destinoId) q = q.eq('destino_id', opts.destinoId);

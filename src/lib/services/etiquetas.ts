@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { normalizarDataValidadeSomenteDataParaTimestamptzBr } from '@/lib/datas/validade-producao-br';
 import { produtoParticipaSequenciaBaldeLoja } from '@/lib/operacional/produto-sequencia-balde-loja';
 import { parseViagemIdDeLoteSep } from '@/lib/separacao/remessa-separacao-ui';
 import { Etiqueta, EtiquetaInsert } from '@/types/database';
@@ -24,9 +25,9 @@ function dedupeItensSeparacao(itens: UpsertEtiquetaSeparacaoItem[]): UpsertEtiqu
 }
 
 function validadeItemParaEtiqueta(item: UpsertEtiquetaSeparacaoItem): string {
-  return item.data_validade && String(item.data_validade).trim()
-    ? item.data_validade!
-    : DATA_SENTINELA_SEM_VALIDADE;
+  const v = item.data_validade != null ? String(item.data_validade).trim() : '';
+  if (!v) return DATA_SENTINELA_SEM_VALIDADE;
+  return normalizarDataValidadeSomenteDataParaTimestamptzBr(v);
 }
 
 const CHUNK_TRANSF_SEP_DESTINO = 200;
@@ -139,6 +140,145 @@ type BaselineEtiquetaRow = {
   data_lote_producao: string | null;
   num_baldes_lote_producao: number | null;
 };
+
+const CHUNK_ITENS_META_LOTE_PROD = 400;
+
+export type MetaLoteProducaoPorItem = {
+  lote_producao_numero: number | null;
+  sequencia_no_lote_producao: number | null;
+  data_lote_producao: string | null;
+  num_baldes_lote_producao: number | null;
+};
+
+/**
+ * Monta número do lote de produção, sequência k/N e data do lançamento a partir de `itens` + `producoes`.
+ * Usado quando a linha em `etiquetas` (SEP) ainda não copiou esses campos — típico de balde vindo de produção na indústria.
+ */
+export async function carregarMetadadosLoteProducaoPorItemIds(
+  itemIds: string[],
+  client: SupabaseClient = supabase
+): Promise<Map<string, MetaLoteProducaoPorItem>> {
+  const out = new Map<string, MetaLoteProducaoPorItem>();
+  const uniq = [...new Set(itemIds.map((x) => String(x || '').trim()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+
+  type ItemLinha = { id: string; producao_id: string | null; sequencia_no_lote_producao: number | null };
+  const porId = new Map<string, ItemLinha>();
+  for (let i = 0; i < uniq.length; i += CHUNK_ITENS_META_LOTE_PROD) {
+    const slice = uniq.slice(i, i + CHUNK_ITENS_META_LOTE_PROD);
+    const { data, error } = await client
+      .from('itens')
+      .select('id, producao_id, sequencia_no_lote_producao')
+      .in('id', slice);
+    if (error) throw error;
+    for (const row of data || []) {
+      const r = row as ItemLinha;
+      porId.set(String(r.id), r);
+    }
+  }
+
+  const pids = [
+    ...new Set(
+      [...porId.values()]
+        .map((r) => r.producao_id)
+        .filter((x): x is string => Boolean(x && String(x).trim()))
+    ),
+  ];
+  const prodPorId = new Map<
+    string,
+    { id: string; numero_lote_producao: number; quantidade: number; num_baldes: number; created_at: string }
+  >();
+  const chunkPr = 120;
+  for (let i = 0; i < pids.length; i += chunkPr) {
+    const slice = pids.slice(i, i + chunkPr);
+    const { data, error } = await client
+      .from('producoes')
+      .select('id, numero_lote_producao, quantidade, num_baldes, created_at')
+      .in('id', slice);
+    if (error) throw error;
+    for (const row of data || []) {
+      const pr = row as {
+        id: string;
+        numero_lote_producao: number;
+        quantidade: number;
+        num_baldes: number;
+        created_at: string;
+      };
+      prodPorId.set(String(pr.id), pr);
+    }
+  }
+
+  for (const id of uniq) {
+    const ir = porId.get(id);
+    if (!ir) continue;
+    const seqRaw = ir.sequencia_no_lote_producao;
+    const seq =
+      seqRaw != null && Number.isFinite(Number(seqRaw)) ? Number(seqRaw) : null;
+    const pid = ir.producao_id != null ? String(ir.producao_id).trim() : '';
+    if (!pid) {
+      out.set(id, {
+        lote_producao_numero: null,
+        sequencia_no_lote_producao: seq,
+        data_lote_producao: null,
+        num_baldes_lote_producao: null,
+      });
+      continue;
+    }
+    const pr = prodPorId.get(pid);
+    const q = pr != null ? Number(pr.quantidade) : NaN;
+    const nb = pr != null ? Number(pr.num_baldes) : NaN;
+    const nTotal =
+      Number.isFinite(q) && q > 0 ? q : Number.isFinite(nb) && nb > 0 ? nb : null;
+    const nLote =
+      pr != null && Number.isFinite(Number(pr.numero_lote_producao))
+        ? Number(pr.numero_lote_producao)
+        : null;
+    out.set(id, {
+      lote_producao_numero: nLote,
+      sequencia_no_lote_producao: seq,
+      data_lote_producao: pr?.created_at != null ? String(pr.created_at) : null,
+      num_baldes_lote_producao: nTotal,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Preenche campos de lote de produção na lista (prévia/impressão) quando vieram vazios em `etiquetas`.
+ */
+export async function aplicarMetadadosLoteProducaoNasRows<
+  T extends {
+    id: string;
+    lote_producao_numero?: number | null;
+    sequencia_no_lote_producao?: number | null;
+    data_lote_producao?: string | null;
+    num_baldes_lote_producao?: number | null;
+  },
+>(rows: T[], client: SupabaseClient = supabase): Promise<T[]> {
+  const faltando = rows.filter(
+    (r) =>
+      r.lote_producao_numero == null ||
+      r.sequencia_no_lote_producao == null ||
+      r.num_baldes_lote_producao == null
+  );
+  if (faltando.length === 0) return rows;
+  const meta = await carregarMetadadosLoteProducaoPorItemIds(
+    faltando.map((r) => r.id),
+    client
+  );
+  return rows.map((r) => {
+    const m = meta.get(r.id);
+    if (!m) return r;
+    return {
+      ...r,
+      lote_producao_numero: r.lote_producao_numero ?? m.lote_producao_numero,
+      sequencia_no_lote_producao: r.sequencia_no_lote_producao ?? m.sequencia_no_lote_producao,
+      data_lote_producao: r.data_lote_producao ?? m.data_lote_producao,
+      num_baldes_lote_producao: r.num_baldes_lote_producao ?? m.num_baldes_lote_producao,
+    };
+  });
+}
 
 /**
  * Garante linhas em `etiquetas` (id = id do item) para itens da separação indústria → loja.
@@ -273,6 +413,30 @@ export async function upsertEtiquetasSeparacaoLoja(
         data_lote_producao: b?.data_lote_producao ?? null,
         num_baldes_lote_producao: b?.num_baldes_lote_producao ?? null,
       });
+    }
+
+    const idsEnriquecer = [...merge.keys()].filter((id) => {
+      const m = merge.get(id)!;
+      return (
+        m.lote_producao_numero == null ||
+        m.sequencia_no_lote_producao == null ||
+        m.num_baldes_lote_producao == null
+      );
+    });
+    if (idsEnriquecer.length > 0) {
+      const metaPorItem = await carregarMetadadosLoteProducaoPorItemIds(idsEnriquecer, client);
+      for (const id of idsEnriquecer) {
+        const m = merge.get(id);
+        const meta = metaPorItem.get(id);
+        if (!m || !meta) continue;
+        merge.set(id, {
+          ...m,
+          lote_producao_numero: m.lote_producao_numero ?? meta.lote_producao_numero,
+          sequencia_no_lote_producao: m.sequencia_no_lote_producao ?? meta.sequencia_no_lote_producao,
+          data_lote_producao: m.data_lote_producao ?? meta.data_lote_producao,
+          num_baldes_lote_producao: m.num_baldes_lote_producao ?? meta.num_baldes_lote_producao,
+        });
+      }
     }
 
     const vid = parseViagemIdDeLoteSep(loteNorm);
@@ -518,22 +682,38 @@ export async function sincronizarEtiquetasRemessaPorLoteSep(
 }
 
 /**
- * IDs de unidades (`itens.id`) na remessa SEP: distintos em `transferencia_itens` para todas as
+ * IDs de unidades (`itens.id`) na remessa SEP: distintos em `transferencia_itens` para as
  * transferências `WAREHOUSE_STORE` da viagem. Ordem estável (UUID) — alinhada ao upsert de sequência de balde.
+ *
+ * Quando a viagem tiver **mais de uma** remessa matriz→loja (destinos diferentes), passe
+ * `opts.destinoLocalId` com o destino da opção selecionada no select — assim a lista não mistura
+ * itens de outra loja com o mesmo `SEP-{viagem_id}`.
  */
 export async function listarItemIdsRemessaSepOrdenados(
   loteSep: string,
-  client: SupabaseClient = supabase
+  client: SupabaseClient = supabase,
+  opts?: { destinoLocalId?: string | null }
 ): Promise<string[] | null> {
   const viagemId = parseViagemIdDeLoteSep(loteSep);
   if (!viagemId) return null;
   const { data: trs, error } = await client
     .from('transferencias')
-    .select('id')
+    .select('id, destino_id')
     .eq('tipo', 'WAREHOUSE_STORE')
     .eq('viagem_id', viagemId);
   if (error || !trs?.length) return null;
-  const idsTr = trs.map((t) => t.id as string);
+
+  const destFiltro = opts?.destinoLocalId?.trim().toLowerCase() || null;
+  let idsTr: string[];
+  if (destFiltro) {
+    idsTr = (trs as { id: string; destino_id?: string | null }[])
+      .filter((t) => String(t.destino_id ?? '').trim().toLowerCase() === destFiltro)
+      .map((t) => t.id);
+    if (idsTr.length === 0) return [];
+  } else {
+    idsTr = trs.map((t) => (t as { id: string }).id);
+  }
+
   const uniq = new Set<string>();
   for (let i = 0; i < idsTr.length; i += CHUNK_TRANSFERENCIA_IDS_IN) {
     const slice = idsTr.slice(i, i + CHUNK_TRANSFERENCIA_IDS_IN);
@@ -556,9 +736,10 @@ export async function listarItemIdsRemessaSepOrdenados(
  */
 export async function contarUnidadesTransferenciaPorLoteSep(
   loteSep: string,
-  client: SupabaseClient = supabase
+  client: SupabaseClient = supabase,
+  opts?: { destinoLocalId?: string | null }
 ): Promise<number | null> {
-  const ids = await listarItemIdsRemessaSepOrdenados(loteSep, client);
+  const ids = await listarItemIdsRemessaSepOrdenados(loteSep, client, opts);
   if (ids == null) return null;
   return ids.length;
 }

@@ -42,7 +42,10 @@ import {
   type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
-import { calcularDataValidadeYmdAposDiasCorridosBr } from '@/lib/datas/validade-producao-br';
+import {
+  calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos,
+  calcularDataValidadeYmdAposDiasCorridosBr,
+} from '@/lib/datas/validade-producao-br';
 import { idsFamiliasInsumoProducao } from '@/lib/producao-insumos-familia';
 import {
   linhasInsumoAPartirDaReceita,
@@ -512,7 +515,7 @@ export default function ProducaoPage() {
     try {
       const amostras = Math.min(numBaldesInt, 3);
       const agora = new Date().toISOString();
-      const valIso = `${dataValidadePrevista}T12:00:00.000Z`;
+      const valIso = calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos(diasValidadeNumero);
       const payload: EtiquetaParaImpressao[] = Array.from({ length: amostras }, (_, i) => ({
         id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
         produtoNome: produtoSelecionadoNome,

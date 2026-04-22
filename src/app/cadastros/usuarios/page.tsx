@@ -295,7 +295,7 @@ export default function UsuariosPage() {
           />
           {form.perfil === 'OPERATOR_STORE' && (
             <p className="text-xs text-gray-500 -mt-2">
-              Obrigatório: recebimentos e aceites pendentes consideram só pedidos destinados a esta loja.
+              Obrigatório: recebimentos consideram só remessas destinadas a esta loja.
             </p>
           )}
           {(form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER') && (

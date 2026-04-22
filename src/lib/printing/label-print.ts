@@ -187,6 +187,30 @@ function formatarRastreioLoteProducao6060(item: EtiquetaParaImpressao): string |
 }
 
 /**
+ * Texto curto do lançamento de produção + posição do balde (k/N), para exibir **junto à validade**
+ * (60×30 SEP e bloco Validade na 60×60). Ex.: «Lote 893 · 1/70» ou «Lote 1/70» sem número de lote.
+ */
+function textoLoteBaldeProducaoAcopladoValidade(item: EtiquetaParaImpressao): string | null {
+  const k = item.sequenciaNoLote;
+  const tot = item.numBaldesLoteProducao;
+  if (
+    k == null ||
+    tot == null ||
+    !Number.isFinite(Number(k)) ||
+    !Number.isFinite(Number(tot)) ||
+    Number(tot) <= 0
+  ) {
+    return null;
+  }
+  const frac = `${k}/${tot}`;
+  const n = item.loteProducaoNumero;
+  if (n != null && Number.isFinite(Number(n))) {
+    return `Lote ${n} · ${frac}`;
+  }
+  return `Lote ${frac}`;
+}
+
+/**
  * Pixels da imagem do QR (fonte) maiores que o mínimo teórico em 203 dpi.
  * O CSS limita o tamanho físico em mm; bitmap pequeno (~80px) vira “borrão” na térmica após raster do SO/driver.
  */
@@ -240,6 +264,7 @@ function gerarCelula60x30(
   const linhaValOuImp = temValidade
     ? `Val. ${valFmt}`
     : `Imp. ${formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao)}`;
+  const loteProducaoValidade = textoLoteBaldeProducaoAcopladoValidade(item);
   const opRaw = (item.responsavel || '').trim();
   const opCurto = opRaw.length > 18 ? `${opRaw.slice(0, 16)}…` : opRaw;
   const linhaOp = opCurto ? `Op. ${opCurto}` : '';
@@ -258,7 +283,14 @@ function gerarCelula60x30(
         <div class="cel-code">${tokenCurto}</div>
         <div class="cel-footer">
           ${linhaBaldeRodape}
-          <div class="cel-val">${escaparHtml(linhaValOuImp)}</div>
+          <div class="cel-val-block">
+            <div class="cel-val">${escaparHtml(linhaValOuImp)}</div>
+            ${
+              loteProducaoValidade
+                ? `<div class="cel-lote-prod-validade">${escaparHtml(loteProducaoValidade)}</div>`
+                : ''
+            }
+          </div>
           ${linhaOp ? `<div class="cel-op">${escaparHtml(linhaOp)}</div>` : ''}
         </div>
       </div>
@@ -293,6 +325,7 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
   const blocoRastreioProducao = rastreioProducao
     ? `<div class="e6060-lote-prod">${escaparHtml(rastreioProducao)}</div>`
     : '';
+  const loteProducaoValidade = textoLoteBaldeProducaoAcopladoValidade(item);
   const responsavel = escaparHtml((item.responsavel || '—').trim() || '—');
   const tokenShort = escaparHtml(item.tokenShort || item.id.slice(0, 8).toUpperCase());
   const tokenQr = escaparHtml(item.tokenQr);
@@ -320,7 +353,14 @@ function gerarHtmlEtiquetaIndustria6060(item: EtiquetaParaImpressao, qrDataUrl: 
         <div class="e6060-meta-row">
           <div class="e6060-meta-block">
             <span class="e6060-ql">Validade</span>
-            <span class="e6060-qv e6060-qv-val">${validade}</span>
+            <div class="e6060-validade-lote-stack">
+              <span class="e6060-qv e6060-qv-val">${validade}</span>
+              ${
+                loteProducaoValidade
+                  ? `<span class="e6060-qv-lote-validade">${escaparHtml(loteProducaoValidade)}</span>`
+                  : ''
+              }
+            </div>
           </div>
           <div class="e6060-meta-block e6060-meta-block-gerou">
             <span class="e6060-ql">Gerou</span>
@@ -439,8 +479,20 @@ export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): E
 
   if (formato === '60x30') {
     return [
-      mk('000000000001', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T1', 12),
-      mk('000000000002', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T2', 13),
+      {
+        ...mk('000000000001', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T1', 12),
+        loteProducaoNumero: 40,
+        sequenciaNoLote: 1,
+        numBaldesLoteProducao: 70,
+        dataLoteProducaoIso: agora,
+      },
+      {
+        ...mk('000000000002', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T2', 13),
+        loteProducaoNumero: 40,
+        sequenciaNoLote: 2,
+        numBaldesLoteProducao: 70,
+        dataLoteProducaoIso: agora,
+      },
     ];
   }
   return [
@@ -597,6 +649,14 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       white-space: nowrap;
       margin: 0.08mm 0 0 0;
     }
+    .cel-val-block {
+      width: 100%;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.12mm;
+    }
     .cel-val {
       font-size: 4.65pt;
       font-weight: 800;
@@ -608,6 +668,17 @@ function estilosGlobais60x30(cfg: (typeof FORMATO_CONFIG)['60x30']): string {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .cel-lote-prod-validade {
+      font-size: 4.2pt;
+      font-weight: 900;
+      color: #000;
+      letter-spacing: 0.02em;
+      line-height: 1.08;
+      text-align: center;
+      max-width: 100%;
+      white-space: normal;
+      word-break: break-word;
     }
     .cel-op {
       font-size: 4.35pt;
@@ -758,6 +829,22 @@ function estilosGlobaisLegado(formato: Exclude<FormatoEtiqueta, '60x30'>): strin
       font-weight: 900;
       letter-spacing: 0.02em;
       line-height: 1.05;
+    }
+    .e6060-validade-lote-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15mm;
+      min-width: 0;
+      max-width: 26mm;
+    }
+    .e6060-qv-lote-validade {
+      font-size: 6.4pt;
+      font-weight: 900;
+      letter-spacing: 0.03em;
+      line-height: 1.06;
+      color: #111;
+      word-break: break-word;
     }
     .e6060-qr-wrap {
       flex-shrink: 0;
@@ -1054,10 +1141,32 @@ export async function abrirPreviaEtiquetasEmJanela(
 
   const n = etiquetas.length;
   const labelFmt = FORMATO_CONFIG[formato].label;
+  const backUrl = `${window.location.origin}/etiquetas`;
   const extraLinha = mensagemBarra
     ? `<div style="margin-top:6px;font-size:12px;opacity:0.92;font-weight:500;max-width:42rem;margin-left:auto;margin-right:auto;">${escaparHtml(mensagemBarra)}</div>`
     : '';
-  const faixa = `<div id="previa-etiquetas-faixa" role="status" style="position:sticky;top:0;left:0;right:0;z-index:2147483647;background:#0f172a;color:#f8fafc;padding:10px 14px;font:13px/1.35 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.25);"><strong>Prévia</strong> — ${n} etiqueta(s) · ${escaparHtml(labelFmt)}. Confira texto, validade e QR antes de imprimir.${extraLinha}</div>`;
+  const faixa = `
+    <div
+      id="previa-etiquetas-faixa"
+      role="status"
+      style="position:sticky;top:0;left:0;right:0;z-index:2147483647;background:#0f172a;color:#f8fafc;padding:10px 12px;font:13px/1.35 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,0.25);"
+    >
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;max-width:56rem;margin:0 auto;">
+        <div style="display:flex;gap:10px;align-items:center;min-width:0;">
+          <a href="${escaparHtml(backUrl)}" style="display:inline-block;text-decoration:none;background:rgba(255,255,255,0.12);color:#f8fafc;padding:6px 10px;border-radius:999px;font-weight:700;white-space:nowrap;">
+            Voltar
+          </a>
+          <button onclick="window.close()" style="appearance:none;border:0;cursor:pointer;background:rgba(255,255,255,0.12);color:#f8fafc;padding:6px 10px;border-radius:999px;font-weight:700;white-space:nowrap;">
+            Fechar
+          </button>
+        </div>
+        <div style="text-align:right;min-width:0;">
+          <strong>Prévia</strong> — ${n} etiqueta(s) · ${escaparHtml(labelFmt)}
+        </div>
+      </div>
+      ${extraLinha}
+    </div>
+  `.trim();
 
   const comFaixa = doc.replace('<body>', `<body>${faixa}`);
 

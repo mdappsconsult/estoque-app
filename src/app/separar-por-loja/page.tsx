@@ -10,7 +10,6 @@ import {
   X,
   Wand2,
   Plus,
-  RefreshCw,
   Package,
   PencilLine,
   Trash2,
@@ -136,9 +135,12 @@ export default function SepararPorLojaPage() {
   const [enviosRegistrados, setEnviosRegistrados] = useState<EnvioMatrizLojaResumo[]>([]);
   const [carregandoEnvios, setCarregandoEnvios] = useState(false);
   const [erroEnvios, setErroEnvios] = useState('');
+  const [enviosOffset, setEnviosOffset] = useState(0);
+  const [enviosHasMore, setEnviosHasMore] = useState(false);
   const [envioEditando, setEnvioEditando] = useState<EnvioMatrizLojaResumo | null>(null);
   const [destinoModalRemessa, setDestinoModalRemessa] = useState('');
   const [remessaEmAcaoId, setRemessaEmAcaoId] = useState<string | null>(null);
+  const ENVIOS_PAGE_SIZE = 10;
 
   /** Registro atômico no servidor: pede senha após o confirm. */
   const [modalSenhaSeparacaoAberto, setModalSenhaSeparacaoAberto] = useState(false);
@@ -178,31 +180,41 @@ export default function SepararPorLojaPage() {
     }
   }, [restricaoOrigemIndustria, warehousesParaOrigemSelect, origemId]);
 
-  const carregarEnviosRegistrados = useCallback(async () => {
+  const carregarEnviosRegistrados = useCallback(async (opts?: { replace?: boolean }) => {
     if (!origemId) {
       setEnviosRegistrados([]);
       setErroEnvios('');
+      setEnviosOffset(0);
+      setEnviosHasMore(false);
       return;
     }
     setCarregandoEnvios(true);
     setErroEnvios('');
     try {
+      const replace = opts?.replace === true;
+      const offset = replace ? 0 : enviosOffset;
       const lista = await buscarEnviosRecentesMatrizParaLojas({
         origemId,
         destinoId: destinoId.trim() || undefined,
-        limiteTransferencias: 40,
+        pageSize: ENVIOS_PAGE_SIZE + 1,
+        offset,
       });
-      setEnviosRegistrados(lista);
+      const page = lista.slice(0, ENVIOS_PAGE_SIZE);
+      setEnviosRegistrados((prev) => (replace ? page : [...prev, ...page]));
+      setEnviosOffset(offset + page.length);
+      setEnviosHasMore(lista.length > ENVIOS_PAGE_SIZE);
     } catch (err: unknown) {
       setEnviosRegistrados([]);
       setErroEnvios(err instanceof Error ? err.message : 'Não foi possível carregar os envios');
+      setEnviosOffset(0);
+      setEnviosHasMore(false);
     } finally {
       setCarregandoEnvios(false);
     }
-  }, [origemId, destinoId]);
+  }, [ENVIOS_PAGE_SIZE, origemId, destinoId, enviosOffset]);
 
   useEffect(() => {
-    void carregarEnviosRegistrados();
+    void carregarEnviosRegistrados({ replace: true });
   }, [carregarEnviosRegistrados]);
 
   const salvarNovoDestinoRemessa = async () => {
@@ -215,7 +227,7 @@ export default function SepararPorLojaPage() {
         usuario.id
       );
       setEnvioEditando(null);
-      await carregarEnviosRegistrados();
+      await carregarEnviosRegistrados({ replace: true });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Não foi possível alterar o destino');
     } finally {
@@ -238,7 +250,7 @@ export default function SepararPorLojaPage() {
     setRemessaEmAcaoId(env.transferencia_id);
     try {
       await cancelarRemessaMatrizParaLoja(env.transferencia_id, usuario.id);
-      await carregarEnviosRegistrados();
+      await carregarEnviosRegistrados({ replace: true });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Não foi possível cancelar a remessa');
     } finally {
@@ -713,7 +725,6 @@ export default function SepararPorLojaPage() {
         <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><Truck className="w-5 h-5 text-blue-600" /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Separar por Loja</h1>
-          <p className="text-sm text-gray-500">Warehouse → Store</p>
         </div>
       </div>
 
@@ -739,11 +750,7 @@ export default function SepararPorLojaPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 mb-6">
         {restricaoOrigemIndustria && !localPadraoIndustriaId && (
           <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            Defina o <strong>local padrão</strong> (warehouse da indústria) em{' '}
-            <Link href="/cadastros/usuarios" className="text-red-700 font-semibold underline underline-offset-2">
-              Cadastros → Usuários
-            </Link>{' '}
-            para travar a origem na indústria e não no armazém central.
+            Usuário sem <strong>local padrão</strong>.
           </p>
         )}
         {restricaoOrigemIndustria &&
@@ -751,11 +758,7 @@ export default function SepararPorLojaPage() {
           warehousesParaOrigemSelect.length === 0 &&
           !loading && (
             <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              O local padrão deste usuário não é um <strong>Warehouse</strong> cadastrado. Ajuste o vínculo em{' '}
-              <Link href="/cadastros/usuarios" className="text-red-700 font-semibold underline underline-offset-2">
-                Usuários
-              </Link>
-              .
+              Local padrão inválido para origem.
             </p>
           )}
         <Select
@@ -775,11 +778,6 @@ export default function SepararPorLojaPage() {
             setEnviosRegistrados([]);
           }}
         />
-        {restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1 && (
-          <p className="text-xs text-gray-500">
-            Origem fixa no seu local da indústria — remessas do armazém central não aparecem aqui.
-          </p>
-        )}
         <Select
           label="Destino (Loja)"
           required
@@ -800,28 +798,8 @@ export default function SepararPorLojaPage() {
               <Package className="w-5 h-5 text-sky-700 shrink-0 mt-0.5" aria-hidden />
               <div className="min-w-0">
                 <p className="text-sm font-bold text-sky-950">Envios já registrados</p>
-                <p className="text-xs text-sky-800 mt-0.5">
-                  Origem selecionada
-                  {destinoId ? (
-                    <> · filtro: {lojas.find((l) => l.id === destinoId)?.nome ?? 'loja'}</>
-                  ) : null}
-                  . Editar / excluir só antes do despacho.
-                </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void carregarEnviosRegistrados()}
-              disabled={carregandoEnvios}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2.5 py-1.5 hover:bg-sky-100 disabled:opacity-50 shrink-0"
-            >
-              {carregandoEnvios ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
-              )}
-              Atualizar
-            </button>
           </div>
 
           {erroEnvios && (
@@ -837,74 +815,87 @@ export default function SepararPorLojaPage() {
 
           {!carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
             <p className="text-xs text-sky-900 py-1">
-              Nenhuma separação matriz → loja encontrada para este filtro. Crie uma com <strong>Criar separação</strong>{' '}
-              abaixo.
+              Nenhuma remessa encontrada.
             </p>
           )}
 
           {enviosRegistrados.length > 0 && (
-            <ul className="space-y-2 max-h-[min(24rem,58vh)] overflow-y-auto text-xs border border-sky-100 rounded-lg bg-white/90 p-2">
-              {enviosRegistrados.map((env) => (
-                <li
-                  key={env.transferencia_id}
-                  className="border-b border-sky-100 last:border-0 pb-2 last:pb-0 text-sky-950"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-1">
-                    <span className="font-semibold">
-                      {env.origem_nome} → {env.destino_nome}
-                    </span>
-                    <span className="text-[11px] text-sky-700">
-                      {new Date(env.created_at).toLocaleString('pt-BR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-sky-800 mt-0.5">
-                    {legivelStatusEnvio(env.status)} · <strong>{env.qtd_unidades}</strong> unidade(s)
-                  </p>
-                  <p className="text-[11px] text-sky-900 mt-1 leading-snug">{env.resumo_produtos}</p>
-                  {env.lote_sep && (
-                    <p className="text-[10px] text-sky-700 mt-1">
-                      Lote etiquetas:{' '}
-                      <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code> — imprimir em{' '}
-                      <Link href="/etiquetas" className="font-semibold text-sky-800 underline underline-offset-2">
-                        Etiquetas
-                      </Link>
-                    </p>
-                  )}
-                  {remessaPermiteEditarOuExcluir(env.status) && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <button
-                        type="button"
-                        disabled={remessaEmAcaoId !== null}
-                        onClick={() => {
-                          setEnvioEditando(env);
-                          setDestinoModalRemessa(env.destino_id);
-                        }}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
-                      >
-                        <PencilLine className="w-3.5 h-3.5" aria-hidden />
-                        Editar destino
-                      </button>
-                      <button
-                        type="button"
-                        disabled={remessaEmAcaoId !== null}
-                        onClick={() => void excluirRemessaConfirmado(env)}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
-                      >
-                        {remessaEmAcaoId === env.transferencia_id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden />
-                        )}
-                        Excluir remessa
-                      </button>
+            <div className="space-y-2">
+              <ul className="space-y-2 max-h-[min(24rem,58vh)] overflow-y-auto text-xs border border-sky-100 rounded-lg bg-white/90 p-2">
+                {enviosRegistrados.map((env) => (
+                  <li
+                    key={env.transferencia_id}
+                    className="border-b border-sky-100 last:border-0 pb-2 last:pb-0 text-sky-950"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-1">
+                      <span className="font-semibold">
+                        {env.origem_nome} → {env.destino_nome}
+                      </span>
+                      <span className="text-[11px] text-sky-700">
+                        {new Date(env.created_at).toLocaleString('pt-BR', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </span>
                     </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    <p className="text-[11px] text-sky-800 mt-0.5">
+                      {legivelStatusEnvio(env.status)} · <strong>{env.qtd_unidades}</strong> unidade(s)
+                    </p>
+                    <p className="text-[11px] text-sky-900 mt-1 leading-snug">{env.resumo_produtos}</p>
+                    {env.lote_sep && (
+                      <p className="text-[10px] text-sky-700 mt-1">
+                        <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code>
+                      </p>
+                    )}
+                    {remessaPermiteEditarOuExcluir(env.status) && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <button
+                          type="button"
+                          disabled={remessaEmAcaoId !== null}
+                          onClick={() => {
+                            setEnvioEditando(env);
+                            setDestinoModalRemessa(env.destino_id);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
+                        >
+                          <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                          Editar destino
+                        </button>
+                        <button
+                          type="button"
+                          disabled={remessaEmAcaoId !== null}
+                          onClick={() => void excluirRemessaConfirmado(env)}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
+                        >
+                          {remessaEmAcaoId === env.transferencia_id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                          )}
+                          Excluir remessa
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-sky-900/70 tabular-nums">
+                  Mostrando {enviosRegistrados.length}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="!px-3 !py-1.5 text-xs"
+                  disabled={!enviosHasMore || carregandoEnvios}
+                  onClick={() => void carregarEnviosRegistrados()}
+                >
+                  {carregandoEnvios ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  Carregar mais
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -964,7 +955,6 @@ export default function SepararPorLojaPage() {
         size="sm"
       >
         <div className="space-y-4">
-          <p className="text-xs text-gray-600">Mesma senha do login.</p>
           <Input
             label="Senha"
             type="password"
@@ -1025,17 +1015,6 @@ export default function SepararPorLojaPage() {
             </div>
             {modoSeparacao === 'reposicao' && (
               <div className="space-y-3">
-                <p className="text-xs text-gray-600">
-                  Faltantes a partir de{' '}
-                  <Link href="/cadastros/reposicao-loja" className="text-blue-600 underline underline-offset-2">
-                    Reposição
-                  </Link>{' '}
-                  e{' '}
-                  <Link href="/contagem-loja" className="text-blue-600 underline underline-offset-2">
-                    Contagem na loja
-                  </Link>
-                  .
-                </p>
                 {(carregandoReposicao || aplicandoSugestao) && (
                   <p className="text-xs text-blue-700 flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -1053,13 +1032,11 @@ export default function SepararPorLojaPage() {
                   ) : (
                     <Wand2 className="w-4 h-4 mr-2" />
                   )}
-                  Recarregar faltantes e sugestão
+                  Recarregar
                 </Button>
                 {mensagemReposicao && <p className="text-xs text-gray-600">{mensagemReposicao}</p>}
                 {resumoReposicao.length === 0 && !carregandoReposicao && !aplicandoSugestao && (
-                  <p className="text-xs text-gray-500">
-                    Nenhum faltante para esta loja no momento.
-                  </p>
+                  <p className="text-xs text-gray-500">Nenhum faltante.</p>
                 )}
                 {resumoReposicao.length > 0 && (
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -1115,20 +1092,6 @@ export default function SepararPorLojaPage() {
                       onKeyDown={(e) => e.key === 'Enter' && void carregarEstoqueOrigemManual()}
                     />
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => void carregarEstoqueOrigemManual()}
-                    disabled={carregandoEstoqueOrigem || !origemId}
-                  >
-                    {carregandoEstoqueOrigem ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                    )}
-                    Atualizar lista
-                  </Button>
                 </div>
                 {carregandoEstoqueOrigem && (
                   <p className="text-xs text-blue-700 flex items-center gap-2">
@@ -1144,8 +1107,7 @@ export default function SepararPorLojaPage() {
                   linhasEstoqueOrigemManual.length > 0 &&
                   estoqueOrigemManual.length === 0 && (
                     <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      Todos os produtos com saldo na origem são de <strong>compra</strong> (fornecedor). Para listar
-                      polpas e similares, marque a opção acima; acabados de <strong>produção</strong> aparecem sem ela.
+                      Sem itens de produção no filtro atual.
                     </p>
                   )}
                 {estoqueOrigemManual.length > 0 && (
@@ -1242,15 +1204,11 @@ export default function SepararPorLojaPage() {
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-xs text-gray-500 px-1 pt-2 border-t border-gray-100">
-                      <strong>+</strong> adiciona por QR existente ou emite do lote se faltar.
-                    </p>
                   </div>
                 )}
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
-                <label className="block text-sm font-medium text-gray-700">Opcional: unidade já com QR legível</label>
                 <QRScanner
                   onScan={(code) => void processarEscaneamento(code)}
                   label="Ativar leitor de QR (câmera)"

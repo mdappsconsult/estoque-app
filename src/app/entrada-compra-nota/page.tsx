@@ -44,10 +44,39 @@ type LinhaDraft = {
   custoUnitario: string;
   produtoId: string;
   dataValidade: string;
+  ignorarValidade: boolean;
   incluir: boolean;
 };
 
 type Etapa = 'foto' | 'conferencia' | 'resumo';
+
+function gerarChaveLinha(): string {
+  const c = (globalThis as unknown as { crypto?: Crypto }).crypto;
+  if (c && 'randomUUID' in c && typeof (c as Crypto & { randomUUID?: () => string }).randomUUID === 'function') {
+    return (c as Crypto & { randomUUID: () => string }).randomUUID();
+  }
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    c.getRandomValues(bytes);
+    // UUID v4-ish, suficiente para chave de UI.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `k-${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+}
+
+function inferirQuantidadeDaDescricao(descricao: string): number | null {
+  const d = String(descricao || '');
+  // Ex.: "EMBRULHADA 100UN" / "100 UN" / "100und"
+  const m =
+    d.match(/(?:^|\s)(\d{1,6}(?:[.,]\d{1,3})?)\s*(?:un|und|unid|unidade|pcs?|pc)\b/i) ||
+    d.match(/(\d{1,6}(?:[.,]\d{1,3})?)(?:\s*)?(?:un|und|unid|unidade|pcs?|pc)\b/i);
+  if (!m?.[1]) return null;
+  const q = Number.parseFloat(m[1].replace(',', '.'));
+  return Number.isFinite(q) ? q : null;
+}
 
 function produtoExigeValidade(p: Produto | undefined): boolean {
   if (!p) return true;
@@ -211,6 +240,10 @@ export default function EntradaCompraNotaPage() {
     () => linhas.filter((l) => l.incluir && !l.produtoId).length,
     [linhas]
   );
+  const linhasSemQuantidade = useMemo(
+    () => linhas.filter((l) => l.incluir && !String(l.quantidade || '').trim()).length,
+    [linhas]
+  );
 
   /** Inclui produtos já vinculados nas linhas (ex.: cadastro rápido) mesmo fora do filtro de receita na indústria. */
   const produtosOpcoesLinha = useMemo(() => {
@@ -284,20 +317,36 @@ export default function EntradaCompraNotaPage() {
         const draft: LinhaDraft[] = body.extracao.linhas.map((l) => {
           const pid = sugerirProdutoId(produtos, l.ean, l.descricao);
           const p = produtos.find((x) => x.id === pid);
+          const qtdInferida = l.quantidade == null ? inferirQuantidadeDaDescricao(l.descricao) : null;
+          const qtdFinal =
+            l.quantidade != null && Number.isFinite(l.quantidade)
+              ? l.quantidade
+              : qtdInferida != null && Number.isFinite(qtdInferida)
+                ? qtdInferida
+                : null;
           return {
-            key: crypto.randomUUID(),
+            key: gerarChaveLinha(),
             descricaoOcr: l.descricao,
             ean: l.ean,
-            quantidade: l.quantidade != null && Number.isFinite(l.quantidade) ? String(l.quantidade) : '',
+            quantidade: qtdFinal != null ? String(qtdFinal) : '',
             custoUnitario:
               l.valor_unitario != null && Number.isFinite(l.valor_unitario)
                 ? String(l.valor_unitario)
                 : '',
             produtoId: pid,
             dataValidade: sugerirDataValidade(p),
+            ignorarValidade: false,
             incluir: true,
           };
         });
+
+        const semQtd = draft.filter((x) => !String(x.quantidade || '').trim()).length;
+        if (semQtd >= draft.length) {
+          throw new Error(
+            'Não consegui ler a quantidade dos itens nesta foto.\n\nTire outra foto aproximando a área dos produtos e da coluna de QTD (evite reflexo e tremido).'
+          );
+        }
+
         setLinhas(draft);
         setEtapa('conferencia');
       } catch (e: unknown) {
@@ -403,6 +452,7 @@ export default function EntradaCompraNotaPage() {
     atualizarLinha(key, {
       produtoId,
       dataValidade: sugerirDataValidade(p),
+      ignorarValidade: false,
     });
   };
 
@@ -512,7 +562,7 @@ export default function EntradaCompraNotaPage() {
     for (const l of linhas) {
       if (!l.incluir) continue;
       const p = produtos.find((x) => x.id === l.produtoId);
-      if (produtoExigeValidade(p) && !l.dataValidade.trim()) {
+      if (produtoExigeValidade(p) && !l.ignorarValidade && !l.dataValidade.trim()) {
         alert(`Informe a validade para: ${p?.nome || 'produto'}.`);
         return;
       }
@@ -573,7 +623,7 @@ export default function EntradaCompraNotaPage() {
               motivo_sem_nota: semNota ? motivoSemNota.trim() : null,
               local_id: localId,
             },
-            l.dataValidade.trim() || null,
+            l.ignorarValidade ? null : l.dataValidade.trim() || null,
             usuario.id
           );
           ok += 1;
@@ -742,15 +792,15 @@ export default function EntradaCompraNotaPage() {
 
       {etapa === 'conferencia' && (
         <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-gray-600">
                 {modoOcr && (
                   <span className="mr-2 rounded bg-gray-100 px-2 py-0.5 text-xs">OCR: {modoOcr}</span>
                 )}
                 {storagePath && (
-                  <span className="text-xs text-gray-400 truncate max-w-[220px]" title={storagePath}>
-                    Arquivo: {storagePath}
+                  <span className="text-xs text-gray-400 break-all" title={storagePath}>
+                    Arquivo: {storagePath.slice(0, 180)}
                   </span>
                 )}
               </p>
@@ -764,6 +814,15 @@ export default function EntradaCompraNotaPage() {
                 <div>
                   <strong>{linhasSemProduto}</strong> linha(s) sem produto no cadastro. Use <strong>Cadastrar</strong> ou
                   selecione um produto existente antes do resumo.
+                </div>
+              </div>
+            )}
+            {linhasSemQuantidade > 0 && (
+              <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <div>
+                  <strong>{linhasSemQuantidade}</strong> linha(s) sem quantidade reconhecida. O mais seguro é tirar outra
+                  foto; ou preencha manualmente a(s) quantidade(s) antes do resumo.
                 </div>
               </div>
             )}
@@ -806,7 +865,98 @@ export default function EntradaCompraNotaPage() {
             )}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          {/* Mobile-first: cards no celular; tabela no desktop */}
+          <div className="space-y-3 sm:hidden">
+            {linhas.map((l, idx) => {
+              const p = produtos.find((x) => x.id === l.produtoId);
+              const exigeVal = produtoExigeValidade(p);
+              return (
+                <div key={l.key} className="bg-white rounded-xl border border-gray-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm text-gray-800 select-none">
+                      <input
+                        type="checkbox"
+                        checked={l.incluir}
+                        onChange={(e) => atualizarLinha(l.key, { incluir: e.target.checked })}
+                        className="rounded border-gray-300 w-5 h-5"
+                      />
+                      <span className="font-semibold">Linha {idx + 1}</span>
+                    </label>
+                    <span className="text-[11px] text-gray-500 tabular-nums">{l.ean || 'EAN —'}</span>
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-700 whitespace-pre-wrap break-words">{l.descricaoOcr}</div>
+
+                  <div className="mt-3 space-y-2">
+                    <Select
+                      label="Produto (cadastro)"
+                      options={[
+                        { value: '', label: 'Selecione…' },
+                        ...produtosOpcoesLinha.map((pr) => ({ value: pr.id, label: pr.nome })),
+                      ]}
+                      value={l.produtoId}
+                      onChange={(e) => onProdutoLinhaChange(l.key, e.target.value)}
+                    />
+                    {!l.produtoId && l.incluir && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full min-h-[44px]"
+                        onClick={() => abrirCadastroRapido(l.key)}
+                      >
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Cadastrar produto desta linha
+                      </Button>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        label="Qtd"
+                        value={l.quantidade}
+                        onChange={(e) => atualizarLinha(l.key, { quantidade: e.target.value })}
+                        inputMode="decimal"
+                      />
+                      <Input
+                        label="Custo un."
+                        value={l.custoUnitario}
+                        onChange={(e) => atualizarLinha(l.key, { custoUnitario: e.target.value })}
+                        inputMode="decimal"
+                      />
+                    </div>
+
+                    {exigeVal ? (
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={l.ignorarValidade}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              atualizarLinha(l.key, { ignorarValidade: checked, dataValidade: checked ? '' : l.dataValidade });
+                            }}
+                            className="rounded border-gray-300 w-5 h-5"
+                          />
+                          Sem validade
+                        </label>
+                        {!l.ignorarValidade && (
+                          <Input
+                            label="Validade"
+                            type="date"
+                            value={l.dataValidade}
+                            onChange={(e) => atualizarLinha(l.key, { dataValidade: e.target.value })}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-400">Validade: —</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden sm:block bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-left">
@@ -874,11 +1024,30 @@ export default function EntradaCompraNotaPage() {
                       </td>
                       <td className="p-2">
                         {exigeVal ? (
-                          <Input
-                            type="date"
-                            value={l.dataValidade}
-                            onChange={(e) => atualizarLinha(l.key, { dataValidade: e.target.value })}
-                          />
+                          <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-xs text-gray-700">
+                              <input
+                                type="checkbox"
+                                checked={l.ignorarValidade}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  atualizarLinha(l.key, {
+                                    ignorarValidade: checked,
+                                    dataValidade: checked ? '' : l.dataValidade,
+                                  });
+                                }}
+                                className="rounded border-gray-300"
+                              />
+                              Sem validade
+                            </label>
+                            {!l.ignorarValidade && (
+                              <Input
+                                type="date"
+                                value={l.dataValidade}
+                                onChange={(e) => atualizarLinha(l.key, { dataValidade: e.target.value })}
+                              />
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">—</span>
                         )}

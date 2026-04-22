@@ -16,7 +16,7 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import { aceitarViagem, iniciarViagem } from '@/lib/services/viagens';
 import { supabase } from '@/lib/supabase';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { errMessage } from '@/lib/errMessage';
 
 interface ViagemRow {
@@ -128,52 +128,96 @@ export default function ViagemAceitePage() {
   const [remessaExpandida, setRemessaExpandida] = useState<Record<string, string | null>>({});
   /** Bloco «Histórico» (IN_TRANSIT / COMPLETED) recolhido por padrão */
   const [historicoAberto, setHistoricoAberto] = useState(false);
+  /** Quantas viagens do histórico exibir / buscar remessas (passo 5) */
+  const [historicoMostrarCount, setHistoricoMostrarCount] = useState(5);
+  const [loadingHistoricoTrans, setLoadingHistoricoTrans] = useState(false);
 
-  const carregarTransferencias = useCallback(async () => {
-    if (viagens.length === 0) {
-      setTransMap({});
-      return;
-    }
-    setLoadingTrans(true);
+  const transMapRef = useRef<Record<string, TransRow[]>>({});
+  transMapRef.current = transMap;
+
+  const carregarTransferenciasPorViagemIds = useCallback(async (viagemIds: string[], modo: 'pendente' | 'historico') => {
+    const unique = [...new Set(viagemIds)];
+    const missing = unique.filter((id) => !(id in transMapRef.current));
+    if (missing.length === 0) return;
+
+    if (modo === 'pendente') setLoadingTrans(true);
+    else setLoadingHistoricoTrans(true);
+
     try {
       const settled = await Promise.allSettled(
-        viagens.map(async (v) => {
+        missing.map(async (vid) => {
           const { data, error } = await supabase
             .from('transferencias')
             .select(SELECT_TRANS_VIAGEM)
-            .eq('viagem_id', v.id);
+            .eq('viagem_id', vid);
           if (error) throw error;
-          return [v.id, (data || []) as unknown as TransRow[]] as const;
+          return [vid, (data || []) as unknown as TransRow[]] as const;
         })
       );
-      const map: Record<string, TransRow[]> = {};
-      for (let i = 0; i < settled.length; i++) {
-        const r = settled[i];
-        const vid = viagens[i].id;
-        if (r.status === 'fulfilled') {
-          const [id, rows] = r.value;
-          map[id] = rows;
-        } else {
-          map[vid] = [];
-          console.warn(
-            '[viagem-aceite] Falha ao carregar remessas da viagem',
-            vid,
-            errMessage(r.reason, String(r.reason))
-          );
+      setTransMap((prev) => {
+        const next = { ...prev };
+        for (let i = 0; i < settled.length; i++) {
+          const r = settled[i];
+          const vid = missing[i];
+          if (r.status === 'fulfilled') {
+            const [, rows] = r.value;
+            next[vid] = rows;
+          } else {
+            next[vid] = [];
+            console.warn(
+              '[viagem-aceite] Falha ao carregar remessas da viagem',
+              vid,
+              errMessage(r.reason, String(r.reason))
+            );
+          }
         }
-      }
-      setTransMap(map);
+        return next;
+      });
     } catch (e: unknown) {
-      console.warn('[viagem-aceite] carregarTransferencias:', errMessage(e, String(e)));
-      setTransMap({});
+      console.warn('[viagem-aceite] carregarTransferenciasPorViagemIds:', errMessage(e, String(e)));
     } finally {
-      setLoadingTrans(false);
+      if (modo === 'pendente') setLoadingTrans(false);
+      else setLoadingHistoricoTrans(false);
     }
-  }, [viagens]);
+  }, []);
+
+  const viagensPendentes = useMemo(
+    () => viagens.filter((v) => v.status === 'PENDING' || v.status === 'ACCEPTED'),
+    [viagens]
+  );
+  const viagensHist = useMemo(
+    () => viagens.filter((v) => v.status === 'IN_TRANSIT' || v.status === 'COMPLETED'),
+    [viagens]
+  );
+  const viagensPendentesIdsKey = useMemo(
+    () => viagensPendentes.map((v) => v.id).sort().join('|'),
+    [viagensPendentes]
+  );
+  const viagensHistIdsKey = useMemo(
+    () => viagensHist.map((v) => v.id).join('|'),
+    [viagensHist]
+  );
 
   useEffect(() => {
-    void carregarTransferencias();
-  }, [carregarTransferencias]);
+    if (viagensPendentes.length === 0) return;
+    void carregarTransferenciasPorViagemIds(
+      viagensPendentes.map((v) => v.id),
+      'pendente'
+    );
+  }, [viagensPendentesIdsKey, carregarTransferenciasPorViagemIds, viagensPendentes]);
+
+  useEffect(() => {
+    if (!historicoAberto || viagensHist.length === 0) return;
+    const n = Math.min(historicoMostrarCount, viagensHist.length);
+    const sliceIds = viagensHist.slice(0, n).map((v) => v.id);
+    void carregarTransferenciasPorViagemIds(sliceIds, 'historico');
+  }, [
+    historicoAberto,
+    historicoMostrarCount,
+    viagensHistIdsKey,
+    carregarTransferenciasPorViagemIds,
+    viagensHist,
+  ]);
 
   const toggleViagemDetalhes = (viagemId: string) => {
     setViagemExpandida((prev) => ({ ...prev, [viagemId]: !prev[viagemId] }));
@@ -268,11 +312,6 @@ export default function ViagemAceitePage() {
     );
   }
 
-  const viagensPendentes = viagens.filter((v) => v.status === 'PENDING' || v.status === 'ACCEPTED');
-  const viagensHist = viagens.filter((v) => v.status === 'IN_TRANSIT' || v.status === 'COMPLETED');
-  const perfilMotorista =
-    usuario?.perfil === 'DRIVER' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
-
   return (
     <div className="max-w-lg mx-auto">
       <div className="flex items-center gap-3 mb-6">
@@ -281,9 +320,6 @@ export default function ViagemAceitePage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Viagens / Aceite</h1>
-          <p className="text-sm text-gray-500">
-            Confira origem, lojas de destino e o que vai em cada remessa antes de aceitar ou iniciar.
-          </p>
         </div>
       </div>
 
@@ -325,27 +361,9 @@ export default function ViagemAceitePage() {
         title={
           confirmModal?.modo === 'aceitar_iniciar' ? 'Aceitar viagem?' : 'Iniciar viagem?'
         }
-        subtitle={
-          confirmModal?.modo === 'aceitar_iniciar'
-            ? 'As remessas vão direto para em trânsito; a loja vê no Recebimento.'
-            : 'Só use se a viagem ficou aceita sem sair (fluxo antigo). As lojas passam a ver em trânsito.'
-        }
         size="sm"
       >
         <div className="px-6 py-4 space-y-4">
-          <p className="text-sm text-gray-600 leading-relaxed">
-            {confirmModal?.modo === 'aceitar_iniciar' ? (
-              <>
-                Você será registrado como motorista; a viagem e as remessas passam para{' '}
-                <strong>em trânsito</strong> neste passo. As lojas de destino podem usar o Recebimento na hora.
-              </>
-            ) : (
-              <>
-                As remessas desta viagem passam para <strong>em trânsito</strong> e as lojas de destino
-                podem preparar o recebimento.
-              </>
-            )}
-          </p>
           <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2">
             <Button
               type="button"
@@ -382,26 +400,6 @@ export default function ViagemAceitePage() {
         <div className="text-center py-10 text-gray-400 px-2">
           <Truck className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p className="font-medium text-gray-600">Nenhuma viagem pendente</p>
-          {perfilMotorista && (
-            <div className="mt-4 mx-auto max-w-md text-left rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm text-gray-700">
-              <p className="font-medium text-gray-800">Motorista</p>
-              <p className="mt-2 leading-relaxed">
-                Ao <strong>aceitar</strong> uma viagem nova, o sistema já coloca tudo <strong>em trânsito</strong> e a
-                loja vê no <strong>Recebimento</strong>. Envios em andamento ficam no <strong>Histórico</strong> abaixo
-                (toque para abrir).
-              </p>
-              <p className="mt-2 leading-relaxed">
-                Se aparecer <strong>Iniciar viagem</strong>, é remessa antiga que ficou só «aceita»: use esse botão ou
-                peça ao gestor. Só quem aceitou com o mesmo login pode iniciar.
-              </p>
-              {viagensHist.some((v) => v.status === 'IN_TRANSIT') && (
-                <p className="mt-2 text-xs text-gray-600">
-                  Há viagem em trânsito no histórico: confira se a loja já consegue selecionar essa entrega no
-                  Recebimento.
-                </p>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -596,15 +594,24 @@ export default function ViagemAceitePage() {
         <div className="mt-8 rounded-xl border border-gray-200 bg-white overflow-hidden">
           <button
             type="button"
-            onClick={() => setHistoricoAberto((aberto) => !aberto)}
+            onClick={() => {
+              setHistoricoAberto((aberto) => {
+                if (!aberto) {
+                  setHistoricoMostrarCount(Math.min(5, viagensHist.length));
+                }
+                return !aberto;
+              });
+            }}
             className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
             aria-expanded={historicoAberto}
           >
             <div className="min-w-0">
               <p className="text-base font-semibold text-gray-800">Histórico</p>
               <p className="text-xs text-gray-500 mt-0.5">
-                {viagensHist.length} viagem(ns) em trânsito ou concluídas
-                {!historicoAberto ? ' · toque para abrir' : ''}
+                {viagensHist.length} viagem(ns)
+                {historicoAberto
+                  ? ` · mostrando ${Math.min(historicoMostrarCount, viagensHist.length)}`
+                  : ''}
               </p>
             </div>
             {historicoAberto ? (
@@ -615,18 +622,15 @@ export default function ViagemAceitePage() {
           </button>
           {historicoAberto && (
             <div className="border-t border-gray-100 px-3 pb-3 pt-1 space-y-2">
-              {viagensHist.slice(0, 10).map((v) => {
-                const trans = transMap[v.id] || [];
+              {viagensHist.slice(0, Math.min(historicoMostrarCount, viagensHist.length)).map((v) => {
+                const trans = transMap[v.id] ?? [];
                 const totalItens = trans.reduce(
                   (acc, t) => acc + (t.transferencia_itens?.length || 0),
                   0
                 );
                 const idCurto = v.id.slice(0, 8).toUpperCase();
-                const remessasNaoTransito =
-                  v.status === 'IN_TRANSIT' &&
-                  trans.length > 0 &&
-                  trans.some((t) => t.status !== 'IN_TRANSIT');
-                const viagemSemRemessa = trans.length === 0;
+                const viagemSemRemessa = v.id in transMap && trans.length === 0;
+                const aguardandoTrans = !(v.id in transMap);
                 return (
                   <div
                     key={v.id}
@@ -634,22 +638,22 @@ export default function ViagemAceitePage() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-700">Viagem · {idCurto}</p>
-                      <p className="text-xs text-gray-500 mt-0.5 truncate">
-                        Lojas: {resumoDestinos(trans)}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {trans.length} remessa(s) · {totalItens} unidades ·{' '}
-                        {new Date(v.created_at).toLocaleString('pt-BR')}
-                      </p>
+                      {aguardandoTrans ? (
+                        <p className="text-xs text-gray-400 mt-0.5">Carregando remessas…</p>
+                      ) : (
+                        <p className="text-xs text-gray-500 mt-0.5 truncate">
+                          Lojas: {resumoDestinos(trans)}
+                        </p>
+                      )}
+                      {!aguardandoTrans && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {trans.length} remessa(s) · {totalItens} unidades ·{' '}
+                          {new Date(v.created_at).toLocaleString('pt-BR')}
+                        </p>
+                      )}
                       {viagemSemRemessa && (
                         <p className="text-xs text-amber-800 mt-1.5 rounded-md bg-amber-50 border border-amber-100 px-2 py-1">
                           Sem remessa vinculada — a loja não verá este envio no Recebimento.
-                        </p>
-                      )}
-                      {remessasNaoTransito && (
-                        <p className="text-xs text-amber-800 mt-1.5 rounded-md bg-amber-50 border border-amber-100 px-2 py-1">
-                          Atenção: a viagem está em trânsito, mas há remessa com outro status — a loja pode não ver
-                          tudo no Recebimento. Fale com suporte.
                         </p>
                       )}
                     </div>
@@ -659,6 +663,26 @@ export default function ViagemAceitePage() {
                   </div>
                 );
               })}
+              {historicoMostrarCount < viagensHist.length && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full mt-1"
+                  disabled={loadingHistoricoTrans}
+                  onClick={() =>
+                    setHistoricoMostrarCount((c) => Math.min(c + 5, viagensHist.length))
+                  }
+                >
+                  {loadingHistoricoTrans ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      Carregando…
+                    </>
+                  ) : (
+                    `Carregar mais (${viagensHist.length - historicoMostrarCount} restantes)`
+                  )}
+                </Button>
+              )}
             </div>
           )}
         </div>

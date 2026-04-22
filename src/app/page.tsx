@@ -2,7 +2,7 @@
 
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
-  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer, Factory,
+  ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer,
   FileImage,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -38,7 +38,6 @@ const features: HomeFeature[] = [
   { title: 'Viagem / Aceite', description: 'Aceite do motorista.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/viagem-aceite' },
   { title: 'Receber Entrega', description: 'Conferência por QR.', icon: Store, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/recebimento' },
   { title: 'Transf. Loja → Loja', description: 'Emergencial com aceite.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/transferencia-loja' },
-  { title: 'Aceites Pendentes', description: 'Aceitar/recusar.', icon: ClipboardCheck, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/aceites-pendentes' },
   { title: 'Baixa Diária', description: 'Baixa por QR.', icon: Archive, iconBg: 'bg-orange-100', iconColor: 'text-orange-600', href: '/baixa-diaria' },
   { title: 'Declarar estoque na loja', description: 'Informe quantas unidades você tem de cada produto.', icon: ClipboardCheck, iconBg: 'bg-purple-100', iconColor: 'text-purple-600', href: '/contagem-loja' },
   { title: 'Perdas / Descarte', description: 'Descarte com motivo.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/perdas' },
@@ -60,14 +59,6 @@ const features: HomeFeature[] = [
   },
   { title: 'Tipos de Embalagem', description: 'Caixa, balde, pote etc.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/embalagens' },
   { title: 'Reposição de estoque por loja', description: 'Mínimos por loja (só produtos de escopo loja).', icon: Store, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/cadastros/reposicao-loja' },
-  {
-    title: 'Cadastros — Indústria',
-    description: 'O que mudou hoje no banco para as lojas; links para editar.',
-    icon: Factory,
-    iconBg: 'bg-violet-100',
-    iconColor: 'text-violet-700',
-    href: '/cadastros/industria',
-  },
   { title: 'Locais', description: 'Indústria e lojas.', icon: MapPin, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/locais' },
   { title: 'Usuários', description: 'Equipe e perfis.', icon: Users, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/usuarios' },
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
@@ -90,7 +81,6 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/etiquetas',
         '/separar-por-loja',
         '/viagem-aceite',
-        '/aceites-pendentes',
         '/recebimento',
       ],
     },
@@ -100,7 +90,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
     },
   ],
   MANAGER: [
@@ -112,7 +102,6 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/etiquetas',
         '/separar-por-loja',
         '/viagem-aceite',
-        '/aceites-pendentes',
         '/recebimento',
         '/qrcode',
       ],
@@ -123,17 +112,17 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Cadastros',
-      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/industria', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
+      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/configuracoes/perfil', '/configuracoes/impressoras'],
     },
   ],
   OPERATOR_WAREHOUSE: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/cadastros/industria', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
     },
     {
       title: 'Transporte',
-      items: ['/viagem-aceite', '/aceites-pendentes'],
+      items: ['/viagem-aceite'],
     },
     {
       title: 'Conferência',
@@ -143,17 +132,17 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE_DRIVER: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/cadastros/industria', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/etiquetas', '/separar-por-loja', '/qrcode'],
     },
     {
       title: 'Transporte',
-      items: ['/viagem-aceite', '/aceites-pendentes', '/recebimento'],
+      items: ['/viagem-aceite', '/recebimento'],
     },
   ],
   OPERATOR_STORE: [
     {
       title: 'Operação da Loja',
-      items: ['/recebimento', '/transferencia-loja', '/aceites-pendentes', '/contagem-loja', '/qrcode'],
+      items: ['/recebimento', '/transferencia-loja', '/contagem-loja', '/qrcode'],
     },
     {
       title: 'Conferência',
@@ -163,7 +152,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   DRIVER: [
     {
       title: 'Transporte',
-      items: ['/viagem-aceite', '/aceites-pendentes'],
+      items: ['/viagem-aceite'],
     },
     {
       title: 'Conferência',

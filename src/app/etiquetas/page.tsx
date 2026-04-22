@@ -12,7 +12,11 @@ import {
   buscarOpcoesRemessaSepParaEtiquetas,
   type OpcaoRemessaSepEtiquetas,
 } from '@/lib/services/etiquetas-opcoes-remessa';
-import { listarItemIdsRemessaSepOrdenados, upsertEtiquetasSeparacaoLoja } from '@/lib/services/etiquetas';
+import {
+  aplicarMetadadosLoteProducaoNasRows,
+  listarItemIdsRemessaSepOrdenados,
+  upsertEtiquetasSeparacaoLoja,
+} from '@/lib/services/etiquetas';
 import {
   abrirPreviaEtiquetasEmJanela,
   confirmarImpressao,
@@ -70,6 +74,9 @@ function dataValidadeParaImpressaoEtiqueta(e: EtiquetaRow): string {
   if (ymd.startsWith('2999')) return '';
   return e.data_validade;
 }
+
+/** Primeira tela e cada «Carregar mais» na lista de remessas SEP. */
+const REMESSAS_SEP_POR_PAGINA = 7;
 
 /** Máximo de etiquetas carregadas por remessa selecionada (uma viagem). */
 const MAX_ETIQUETAS_POR_REMESSA = 6000;
@@ -200,7 +207,7 @@ async function carregarLinhasFantasmaItensParaSep(ids: string[], lote: string): 
       out.push(itemRowFantasmaParaEtiquetaRowSep(row as Record<string, unknown>, lote));
     }
   }
-  return out;
+  return aplicarMetadadosLoteProducaoNasRows(out, supabase);
 }
 
 /**
@@ -310,6 +317,12 @@ export default function EtiquetasPage() {
   }, []);
 
   const loginIndustriaEtiquetas = usuarioIndustriaSemConsultaEstoque(usuario);
+  /** Qualquer operador de indústria: remessas SEP só da origem do `local_padrao_id` (não alternar para Estoque central). */
+  const perfilOperadorIndustria =
+    usuario?.perfil === 'OPERATOR_WAREHOUSE' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
+  const etiquetasSomenteOrigemLocalPadrao = perfilOperadorIndustria || loginIndustriaEtiquetas;
+  const ocultarAtualizarListaRemessas =
+    etiquetasSomenteOrigemLocalPadrao && Boolean(usuario?.local_padrao_id?.trim());
   const matrizBootstrapRef = useRef(false);
   const [matrizOrigemEtiquetas, setMatrizOrigemEtiquetas] = useState<MatrizOrigemEtiquetas>(() => {
     if (typeof window === 'undefined') return 'estoque';
@@ -317,7 +330,7 @@ export default function EtiquetasPage() {
   });
 
   useEffect(() => {
-    if (loginIndustriaEtiquetas) return;
+    if (etiquetasSomenteOrigemLocalPadrao) return;
     if (matrizBootstrapRef.current) return;
     if (locais.length === 0) return;
     if (lerMatrizEtiquetasSession()) {
@@ -329,16 +342,37 @@ export default function EtiquetasPage() {
     if (lp && lp === industriaId) setMatrizOrigemEtiquetas('industria');
     else if (lp && lp === estoqueId) setMatrizOrigemEtiquetas('estoque');
     matrizBootstrapRef.current = true;
-  }, [loginIndustriaEtiquetas, usuario?.local_padrao_id, locais]);
+  }, [etiquetasSomenteOrigemLocalPadrao, usuario?.local_padrao_id, locais]);
 
-  const [opcoesRemessa, setOpcoesRemessa] = useState<OpcaoRemessaSepEtiquetas[]>([]);
+  const [opcoesRemessaTodas, setOpcoesRemessaTodas] = useState<OpcaoRemessaSepEtiquetas[]>([]);
+  /** Quantas remessas mostrar no `<select>` (aumenta com «Carregar mais»). */
+  const [limiteRemessasExibidas, setLimiteRemessasExibidas] = useState(REMESSAS_SEP_POR_PAGINA);
   const [carregandoOpcoesRemessa, setCarregandoOpcoesRemessa] = useState(true);
   const [erroOpcoesRemessa, setErroOpcoesRemessa] = useState('');
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
 
+  const { opcoesRemessa, haMaisRemessasNaoExibidas } = useMemo(() => {
+    const todas = opcoesRemessaTodas;
+    if (todas.length === 0) {
+      return { opcoesRemessa: [] as OpcaoRemessaSepEtiquetas[], haMaisRemessasNaoExibidas: false };
+    }
+    let lim = Math.min(limiteRemessasExibidas, todas.length);
+    if (loteSelecionado) {
+      const idx = todas.findIndex((o) => o.lote === loteSelecionado);
+      if (idx >= 0) {
+        lim = Math.max(lim, idx + 1);
+      }
+    }
+    const opcoesRemessa = todas.slice(0, lim);
+    return {
+      opcoesRemessa,
+      haMaisRemessasNaoExibidas: lim < todas.length,
+    };
+  }, [opcoesRemessaTodas, limiteRemessasExibidas, loteSelecionado]);
+
   const metaPorViagemId = useMemo(() => {
     const m = new Map<string, MetaTransferenciaRemessa>();
-    for (const o of opcoesRemessa) {
+    for (const o of opcoesRemessaTodas) {
       const vid = parseViagemIdDeLoteSep(o.lote);
       if (!vid || !o.origemNome || !o.destinoNome) continue;
       m.set(vid, {
@@ -350,7 +384,7 @@ export default function EtiquetasPage() {
       });
     }
     return m;
-  }, [opcoesRemessa]);
+  }, [opcoesRemessaTodas]);
 
   /** Remessa SEP-…: loja de destino (ou origem) para não sair «—» no 60×30 e no bloco local do 60×60. */
   const nomeLojaOuLocalRemessa = useMemo(() => {
@@ -425,7 +459,11 @@ export default function EtiquetasPage() {
 
     void (async () => {
       try {
-        const idsTransfer = await listarItemIdsRemessaSepOrdenados(lote);
+        const vidSep = parseViagemIdDeLoteSep(lote);
+        const destinoLocalIdLista = vidSep ? metaPorViagemId.get(vidSep)?.destinoLocalId ?? null : null;
+        const idsTransfer = await listarItemIdsRemessaSepOrdenados(lote, supabase, {
+          destinoLocalId: destinoLocalIdLista,
+        });
         if (cancelled) return;
 
         if (idsTransfer == null) {
@@ -481,7 +519,7 @@ export default function EtiquetasPage() {
     return () => {
       cancelled = true;
     };
-  }, [loteSelecionado, etiquetas]);
+  }, [loteSelecionado, etiquetas, metaPorViagemId]);
 
   const [formatoImpressao, setFormatoImpressao] = useState<FormatoEtiqueta>('60x30');
   /** Indústria: sempre 60×60 + Pi; estoque: 60×30 navegador. */
@@ -501,12 +539,12 @@ export default function EtiquetasPage() {
    * - Demais: seletor Estoque × Indústria (`matrizOrigemEtiquetas`) + resolução por nome em `locais`.
    */
   const origemIdOpcoesRemessa = useMemo(() => {
-    if (loginIndustriaEtiquetas) {
+    if (etiquetasSomenteOrigemLocalPadrao) {
       const id = usuario?.local_padrao_id?.trim();
       return id || undefined;
     }
     return origemIdParaMatrizEtiquetas(matrizOrigemEtiquetas, idsMatrizRemessa);
-  }, [loginIndustriaEtiquetas, usuario?.local_padrao_id, matrizOrigemEtiquetas, idsMatrizRemessa]);
+  }, [etiquetasSomenteOrigemLocalPadrao, usuario?.local_padrao_id, matrizOrigemEtiquetas, idsMatrizRemessa]);
 
   /** Estoque: 60×30; indústria: 60×60 (sem restaurar formato salvo — evita 60×60 no estoque após uso do Leonardo no mesmo aparelho). */
   useLayoutEffect(() => {
@@ -535,36 +573,44 @@ export default function EtiquetasPage() {
   const carregarOpcoesRemessa = useCallback(async () => {
     setCarregandoOpcoesRemessa(true);
     setErroOpcoesRemessa('');
+    if (etiquetasSomenteOrigemLocalPadrao && !usuario?.local_padrao_id?.trim()) {
+      setOpcoesRemessaTodas([]);
+      setLimiteRemessasExibidas(REMESSAS_SEP_POR_PAGINA);
+      setCarregandoOpcoesRemessa(false);
+      return;
+    }
     try {
       const opcoes = await buscarOpcoesRemessaSepParaEtiquetas({
         origemId: origemIdOpcoesRemessa,
-        /** Indústria (Leonardo / logins 60×60): todas as remessas SEP da origem (`local_padrao_id`), como nas demais telas da indústria. */
+        /** Operador indústria / logins 60×60: todas as remessas SEP da origem (`local_padrao_id`). */
       });
-      setOpcoesRemessa(loginIndustriaEtiquetas ? opcoes.slice(0, 10) : opcoes);
+      setOpcoesRemessaTodas(opcoes);
+      setLimiteRemessasExibidas(REMESSAS_SEP_POR_PAGINA);
     } catch (err: unknown) {
       setErroOpcoesRemessa(err instanceof Error ? err.message : 'Não foi possível listar remessas');
-      setOpcoesRemessa([]);
+      setOpcoesRemessaTodas([]);
+      setLimiteRemessasExibidas(REMESSAS_SEP_POR_PAGINA);
     } finally {
       setCarregandoOpcoesRemessa(false);
     }
-  }, [loginIndustriaEtiquetas, origemIdOpcoesRemessa]);
+  }, [etiquetasSomenteOrigemLocalPadrao, origemIdOpcoesRemessa, usuario?.local_padrao_id]);
 
   useEffect(() => {
     void carregarOpcoesRemessa();
   }, [carregarOpcoesRemessa]);
 
   useEffect(() => {
-    if (opcoesRemessa.length === 0) {
+    if (opcoesRemessaTodas.length === 0) {
       setLoteSelecionado(null);
       return;
     }
     setLoteSelecionado((prev) => {
-      if (prev && opcoesRemessa.some((o) => o.lote === prev)) return prev;
+      if (prev && opcoesRemessaTodas.some((o) => o.lote === prev)) return prev;
       const salva = lerUltimaRemessaPersistida();
-      if (salva && opcoesRemessa.some((o) => o.lote === salva.lote)) return salva.lote;
+      if (salva && opcoesRemessaTodas.some((o) => o.lote === salva.lote)) return salva.lote;
       return null;
     });
-  }, [opcoesRemessa]);
+  }, [opcoesRemessaTodas]);
 
   function rotuloOpcaoRemessaNoTopo(o: OpcaoRemessaSepEtiquetas): string {
     if (o.origemNome && o.destinoNome) {
@@ -590,10 +636,11 @@ export default function EtiquetasPage() {
       const vid = parseViagemIdDeLoteSep(ordenada[0]?.lote);
       const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
       const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(ordenada, destinoLocalId);
+      const ordenadaMeta = await aplicarMetadadosLoteProducaoNasRows(ordenada, supabase);
 
       const sucesso = await imprimirEtiquetasEmJobUnico(
         rowsParaEtiquetasImpressao(
-          ordenada,
+          ordenadaMeta,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
           numerosMap
@@ -638,9 +685,10 @@ export default function EtiquetasPage() {
       const vid = parseViagemIdDeLoteSep(lista[0]?.lote);
       const destinoLocalId = vid ? metaPorViagemId.get(vid)?.destinoLocalId ?? null : null;
       const numerosMap = await garantirNumerosSequenciaBaldeAntesImpressao(lista, destinoLocalId);
+      const listaMeta = await aplicarMetadadosLoteProducaoNasRows(lista, supabase);
 
       const etiquetas = rowsParaEtiquetasImpressao(
-        lista,
+        listaMeta,
         usuario?.nome || 'OPERADOR',
         nomeLojaOuLocalRemessa,
         numerosMap
@@ -673,8 +721,9 @@ export default function EtiquetasPage() {
       try {
         const ordenada = prepararListaMesmaOrdemImpressao(lista);
         /** Só leitura: não chama upsert/RPC no Supabase (evita falha com RLS ou login sem escrita em `etiquetas`). Imprimir remessa continua gravando números antes da folha. */
+        const ordenadaMeta = await aplicarMetadadosLoteProducaoNasRows(ordenada, supabase);
         const payload = rowsParaEtiquetasImpressao(
-          ordenada,
+          ordenadaMeta,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
           null
@@ -742,7 +791,6 @@ export default function EtiquetasPage() {
                     onClick={() => void previsualizarEtiquetas(linhasRemessa)}
                     disabled={previsualizando || printing}
                     className="w-full sm:w-auto"
-                    title="Abre uma nova aba com o layout exato antes de imprimir"
                   >
                     {previsualizando ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -770,7 +818,6 @@ export default function EtiquetasPage() {
                     onClick={() => void previsualizarEtiquetas(linhasRemessa)}
                     disabled={previsualizando || printing}
                     className="w-full sm:w-auto border-emerald-800/40 text-emerald-950"
-                    title="Mesmo HTML enviado à Zebra — conferir antes de imprimir"
                   >
                     {previsualizando ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -812,11 +859,23 @@ export default function EtiquetasPage() {
         </p>
       )}
       <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-        {loginIndustriaEtiquetas ? (
-          <p className="text-xs text-gray-700 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-            <span className="font-semibold text-gray-900">Origem:</span> somente remessas da{' '}
-            <strong>Indústria</strong> — esta conta não alterna para o armazém central.
-          </p>
+        {etiquetasSomenteOrigemLocalPadrao ? (
+          usuario?.local_padrao_id?.trim() ? (
+            <p className="text-xs text-gray-700 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+              <span className="font-semibold text-gray-900">Origem:</span> somente remessas com saída do{' '}
+              <strong>seu local</strong> (indústria / armazém vinculado ao usuário) — não é possível alternar para o
+              estoque central nesta conta.
+            </p>
+          ) : (
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Para listar apenas remessas da <strong>indústria</strong>, defina o <strong>local padrão</strong> do
+              operador em{' '}
+              <Link href="/cadastros/usuarios" className="text-red-700 font-medium underline underline-offset-2">
+                Cadastros → Usuários
+              </Link>{' '}
+              e entre de novo.
+            </p>
+          )
         ) : (
           <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 border border-slate-100 px-3 py-2.5">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -863,7 +922,7 @@ export default function EtiquetasPage() {
             <select
               value={loteSelecionado ?? ''}
               onChange={(ev) => setLoteSelecionado(ev.target.value || null)}
-              disabled={carregandoOpcoesRemessa || opcoesRemessa.length === 0}
+              disabled={carregandoOpcoesRemessa || opcoesRemessaTodas.length === 0}
               className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white disabled:bg-gray-100"
               aria-label="Selecionar remessa"
             >
@@ -876,7 +935,18 @@ export default function EtiquetasPage() {
                 </option>
               ))}
             </select>
-            {!loginIndustriaEtiquetas && (
+            {haMaisRemessasNaoExibidas && (
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={carregandoOpcoesRemessa}
+                onClick={() => setLimiteRemessasExibidas((n) => n + REMESSAS_SEP_POR_PAGINA)}
+              >
+                Carregar mais
+              </Button>
+            )}
+            {!ocultarAtualizarListaRemessas && (
               <Button
                 type="button"
                 variant="outline"
@@ -899,29 +969,32 @@ export default function EtiquetasPage() {
             )}
           </div>
         </label>
+        {!carregandoOpcoesRemessa && opcoesRemessaTodas.length > 0 && (
+          <p className="text-xs text-gray-500">
+            Mostrando {opcoesRemessa.length} de {opcoesRemessaTodas.length} remessa{opcoesRemessaTodas.length === 1 ? '' : 's'}
+            {haMaisRemessasNaoExibidas ? ' — use Carregar mais para as anteriores.' : '.'}
+          </p>
+        )}
         {erroOpcoesRemessa && (
           <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{erroOpcoesRemessa}</p>
         )}
-        {!carregandoOpcoesRemessa && opcoesRemessa.length === 0 && (
+        {!carregandoOpcoesRemessa && opcoesRemessaTodas.length === 0 && (
           <p className="text-xs text-gray-600">
-            {loginIndustriaEtiquetas && !usuario?.local_padrao_id?.trim() ? (
+            {etiquetasSomenteOrigemLocalPadrao && !usuario?.local_padrao_id?.trim() ? (
               <>
-                Para listar só remessas geradas pela <strong>indústria</strong>, defina o{' '}
-                <strong>local padrão</strong> (warehouse da indústria) em{' '}
+                Com o perfil de indústria, a lista depende do <strong>local padrão</strong> cadastrado. Ajuste em{' '}
                 <Link href="/cadastros/usuarios" className="text-red-600 underline">
                   Cadastros → Usuários
                 </Link>{' '}
                 e entre de novo.
               </>
-            ) : loginIndustriaEtiquetas ? (
+            ) : etiquetasSomenteOrigemLocalPadrao ? (
               <>
-                Nenhuma remessa <code className="text-[10px]">SEP-…</code> da indústria <strong>criada por este login</strong>{' '}
-                (origem no seu local). Remessas registradas por outro usuário ou pelo armazém central não aparecem aqui.
-                Registre em{' '}
+                Nenhuma remessa <code className="text-[10px]">SEP-…</code> com origem no seu local. Registre em{' '}
                 <Link href="/separar-por-loja" className="text-red-600 underline">
                   Separar por Loja
                 </Link>{' '}
-                com o mesmo usuário para listar.
+                a partir deste armazém.
               </>
             ) : origemIdOpcoesRemessa ? (
               <>
@@ -1017,16 +1090,8 @@ export default function EtiquetasPage() {
         !mesclandoLinhasSep &&
         !erroQueryEtiquetas &&
         linhasRemessa.length > 0 && (
-        <p className="mb-4 text-sm text-gray-600 rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-3">
-          <strong>{linhasRemessa.length}</strong> etiqueta{linhasRemessa.length === 1 ? '' : 's'} — mesma quantidade de
-          unidades registradas na separação matriz → loja para este lote <code className="text-[11px]">SEP-…</code>{' '}
-          (cada QR da remessa). Use <strong>Ver prévia</strong> ou <strong>Imprimir remessa</strong> no topo; a prévia
-          não grava no banco; ao imprimir, grava em <code className="text-[11px]">etiquetas</code> e sequência de balde
-          quando aplicável. Registro em{' '}
-          <Link href="/separar-por-loja" className="text-red-700 font-medium underline underline-offset-2">
-            Separar por Loja
-          </Link>
-          .
+        <p className="mb-4 text-sm text-gray-700 rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-3">
+          <strong>{linhasRemessa.length}</strong> etiqueta{linhasRemessa.length === 1 ? '' : 's'}
         </p>
       )}
     </div>
