@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Eye, QrCode, Loader2, Printer, RefreshCw, Server } from 'lucide-react';
+import { Eye, QrCode, Loader2, Printer, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
@@ -236,7 +236,8 @@ function rowsParaEtiquetasImpressao(
   lista: EtiquetaRow[],
   usuarioNome: string,
   nomeLojaOuLocal?: string | null,
-  numerosPorItemId?: Map<string, number | null> | null
+  numerosPorItemId?: Map<string, number | null> | null,
+  dataCriacaoRemessaIso?: string | null
 ): EtiquetaParaImpressao[] {
   const loja = (nomeLojaOuLocal && String(nomeLojaOuLocal).trim()) || undefined;
   return lista.map((e) => {
@@ -260,6 +261,7 @@ function rowsParaEtiquetasImpressao(
       sequenciaNoLote: e.sequencia_no_lote_producao ?? null,
       numBaldesLoteProducao: e.num_baldes_lote_producao ?? null,
       dataLoteProducaoIso: e.data_lote_producao ?? null,
+      dataCriacaoRemessaIso: dataCriacaoRemessaIso?.trim() || null,
     };
   });
 }
@@ -321,8 +323,6 @@ export default function EtiquetasPage() {
   const perfilOperadorIndustria =
     usuario?.perfil === 'OPERATOR_WAREHOUSE' || usuario?.perfil === 'OPERATOR_WAREHOUSE_DRIVER';
   const etiquetasSomenteOrigemLocalPadrao = perfilOperadorIndustria || loginIndustriaEtiquetas;
-  const ocultarAtualizarListaRemessas =
-    etiquetasSomenteOrigemLocalPadrao && Boolean(usuario?.local_padrao_id?.trim());
   const matrizBootstrapRef = useRef(false);
   const [matrizOrigemEtiquetas, setMatrizOrigemEtiquetas] = useState<MatrizOrigemEtiquetas>(() => {
     if (typeof window === 'undefined') return 'estoque';
@@ -395,6 +395,15 @@ export default function EtiquetasPage() {
     const dest = meta?.destinoNome?.trim();
     if (dest) return dest;
     return meta?.origemNome?.trim() || undefined;
+  }, [loteSelecionado, metaPorViagemId]);
+
+  /** 60×30: no lugar da validade, exibir data em que a remessa (`transferencias`) foi criada. */
+  const dataCriacaoRemessaIsoAtual = useMemo(() => {
+    if (!loteSelecionado || !loteSelecionado.startsWith('SEP-')) return null;
+    const vid = parseViagemIdDeLoteSep(loteSelecionado);
+    if (!vid) return null;
+    const raw = metaPorViagemId.get(vid)?.createdAt?.trim();
+    return raw || null;
   }, [loteSelecionado, metaPorViagemId]);
 
   const filtrosEtiquetasRemessa = useMemo(() => {
@@ -643,7 +652,8 @@ export default function EtiquetasPage() {
           ordenadaMeta,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
-          numerosMap
+          numerosMap,
+          dataCriacaoRemessaIsoAtual
         ),
         formatoImpressao,
         formatoImpressao === '60x30' ? { preparar60x30PilhasPorLado: true } : undefined
@@ -691,7 +701,8 @@ export default function EtiquetasPage() {
         listaMeta,
         usuario?.nome || 'OPERADOR',
         nomeLojaOuLocalRemessa,
-        numerosMap
+        numerosMap,
+        dataCriacaoRemessaIsoAtual
       );
       await enviarEtiquetasParaPiEmMultiplosJobs(etiquetas, formatoImpressao, {
         jobNameBase: jobName,
@@ -726,7 +737,8 @@ export default function EtiquetasPage() {
           ordenadaMeta,
           usuario?.nome || 'OPERADOR',
           nomeLojaOuLocalRemessa,
-          null
+          null,
+          dataCriacaoRemessaIsoAtual
         );
         const mensagemBarra = somenteZebra6060Industria
           ? 'O Pi/Zebra recebe este mesmo layout. Feche a aba após conferir e use o botão Zebra 60×60.'
@@ -747,6 +759,7 @@ export default function EtiquetasPage() {
       }
     },
     [
+      dataCriacaoRemessaIsoAtual,
       formatoImpressao,
       nomeLojaOuLocalRemessa,
       prepararListaMesmaOrdemImpressao,
@@ -944,27 +957,6 @@ export default function EtiquetasPage() {
                 onClick={() => setLimiteRemessasExibidas((n) => n + REMESSAS_SEP_POR_PAGINA)}
               >
                 Carregar mais
-              </Button>
-            )}
-            {!ocultarAtualizarListaRemessas && (
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                disabled={carregandoOpcoesRemessa}
-                onClick={() => void carregarOpcoesRemessa()}
-              >
-                {carregandoOpcoesRemessa ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Atualizar lista
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Atualizar lista
-                  </>
-                )}
               </Button>
             )}
           </div>

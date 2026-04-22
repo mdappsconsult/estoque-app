@@ -1,5 +1,31 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Etiquetas: remover botão «Atualizar lista» + deploy
+- **Pedido:** retirar o botão **Atualizar lista** do bloco Remessa (permanece **Carregar mais** e o select).
+- **Código:** `src/app/etiquetas/page.tsx` — remoção do botão, `ocultarAtualizarListaRemessas` e ícone `RefreshCw`. `CONTEXTO_ATUAL.md` alinhado.
+- **Deploy:** push para `main` + `npm run railway:release` (Railway).
+
+### Sessão - 2026-04-22 - Etiquetas 60×30: data da remessa no lugar da validade (lote SEP)
+- **Pedido:** na meia-folha **30×60 mm** (meia 60×30 com QR), trocar o que parecia **validade** pela **data em que a remessa foi criada** (não a validade do item).
+- **Código:** `src/lib/printing/label-print.ts` — `EtiquetaParaImpressao.dataCriacaoRemessaIso` e `gerarCelula60x30` mostra `Rem. dd/mm/aa` (dia civil BR) quando a remessa SEP tem meta; caso contrário mantém `Val.` / `Imp.`; `src/app/etiquetas/page.tsx` repassa `createdAt` da opção de remessa (`transferencias.created_at` via `metaPorViagemId`). `CONTEXTO_ATUAL.md` ajustado.
+- **Validação:** `npm run lint`, `npm run build` (OK).
+
+### Sessão - 2026-04-22 - Baldes nas lojas: marcar utilizados (exceto recebidos hoje)
+- **Pedido:** tratar como **utilizados** os baldes que já foram às lojas, **exceto** os que **chegaram hoje** (recebimento no dia, fuso BR).
+- **Banco (Supabase):** critério — balde em loja `EM_ESTOQUE` sem linha em `baixas`; exclusão se `auditoria` indica recebimento **hoje** (`RECEBER_TRANSFERENCIA` com `transferencia_id` da remessa para o `local` do item, ou `ENTRADA_FALTANTE_DIVERGENCIA_LOJA` no `item_id`). **42** itens → `BAIXADO` + `baixas` + `BAIXA` (usuário Marco); **65** permanecem em estoque na loja. `estoque` (Açaí Balde 11L, Cupuaçu balde 11 litros) alinhado ao pós-baixa.
+- **Impacto:** Relatório Baldes / saldo de loja refletem consumo retroativo alinhado à operação real.
+- **Validação:** queries de contagem antes/depois; `upsert` em `estoque` por produto afetado.
+
+### Sessão - 2026-04-22 - Produção: validade (dias) padrão 7
+- **Pedido:** campo **Validade (dias) — acabado** já vir com **7** preenchido.
+- **Código:** `src/app/producao/page.tsx` — estado inicial e reset pós-registro com `dias_validade: '7'`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint` (recomendado local).
+
+### Sessão - 2026-04-22 - Produção: receita Açaí do Kim + itens recolhíveis
+- **Pedido:** em **Produção**, pré-selecionar receita **Açaí do Kim**, menos textos explicativos, não exibir bloco **Insumos** em tela cheia — abrir **Itens da receita** ao toque.
+- **Código:** `src/lib/services/producao-receitas.ts` — `encontrarReceitaAcaiDoKim`; `src/app/producao/page.tsx` — efeito de pré-seleção (respeita **Manual**), painel recolhível, textos enxutos, link cadastro só ícone; após registro, `receitaPadraoBloqueada` limpa e local volta ao padrão. `CONTEXTO_ATUAL.md` atualizado.
+- **Validação:** `npm run lint` (OK). `npm run build` não concluído aqui por falha de rede ao buscar **Google Fonts** (Inter); repetir em ambiente com acesso a `fonts.googleapis.com`.
+
 ### Sessão - 2026-04-22 - Etiquetas: 7 remessas no select + Carregar mais (páginação)
 - **Pedido:** carregar as últimas 7 remessas e paginar o restante.
 - **Código:** `src/app/etiquetas/page.tsx` — `opcoesRemessaTodas` (lista completa da API), exibição fatiada com `REMESSAS_SEP_POR_PAGINA = 7` e botão **Carregar mais**; meta da remessa a partir de todas as opções; contador X de Y. Removido o corte em 10 itens no fetch da indústria. `CONTEXTO_ATUAL.md` ajustado.
