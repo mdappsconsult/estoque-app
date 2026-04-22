@@ -3,7 +3,7 @@
 ### Sessão - 2026-04-22 - Etiquetas: remover botão «Atualizar lista» + deploy
 - **Pedido:** retirar o botão **Atualizar lista** do bloco Remessa (permanece **Carregar mais** e o select).
 - **Código:** `src/app/etiquetas/page.tsx` — remoção do botão, `ocultarAtualizarListaRemessas` e ícone `RefreshCw`. `CONTEXTO_ATUAL.md` alinhado.
-- **Deploy:** push para `main` + `npm run railway:release` (Railway).
+- **Deploy:** push para `main` (Railway dispara build pelo repo; evitar `railway up` em duplicata com o mesmo push — ver `docs/FLUXO_ENTREGA.md`).
 
 ### Sessão - 2026-04-22 - Etiquetas 60×30: data da remessa no lugar da validade (lote SEP)
 - **Pedido:** na meia-folha **30×60 mm** (meia 60×30 com QR), trocar o que parecia **validade** pela **data em que a remessa foi criada** (não a validade do item).
