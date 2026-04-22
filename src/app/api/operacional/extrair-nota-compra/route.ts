@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createSupabaseAdmin } from '@/lib/supabase/admin';
 import { errMessage } from '@/lib/errMessage';
-import { resolverUsuarioPorBearer } from '@/lib/auth/resolve-usuario-bearer';
+import { validarCredencialOperacional } from '@/lib/services/operacional-auth-server';
 import { extrairNotaCompraDeImagem } from '@/lib/nota-compra/ocr-extrair';
 
 const MAX_BASE64_CHARS = 11_500_000;
 const MIME_OK = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type Body = {
+  login?: string;
+  senha?: string;
   imageBase64?: string;
   mimeType?: string;
 };
@@ -35,6 +37,8 @@ function validarImagemBuffer(buf: Buffer, mimeType: string): { ok: true } | { ok
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
+    const login = String(body.login ?? '');
+    const senha = String(body.senha ?? '');
     const imageBase64 = String(body.imageBase64 ?? '').replace(/\s/g, '');
     const mimeType = String(body.mimeType ?? 'image/jpeg').toLowerCase();
 
@@ -45,10 +49,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Imagem muito grande.' }, { status: 400 });
     }
 
-    const auth = await resolverUsuarioPorBearer(req.headers.get('authorization'));
-    if (!auth.ok) {
-      return NextResponse.json({ error: auth.error }, { status: auth.status });
-    }
+    const auth = await validarCredencialOperacional(login, senha);
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     let buf: Buffer;
     try {

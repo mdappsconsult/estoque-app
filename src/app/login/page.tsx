@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input';
 import { LogoKim } from '@/components/branding/LogoKim';
 import { useAuth } from '@/hooks/useAuth';
 import { autenticarOperacional } from '@/lib/services/acesso';
+import { setSenhaOperacionalSession } from '@/lib/auth';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -22,6 +23,7 @@ export default function LoginPage() {
 
     try {
       const usuario = await autenticarOperacional(usuarioLogin, senha);
+      setSenhaOperacionalSession(senha);
       login(usuario);
       window.location.href = '/';
     } catch (err: unknown) {

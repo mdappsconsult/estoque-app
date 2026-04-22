@@ -21,6 +21,7 @@ import { criarLoteCompra } from '@/lib/services/lotes-compra';
 import { supabase } from '@/lib/supabase';
 import { Produto, Local } from '@/types/database';
 import { errMessage } from '@/lib/errMessage';
+import { getSenhaOperacionalSession } from '@/lib/auth';
 import {
   avaliarQualidadeImagemNota,
   fileToDataUrl,
@@ -227,9 +228,13 @@ export default function EntradaCompraNotaPage() {
         alert('Faça login.');
         return;
       }
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
+      const senha = getSenhaOperacionalSession();
+      const loginOp = usuario.login_operacional?.trim() || '';
+      if (!loginOp) {
+        alert('Seu usuário não tem login operacional. Cadastre em Cadastros → Usuários.');
+        return;
+      }
+      if (!senha) {
         alert('Sessão expirada. Saia e entre de novo no sistema.');
         return;
       }
@@ -247,9 +252,10 @@ export default function EntradaCompraNotaPage() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
+            login: loginOp,
+            senha,
             imageBase64: parsed.base64,
             mimeType: parsed.mimeType,
           }),
