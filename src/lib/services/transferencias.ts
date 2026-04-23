@@ -234,6 +234,122 @@ export async function criarTransferencia(
   return data;
 }
 
+const STATUS_SEP_PODE_ACRESCENTAR_ITENS = new Set<string>(['AWAITING_ACCEPT', 'ACCEPTED']);
+
+/**
+ * Acrescenta unidades a uma remessa matriz→loja **já criada** (mesma `transferencias.id`),
+ * antes do despacho. Usado para dividir o POST em fatias (evita `fetch failed` em remessas grandes).
+ */
+export async function adicionarItensTransferenciaMatrizLoja(
+  transferenciaId: string,
+  itemIds: string[],
+  usuarioId: string,
+  client: SupabaseClient = supabase
+): Promise<{ qtd_adicionados: number }> {
+  if (itemIds.length === 0) {
+    return { qtd_adicionados: 0 };
+  }
+
+  const { data: tr, error: e1 } = await client
+    .from('transferencias')
+    .select('id, tipo, status, origem_id, destino_id, viagem_id')
+    .eq('id', transferenciaId)
+    .single();
+  if (e1) throw e1;
+  if (!tr) throw new Error('Transferência não encontrada');
+  if (tr.tipo !== 'WAREHOUSE_STORE') {
+    throw new Error('Só é possível acrescentar itens em remessas indústria → loja');
+  }
+  if (!STATUS_SEP_PODE_ACRESCENTAR_ITENS.has(String(tr.status))) {
+    throw new Error(
+      'Só é possível acrescentar itens enquanto a remessa estiver aguardando aceite ou aceita (antes do trânsito).'
+    );
+  }
+
+  const { data: existTi, error: eTi } = await client
+    .from('transferencia_itens')
+    .select('item_id')
+    .eq('transferencia_id', transferenciaId);
+  if (eTi) throw eTi;
+  const jaNaRemessa = new Set((existTi || []).map((r) => String(r.item_id || '').trim()).filter(Boolean));
+
+  const idsOrd = [...new Set(itemIds.map((id) => String(id || '').trim()).filter(Boolean))].filter(
+    (id) => !jaNaRemessa.has(id)
+  );
+  if (idsOrd.length === 0) {
+    return { qtd_adicionados: 0 };
+  }
+
+  type ItemLinha = { id: string; local_atual_id: string | null; estado: string; produto_id: string };
+  const itensValidos: ItemLinha[] = [];
+  for (let i = 0; i < idsOrd.length; i += IN_CLAUSE_CHUNK) {
+    const slice = idsOrd.slice(i, i + IN_CLAUSE_CHUNK);
+    const { data: chunk, error: itensError } = await client
+      .from('itens')
+      .select('id, local_atual_id, estado, produto_id')
+      .in('id', slice);
+    if (itensError) throw itensError;
+    itensValidos.push(...((chunk || []) as ItemLinha[]));
+  }
+
+  if (itensValidos.length !== idsOrd.length) {
+    throw new Error('Um ou mais itens não foram encontrados');
+  }
+
+  const origemId = String(tr.origem_id || '').trim();
+  const itemInvalido = itensValidos.find(
+    (item) => item.estado !== 'EM_ESTOQUE' || item.local_atual_id !== origemId
+  );
+  if (itemInvalido) {
+    throw new Error('Todos os itens novos devem estar em estoque no local de origem da remessa');
+  }
+
+  await assertItensSemVinculoRemessaAberta(idsOrd, client);
+
+  try {
+    for (let i = 0; i < idsOrd.length; i += INSERT_TRANSFERENCIA_ITENS_CHUNK) {
+      const slice = idsOrd.slice(i, i + INSERT_TRANSFERENCIA_ITENS_CHUNK);
+      const transItens = slice.map((itemId) => ({
+        transferencia_id: transferenciaId,
+        item_id: itemId,
+      }));
+      const { error: insErr } = await client.from('transferencia_itens').insert(transItens);
+      if (insErr) throw insErr;
+    }
+  } catch (e) {
+    for (let i = 0; i < idsOrd.length; i += INSERT_TRANSFERENCIA_ITENS_CHUNK) {
+      const slice = idsOrd.slice(i, i + INSERT_TRANSFERENCIA_ITENS_CHUNK);
+      await client.from('transferencia_itens').delete().eq('transferencia_id', transferenciaId).in('item_id', slice);
+    }
+    throw e;
+  }
+
+  await registrarAuditoria(
+    {
+      usuario_id: usuarioId,
+      local_id: origemId,
+      acao: 'ADICIONAR_ITENS_SEPARACAO_MATRIZ_LOJA',
+      origem_id: origemId,
+      destino_id: tr.destino_id,
+      detalhes: { transferencia_id: transferenciaId, qtd_itens: idsOrd.length },
+    },
+    client
+  );
+
+  for (let i = 0; i < idsOrd.length; i += IN_CLAUSE_CHUNK) {
+    const slice = idsOrd.slice(i, i + IN_CLAUSE_CHUNK);
+    const { error: eRes } = await client.from('itens').update({ estado: 'EM_TRANSFERENCIA' }).in('id', slice);
+    if (eRes) throw eRes;
+  }
+
+  await sincronizarEstoquePorProdutos(
+    itensValidos.map((row) => row.produto_id),
+    client
+  );
+
+  return { qtd_adicionados: idsOrd.length };
+}
+
 export async function aceitarTransferencia(id: string, usuarioId: string): Promise<void> {
   const transferencia = await getTransferenciaComItensMinimo(id);
   if (transferencia.status !== 'AWAITING_ACCEPT') {

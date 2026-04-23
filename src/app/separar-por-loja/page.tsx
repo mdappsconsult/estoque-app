@@ -28,7 +28,10 @@ import {
 import { getResumoReposicaoLoja } from '@/lib/services/reposicao-loja';
 import { emitirUnidadesCompraFifo } from '@/lib/services/lotes-compra';
 import { getResumoEstoqueAgrupado, type ResumoEstoqueRow } from '@/lib/services/estoque-resumo';
-import { MAX_ITENS_SEPARACAO } from '@/lib/services/separacao-matriz-loja-atomic';
+import {
+  CHUNK_ITENS_SEPARACAO_HTTP,
+  MAX_ITENS_SEPARACAO,
+} from '@/lib/services/separacao-matriz-loja-atomic';
 import { persistirUltimaRemessa, type UltimaRemessaImpressao } from '@/lib/separacao/ultima-remessa-storage';
 import { supabase } from '@/lib/supabase';
 import {
@@ -615,9 +618,13 @@ export default function SepararPorLojaPage() {
       return;
     }
     const msgBase = `Confirmar criação da separação com ${n} item(ns)?`;
+    const partes =
+      n > CHUNK_ITENS_SEPARACAO_HTTP
+        ? ` O sistema grava em até ${CHUNK_ITENS_SEPARACAO_HTTP} unidades por etapa na mesma remessa (várias confirmações de rede — mantenha a aba aberta).`
+        : '';
     const msgGrande =
       n > 150
-        ? `${msgBase}\n\nRemessas grandes podem levar até cerca de um minuto. Na próxima tela, informe sua senha para gravar tudo de uma vez no servidor (viagem + etiquetas + transferência). Mantenha a aba aberta.`
+        ? `${msgBase}${partes}\n\nRemessas grandes podem levar mais de um minuto no total. Na próxima tela, informe sua senha para gravar no servidor (viagem + etiquetas + transferência).`
         : `${msgBase}\n\nNa próxima tela, informe sua senha de acesso para concluir o registro no servidor.`;
     const confirmou = window.confirm(msgGrande);
     if (!confirmou) return;
@@ -643,34 +650,82 @@ export default function SepararPorLojaPage() {
     const { snapshotItens, nomeLojaDestino } = pendingSeparacao;
 
     setSaving(true);
-    setSavingEtapa(`Gravando remessa no servidor (${snapshotItens.length} unidades)…`);
     setErroModalSeparacao('');
+    const fatias: typeof snapshotItens[] = [];
+    for (let i = 0; i < snapshotItens.length; i += CHUNK_ITENS_SEPARACAO_HTTP) {
+      fatias.push(snapshotItens.slice(i, i + CHUNK_ITENS_SEPARACAO_HTTP));
+    }
+
+    const itensPayload = (chunk: typeof snapshotItens) =>
+      chunk.map((item) => ({
+        id: item.id,
+        produto_id: item.produto_id,
+        data_validade: item.data_validade ?? null,
+      }));
+
     try {
-      const res = await fetch('/api/operacional/criar-separacao-matriz-loja', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          login: loginOp,
-          senha: senhaSeparacao,
-          origem_id: origemId,
-          destino_id: destinoId,
-          itens: snapshotItens.map((item) => ({
-            id: item.id,
-            produto_id: item.produto_id,
-            data_validade: item.data_validade ?? null,
-          })),
-        }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        lote?: string;
-      };
-      if (!res.ok) {
-        throw new Error(payload.error || 'Falha ao registrar separação');
-      }
-      const loteEtiqueta = payload.lote?.trim();
-      if (!loteEtiqueta) {
-        throw new Error('Resposta do servidor sem lote.');
+      let loteEtiqueta = '';
+      let transferenciaId = '';
+
+      for (let parte = 0; parte < fatias.length; parte++) {
+        const chunk = fatias[parte]!;
+        setSavingEtapa(
+          fatias.length > 1
+            ? `Gravando remessa (parte ${parte + 1}/${fatias.length}, ${chunk.length} unidades)…`
+            : `Gravando remessa no servidor (${chunk.length} unidades)…`
+        );
+
+        if (parte === 0) {
+          const res = await fetch('/api/operacional/criar-separacao-matriz-loja', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              login: loginOp,
+              senha: senhaSeparacao,
+              origem_id: origemId,
+              destino_id: destinoId,
+              itens: itensPayload(chunk),
+            }),
+          });
+          const payload = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            lote?: string;
+            transferencia_id?: string;
+          };
+          if (!res.ok) {
+            throw new Error(payload.error || 'Falha ao registrar separação');
+          }
+          loteEtiqueta = payload.lote?.trim() ?? '';
+          transferenciaId = String(payload.transferencia_id || '').trim();
+          if (!loteEtiqueta) {
+            throw new Error('Resposta do servidor sem lote.');
+          }
+        } else {
+          if (!transferenciaId) {
+            throw new Error('Resposta inicial sem transferência — não foi possível continuar a gravação.');
+          }
+          const res = await fetch('/api/operacional/adicionar-itens-separacao-matriz-loja', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              login: loginOp,
+              senha: senhaSeparacao,
+              transferencia_id: transferenciaId,
+              itens: itensPayload(chunk),
+            }),
+          });
+          const payload = (await res.json().catch(() => ({}))) as { error?: string; lote?: string };
+          if (!res.ok) {
+            throw new Error(
+              payload.error ||
+                `Falha ao gravar a parte ${parte + 1} da remessa. A primeira parte já foi salva — não feche a lista sem alinhar com o suporte (remessa ${transferenciaId.slice(0, 8)}…).`
+            );
+          }
+          const loteParte = payload.lote?.trim();
+          if (loteParte && loteParte !== loteEtiqueta) {
+            console.warn('adicionar-itens-separacao: lote divergente do esperado', loteEtiqueta, loteParte);
+          }
+        }
       }
 
       setSenhaSeparacao('');

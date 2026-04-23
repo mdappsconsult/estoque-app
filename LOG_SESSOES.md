@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-04-23 - Separar por Loja: gravação em fatias + Recebimento multi-remessa
+- **Separar por Loja:** listas **> 200** unidades gravam em **uma única remessa** em vários POSTs (`criar-separacao-matriz-loja` + `adicionar-itens-separacao-matriz-loja`); constante `CHUNK_ITENS_SEPARACAO_HTTP = 200`. Serviço `adicionarItensTransferenciaMatrizLoja` + `adicionarItensSeparacaoMatrizLojaNaTransferencia`.
+- **Recebimento:** modo **«Conferir várias remessas juntas»** (checkboxes; operador de loja pré-marca todas as pendentes); confirmação reparte por `transferencia_id` e chama `receberTransferencia` em sequência. Admin: sem escanear / divergência desligados no modo agrupado.
+- **Validação:** `npm run lint`, `npm run build`. `CONTEXTO_ATUAL.md` atualizado.
+- **Deploy:** `git push origin main` (Railway pelo repo; ver `docs/FLUXO_ENTREGA.md`).
+
 ### Sessão - 2026-04-23 - Separar por Loja: mensagem quando `fetch` falha ao gravar remessa
 - **Problema:** no modal **Senha para gravar remessa**, erro genérico `TypeError: fetch failed` (rede/timeout/serviço antes da resposta HTTP).
 - **Código:** `mensagemErroFetchClienteOperacional` em `src/lib/errMessage.ts`; uso no `catch` de `confirmarSeparacaoComSenhaNoServidor` em `src/app/separar-por-loja/page.tsx`; `export const maxDuration = 180` em `src/app/api/operacional/criar-separacao-matriz-loja/route.ts`. `CONTEXTO_ATUAL.md` alinhado.

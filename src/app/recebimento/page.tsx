@@ -35,6 +35,8 @@ interface ItemEsperado {
   token_qr: string;
   token_short: string | null;
   nome: string;
+  /** Presente ao conferir mais de uma remessa na mesma sessão. */
+  transferencia_id: string;
 }
 
 /** Ações sensíveis no recebimento (divergência ou confirmar tudo sem QR): só `ADMIN_MASTER`. */
@@ -45,6 +47,21 @@ function recebimentoSomenteAdminMaster(perfil: string | undefined): boolean {
 export default function RecebimentoPage() {
   const { usuario } = useAuth();
   const adminRecebimento = recebimentoSomenteAdminMaster(usuario?.perfil);
+
+  /** Uma remessa (`[id]`) ou várias no modo agrupado (`>= 2` ids). */
+  const [remessasIdsConferencia, setRemessasIdsConferencia] = useState<string[]>([]);
+  const [modoMultiRemessas, setModoMultiRemessas] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
+  const [itensRecebidos, setItensRecebidos] = useState<{ id: string; token_qr: string; nome: string }[]>([]);
+  const [itensEsperados, setItensEsperados] = useState<ItemEsperado[]>([]);
+  const [loadingEsperados, setLoadingEsperados] = useState(false);
+  const [erro, setErro] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [resultado, setResultado] = useState<{ divergencias: number } | null>(null);
+  /** Aviso quando a remessa selecionada deixa de estar em trânsito (ex.: outro aparelho confirmou antes). */
+  const [avisoRemessaEncerrada, setAvisoRemessaEncerrada] = useState<string | null>(null);
+  const scanEmAndamentoRef = useRef(false);
 
   /** Só a loja: busca no PostgREST já filtrada por destino — evita truncar/paginar o quadro geral e perder remessas novas. */
   const filtrosDestinoLoja = useMemo(() => {
@@ -68,6 +85,31 @@ export default function RecebimentoPage() {
 
   const emTransito = transferencias.filter((t) => t.status === 'IN_TRANSIT');
   const pendentes = filtrarRecebimentoPorLoja(emTransito, usuario);
+
+  const conferenciaAgrupadaAtiva = modoMultiRemessas && remessasIdsConferencia.length >= 2;
+  const remessaUnicaId =
+    !modoMultiRemessas && remessasIdsConferencia.length === 1 ? remessasIdsConferencia[0]! : null;
+  const exigePainelConferencia = remessaUnicaId != null || conferenciaAgrupadaAtiva;
+
+  const alternarRemessaNoModoMulti = (id: string) => {
+    setRemessasIdsConferencia((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (next.length === 0) {
+        setErro('');
+        return next;
+      }
+      const destinos = next
+        .map((rid) => pendentes.find((p) => p.id === rid)?.destino_id)
+        .filter((d): d is string => Boolean(d));
+      if (new Set(destinos).size > 1) {
+        setErro('Só é possível agrupar remessas com o mesmo destino (mesma loja de entrega).');
+        return prev;
+      }
+      setErro('');
+      return next;
+    });
+  };
+
   const aguardandoMotorista = useMemo(
     () => filtrarRemessasMatrizAguardandoMotorista(transferencias, usuario),
     [transferencias, usuario]
@@ -88,48 +130,43 @@ export default function RecebimentoPage() {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [transferencias, usuario]);
 
-  const [selecionada, setSelecionada] = useState<string>('');
-  const [tokenInput, setTokenInput] = useState('');
-  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
-  const [itensRecebidos, setItensRecebidos] = useState<{ id: string; token_qr: string; nome: string }[]>([]);
-  const [itensEsperados, setItensEsperados] = useState<ItemEsperado[]>([]);
-  const [loadingEsperados, setLoadingEsperados] = useState(false);
-  const [erro, setErro] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [resultado, setResultado] = useState<{ divergencias: number } | null>(null);
-  /** Aviso quando a remessa selecionada deixa de estar em trânsito (ex.: outro aparelho confirmou antes). */
-  const [avisoRemessaEncerrada, setAvisoRemessaEncerrada] = useState<string | null>(null);
-  const scanEmAndamentoRef = useRef(false);
-
   useEffect(() => {
-    if (!selecionada || loading) return;
-    const t = transferencias.find((x) => x.id === selecionada);
-    if (!t) {
-      setAvisoRemessaEncerrada(
-        'Não encontramos esta remessa na lista atual. Atualize a página ou selecione outra entrega.'
-      );
-      setSelecionada('');
-      setItensRecebidos([]);
-      setErro('');
-      return;
+    if (remessasIdsConferencia.length === 0 || loading) return;
+    for (const rid of remessasIdsConferencia) {
+      const t = transferencias.find((x) => x.id === rid);
+      if (!t) {
+        setAvisoRemessaEncerrada(
+          'Não encontramos uma das remessas na lista atual. Atualize a página ou selecione outra entrega.'
+        );
+        setRemessasIdsConferencia([]);
+        setModoMultiRemessas(false);
+        setItensRecebidos([]);
+        setErro('');
+        return;
+      }
+      if (t.status !== 'IN_TRANSIT') {
+        const msg =
+          t.status === 'DELIVERED'
+            ? 'Uma das entregas já foi concluída nesta conta em outro aparelho (ou por outro operador). Os QRs escaneados neste telefone não foram enviados ao servidor — use um único aparelho até confirmar, ou confira o estoque da loja.'
+            : t.status === 'DIVERGENCE'
+              ? 'Uma das remessas foi encerrada com divergência (faltante ou excedente). Não é possível continuar o recebimento aqui. Veja a tela Divergências ou fale com o gestor.'
+              : `Uma transferência não está mais em trânsito (status: ${t.status}).`;
+        setAvisoRemessaEncerrada(msg);
+        setRemessasIdsConferencia([]);
+        setModoMultiRemessas(false);
+        setItensRecebidos([]);
+        setErro('');
+        return;
+      }
     }
-    if (t.status !== 'IN_TRANSIT') {
-      const msg =
-        t.status === 'DELIVERED'
-          ? 'Esta entrega já foi concluída nesta conta em outro aparelho (ou por outro operador). Os QRs escaneados neste telefone não foram enviados ao servidor — use um único aparelho por remessa até confirmar, ou confira o estoque da loja.'
-          : t.status === 'DIVERGENCE'
-            ? 'Esta remessa foi encerrada com divergência (faltante ou excedente). Não é possível continuar o recebimento aqui. Veja a tela Divergências ou fale com o gestor.'
-            : `Esta transferência não está mais em trânsito (status: ${t.status}).`;
-      setAvisoRemessaEncerrada(msg);
-      setSelecionada('');
-      setItensRecebidos([]);
-      setErro('');
-    }
-  }, [selecionada, transferencias, loading]);
+  }, [remessasIdsConferencia, transferencias, loading]);
 
   useEffect(() => {
     const carregarItensEsperados = async () => {
-      if (!selecionada) {
+      const ok =
+        (!modoMultiRemessas && remessasIdsConferencia.length === 1) ||
+        (modoMultiRemessas && remessasIdsConferencia.length >= 2);
+      if (!ok) {
         setItensEsperados([]);
         return;
       }
@@ -137,8 +174,10 @@ export default function RecebimentoPage() {
       try {
         const { data, error } = await supabase
           .from('transferencia_itens')
-          .select('item_id, item:itens!item_id(id, token_qr, token_short, produto:produtos(nome))')
-          .eq('transferencia_id', selecionada);
+          .select(
+            'transferencia_id, item_id, item:itens!item_id(id, token_qr, token_short, produto:produtos(nome))'
+          )
+          .in('transferencia_id', remessasIdsConferencia);
         if (error) throw error;
         type ItemJoin = {
           id?: string;
@@ -146,7 +185,11 @@ export default function RecebimentoPage() {
           token_short?: string | null;
           produto?: { nome?: string } | { nome?: string }[] | null;
         };
-        type TiRow = { item_id: string; item: ItemJoin | ItemJoin[] | null };
+        type TiRow = {
+          transferencia_id: string;
+          item_id: string;
+          item: ItemJoin | ItemJoin[] | null;
+        };
         const normItem = (item: TiRow['item']): ItemJoin | null => {
           if (item == null) return null;
           return Array.isArray(item) ? (item[0] ?? null) : item;
@@ -163,9 +206,10 @@ export default function RecebimentoPage() {
               token_qr: it?.token_qr || '',
               token_short: it?.token_short || null,
               nome: normProd(it?.produto)?.nome || 'Produto',
+              transferencia_id: String(row.transferencia_id || ''),
             };
           })
-          .filter((item: ItemEsperado) => Boolean(item.id));
+          .filter((item: ItemEsperado) => Boolean(item.id) && Boolean(item.transferencia_id));
         setItensEsperados(itens);
       } catch {
         setItensEsperados([]);
@@ -174,7 +218,7 @@ export default function RecebimentoPage() {
       }
     };
     void carregarItensEsperados();
-  }, [selecionada]);
+  }, [remessasIdsConferencia, modoMultiRemessas]);
 
   const idsEscaneados = useMemo(
     () => new Set(itensRecebidos.map((i) => i.id)),
@@ -231,10 +275,6 @@ export default function RecebimentoPage() {
       setErro('Faça login novamente para continuar');
       return;
     }
-    if (!selecionada) {
-      setErro('Selecione uma transferência em trânsito');
-      return;
-    }
     if (!conferenciaCompleta) {
       setErro(
         'Escaneie todos os itens da lista antes de confirmar. Se faltar produto na entrega, peça ao administrador do sistema.'
@@ -242,7 +282,75 @@ export default function RecebimentoPage() {
       return;
     }
 
-    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    if (conferenciaAgrupadaAtiva) {
+      const destinoIdPrim = pendentes.find((t) => t.id === remessasIdsConferencia[0])?.destino_id;
+      if (
+        !destinoIdPrim ||
+        remessasIdsConferencia.some((rid) => pendentes.find((t) => t.id === rid)?.destino_id !== destinoIdPrim)
+      ) {
+        setErro('Remessas com destinos diferentes não podem ser confirmadas juntas.');
+        return;
+      }
+      for (const rid of remessasIdsConferencia) {
+        const tr = transferencias.find((t) => t.id === rid);
+        if (!tr || tr.status !== 'IN_TRANSIT' || !pendentes.some((t) => t.id === rid)) {
+          setErro('Uma das remessas não está mais disponível para recebimento. Atualize a lista.');
+          return;
+        }
+      }
+
+      const idParaTid = new Map(itensEsperados.map((e) => [e.id, e.transferencia_id]));
+      const porRemessa = new Map<string, string[]>();
+      for (const r of itensRecebidos) {
+        const tid = idParaTid.get(r.id);
+        if (!tid) continue;
+        porRemessa.set(tid, [...(porRemessa.get(tid) || []), r.id]);
+      }
+      for (const tid of remessasIdsConferencia) {
+        const esp = itensEsperados.filter((e) => e.transferencia_id === tid).map((e) => e.id);
+        const rec = porRemessa.get(tid) || [];
+        if (esp.length !== rec.length || esp.some((id) => !rec.includes(id))) {
+          setErro('Conferência incompleta para uma das remessas. Confira os totais escaneados.');
+          return;
+        }
+      }
+
+      const confirmou = window.confirm(
+        `Confirmar recebimento completo de ${itensRecebidos.length} item(ns) em ${remessasIdsConferencia.length} remessa(s)? Cada uma será marcada como entregue.`
+      );
+      if (!confirmou) return;
+
+      setSaving(true);
+      setErro('');
+      try {
+        let divTot = 0;
+        for (const tid of remessasIdsConferencia) {
+          const ids = porRemessa.get(tid) || [];
+          const res = await receberTransferencia(tid, ids, destinoIdPrim, usuario.id);
+          divTot += res.divergencias.length;
+        }
+        setResultado({ divergencias: divTot });
+        setItensRecebidos([]);
+        setRemessasIdsConferencia([]);
+        setModoMultiRemessas(false);
+      } catch (err: unknown) {
+        setErro(errMessage(err, 'Erro ao confirmar recebimento'));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (!remessaUnicaId) {
+      setErro(
+        modoMultiRemessas
+          ? 'Marque pelo menos duas remessas para conferir juntas, ou use «Voltar a conferir uma remessa por vez».'
+          : 'Selecione uma transferência em trânsito'
+      );
+      return;
+    }
+
+    const transSelecionada = transferencias.find((t) => t.id === remessaUnicaId);
     if (!transSelecionada) {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
@@ -257,7 +365,7 @@ export default function RecebimentoPage() {
       );
       return;
     }
-    if (!pendentes.some((t) => t.id === selecionada)) {
+    if (!pendentes.some((t) => t.id === remessaUnicaId)) {
       setErro('Esta transferência não está disponível para o seu usuário.');
       return;
     }
@@ -270,14 +378,14 @@ export default function RecebimentoPage() {
     setErro('');
     try {
       const res = await receberTransferencia(
-        selecionada,
+        remessaUnicaId,
         itensRecebidos.map((i) => i.id),
         transSelecionada.destino_id,
         usuario.id
       );
       setResultado({ divergencias: res.divergencias.length });
       setItensRecebidos([]);
-      setSelecionada('');
+      setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao confirmar recebimento'));
     } finally {
@@ -295,7 +403,13 @@ export default function RecebimentoPage() {
       setErro('Somente administrador do sistema pode confirmar a entrega inteira sem escanear.');
       return;
     }
-    if (!selecionada) {
+    if (conferenciaAgrupadaAtiva) {
+      setErro(
+        'Com várias remessas agrupadas, use apenas a conferência por QR até completar todos os itens. Desmarque o modo agrupado se precisar de «sem escanear» ou divergência em uma remessa só.'
+      );
+      return;
+    }
+    if (!remessaUnicaId) {
       setErro('Selecione uma transferência em trânsito');
       return;
     }
@@ -308,7 +422,7 @@ export default function RecebimentoPage() {
       return;
     }
 
-    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    const transSelecionada = transferencias.find((t) => t.id === remessaUnicaId);
     if (!transSelecionada) {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
@@ -323,7 +437,7 @@ export default function RecebimentoPage() {
       );
       return;
     }
-    if (!pendentes.some((t) => t.id === selecionada)) {
+    if (!pendentes.some((t) => t.id === remessaUnicaId)) {
       setErro('Esta transferência não está disponível para o seu usuário.');
       return;
     }
@@ -342,14 +456,14 @@ export default function RecebimentoPage() {
     try {
       const idsTodos = itensEsperados.map((e) => e.id);
       const res = await receberTransferencia(
-        selecionada,
+        remessaUnicaId,
         idsTodos,
         transSelecionada.destino_id,
         usuario.id
       );
       setResultado({ divergencias: res.divergencias.length });
       setItensRecebidos([]);
-      setSelecionada('');
+      setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao confirmar recebimento integral (administrador)'));
     } finally {
@@ -366,7 +480,13 @@ export default function RecebimentoPage() {
       setErro('Somente administrador do sistema pode encerrar com divergência. Use o login de administrador neste aparelho ou peça a um administrador.');
       return;
     }
-    if (!selecionada) {
+    if (conferenciaAgrupadaAtiva) {
+      setErro(
+        'Com várias remessas agrupadas, use apenas a conferência por QR até completar todos os itens. Desmarque o modo agrupado se precisar encerrar com divergência em uma remessa só.'
+      );
+      return;
+    }
+    if (!remessaUnicaId) {
       setErro('Selecione uma transferência em trânsito');
       return;
     }
@@ -379,7 +499,7 @@ export default function RecebimentoPage() {
       return;
     }
 
-    const transSelecionada = transferencias.find((t) => t.id === selecionada);
+    const transSelecionada = transferencias.find((t) => t.id === remessaUnicaId);
     if (!transSelecionada) {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
@@ -394,7 +514,7 @@ export default function RecebimentoPage() {
       );
       return;
     }
-    if (!pendentes.some((t) => t.id === selecionada)) {
+    if (!pendentes.some((t) => t.id === remessaUnicaId)) {
       setErro('Esta transferência não está disponível para o seu usuário.');
       return;
     }
@@ -412,7 +532,7 @@ export default function RecebimentoPage() {
     setErro('');
     try {
       const res = await receberTransferencia(
-        selecionada,
+        remessaUnicaId,
         itensRecebidos.map((i) => i.id),
         transSelecionada.destino_id,
         usuario.id,
@@ -420,7 +540,7 @@ export default function RecebimentoPage() {
       );
       setResultado({ divergencias: res.divergencias.length });
       setItensRecebidos([]);
-      setSelecionada('');
+      setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao encerrar com divergência'));
     } finally {
@@ -517,42 +637,133 @@ export default function RecebimentoPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-2">
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
         {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
           <p className="text-xs text-gray-600">
             Lista só entregas <span className="font-medium">em trânsito para a sua loja</span> (origem pode ser a
             indústria ou outra loja — o que importa é o destino ser a unidade vinculada ao seu usuário).
           </p>
         )}
-        <Select
-          label="Transferência em trânsito"
-          options={[
-            { value: '', label: 'Selecione...' },
-            ...pendentes.map((t) => {
-              const qtdItens = t.transferencia_itens?.length || 0;
-              const data = new Date(t.created_at).toLocaleString('pt-BR');
-              return {
-                value: t.id,
-                label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'} • ${qtdItens} item(ns) • ${data}`,
-              };
-            }),
-          ]}
-          value={selecionada}
-          onChange={(e) => {
-            setAvisoRemessaEncerrada(null);
-            setSelecionada(e.target.value);
-            setItensRecebidos([]);
-            setErro('');
-            setMostrarEntradaManual(false);
-          }}
-        />
+        {pendentes.length >= 2 && (
+          <div className="space-y-2">
+            {!modoMultiRemessas ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full text-sm"
+                onClick={() => {
+                  setAvisoRemessaEncerrada(null);
+                  setModoMultiRemessas(true);
+                  setItensRecebidos([]);
+                  setErro('');
+                  setMostrarEntradaManual(false);
+                  if (usuario?.perfil === 'OPERATOR_STORE') {
+                    setRemessasIdsConferencia(pendentes.map((t) => t.id));
+                  } else {
+                    setRemessasIdsConferencia([]);
+                  }
+                }}
+              >
+                Conferir várias remessas juntas (carga misturada na loja)
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full text-sm"
+                onClick={() => {
+                  setAvisoRemessaEncerrada(null);
+                  setModoMultiRemessas(false);
+                  setRemessasIdsConferencia([]);
+                  setItensRecebidos([]);
+                  setErro('');
+                  setMostrarEntradaManual(false);
+                }}
+              >
+                Voltar a conferir uma remessa por vez
+              </Button>
+            )}
+          </div>
+        )}
+        {modoMultiRemessas ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 space-y-2">
+            <p className="text-sm font-medium text-gray-900">Remessas nesta conferência</p>
+            <p className="text-xs text-gray-600">
+              Marque as que chegaram misturadas e escaneie os QRs em qualquer ordem. Ao confirmar, cada remessa é
+              encerrada com os itens dela.
+            </p>
+            {usuario?.perfil !== 'OPERATOR_STORE' && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5">
+                Agrupe só remessas com o <strong>mesmo destino</strong> (mesma loja).
+              </p>
+            )}
+            <ul className="space-y-2 max-h-48 overflow-y-auto">
+              {pendentes.map((t) => {
+                const qtdItens = t.transferencia_itens?.length || 0;
+                const data = new Date(t.created_at).toLocaleString('pt-BR');
+                return (
+                  <li key={t.id}>
+                    <label className="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-1 rounded border-gray-300"
+                        checked={remessasIdsConferencia.includes(t.id)}
+                        onChange={() => {
+                          setAvisoRemessaEncerrada(null);
+                          alternarRemessaNoModoMulti(t.id);
+                          setItensRecebidos([]);
+                          setMostrarEntradaManual(false);
+                        }}
+                      />
+                      <span>
+                        <span className="font-medium">{t.origem?.nome || '?'} → {t.destino?.nome || '?'}</span>
+                        <span className="text-gray-500"> · {qtdItens} item(ns) · {data}</span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+            {modoMultiRemessas && remessasIdsConferencia.length < 2 && (
+              <p className="text-xs text-gray-500">Marque pelo menos duas remessas para carregar a lista unificada.</p>
+            )}
+          </div>
+        ) : (
+          <Select
+            label="Transferência em trânsito"
+            options={[
+              { value: '', label: 'Selecione...' },
+              ...pendentes.map((t) => {
+                const qtdItens = t.transferencia_itens?.length || 0;
+                const data = new Date(t.created_at).toLocaleString('pt-BR');
+                return {
+                  value: t.id,
+                  label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'} • ${qtdItens} item(ns) • ${data}`,
+                };
+              }),
+            ]}
+            value={remessaUnicaId ?? ''}
+            onChange={(e) => {
+              setAvisoRemessaEncerrada(null);
+              const v = e.target.value;
+              setRemessasIdsConferencia(v ? [v] : []);
+              setItensRecebidos([]);
+              setErro('');
+              setMostrarEntradaManual(false);
+            }}
+          />
+        )}
       </div>
 
-      {selecionada && (
+      {exigePainelConferencia && (
         <>
           <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
-              <p className="font-semibold text-gray-900">Itens esperados desta entrega</p>
+              <p className="font-semibold text-gray-900">
+                {conferenciaAgrupadaAtiva
+                  ? `Itens esperados (${remessasIdsConferencia.length} remessas)`
+                  : 'Itens esperados desta entrega'}
+              </p>
               <div className="flex items-center gap-2">
                 <Badge variant="info" size="sm">Total: {itensEsperados.length}</Badge>
                 <Badge variant="success" size="sm">Escaneados: {itensRecebidos.length}</Badge>
@@ -560,7 +771,8 @@ export default function RecebimentoPage() {
               </div>
             </div>
             <p className="text-xs text-gray-500 mb-3">
-              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho por remessa (ou confira tudo antes de confirmar no primeiro).
+              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho até confirmar
+              {conferenciaAgrupadaAtiva ? ' todas as remessas desta conferência' : ' esta remessa'} (ou confira tudo antes de confirmar no primeiro).
               {adminRecebimento ? (
                 <>
                   {' '}
@@ -687,7 +899,9 @@ export default function RecebimentoPage() {
                 variant="secondary"
                 className="w-full"
                 onClick={confirmarRecebimentoInteiroSemEscanearAdmin}
-                disabled={saving || loadingEsperados || itensEsperados.length === 0}
+                disabled={
+                  saving || loadingEsperados || itensEsperados.length === 0 || conferenciaAgrupadaAtiva
+                }
               >
                 {saving ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -703,7 +917,11 @@ export default function RecebimentoPage() {
                 className="w-full"
                 onClick={encerrarComDivergencia}
                 disabled={
-                  saving || loadingEsperados || itensEsperados.length === 0 || conferenciaCompleta
+                  saving ||
+                  loadingEsperados ||
+                  itensEsperados.length === 0 ||
+                  conferenciaCompleta ||
+                  conferenciaAgrupadaAtiva
                 }
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
@@ -728,7 +946,7 @@ export default function RecebimentoPage() {
         </>
       )}
 
-      {pendentes.length === 0 && !selecionada && (
+      {pendentes.length === 0 && !exigePainelConferencia && (
         <div className="text-center py-12 text-gray-400">
           <Store className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>Nenhuma entrega em trânsito</p>
