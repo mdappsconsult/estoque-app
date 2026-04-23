@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Deploy: Produção + etiquetas 60×30 (remessa) + receita Açaí do Kim
+- **Conteúdo do push:** (1) **Produção** — `encontrarReceitaAcaiDoKim`, painel recolhível **Itens da receita**, validade (dias) padrão **7**, reset pós-registro, UI enxuta; (2) **`producao-receitas.ts`** — função `encontrarReceitaAcaiDoKim`; (3) **`label-print`** — 60×30 com **`Rem. dd/mm/aa`** (criação da remessa `SEP-…`) no lugar da validade quando houver meta.
+- **Deploy:** `git push` em `main` (Railway pelo repositório; não empilhar `railway up` no mesmo minuto).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-22 - Etiquetas: remover botão «Atualizar lista» + deploy
 - **Pedido:** retirar o botão **Atualizar lista** do bloco Remessa (permanece **Carregar mais** e o select).
 - **Código:** `src/app/etiquetas/page.tsx` — remoção do botão, `ocultarAtualizarListaRemessas` e ícone `RefreshCw`. `CONTEXTO_ATUAL.md` alinhado.

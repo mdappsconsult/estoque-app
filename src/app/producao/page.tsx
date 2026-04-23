@@ -48,6 +48,7 @@ import {
 } from '@/lib/datas/validade-producao-br';
 import { idsFamiliasInsumoProducao } from '@/lib/producao-insumos-familia';
 import {
+  encontrarReceitaAcaiDoKim,
   linhasInsumoAPartirDaReceita,
   listarReceitasAtivasParaProducao,
   novaLinhaInsumoVazia,
@@ -151,13 +152,16 @@ export default function ProducaoPage() {
     produto_id: '',
     num_baldes: '',
     local_id: '',
-    dias_validade: '',
+    dias_validade: '7',
     observacoes: '',
   });
   const [linhasInsumo, setLinhasInsumo] = useState(() => [novaLinhaInsumoVazia()]);
   const [insumosExpanded, setInsumosExpanded] = useState<Set<string>>(() => new Set());
   const [receitasProducao, setReceitasProducao] = useState<ProducaoReceitaComItens[]>([]);
   const [receitaSelectId, setReceitaSelectId] = useState('');
+  /** Se true, não reaplica a receita «Açaí do Kim» ao abrir/limpar o formulário. */
+  const [receitaPadraoBloqueada, setReceitaPadraoBloqueada] = useState(false);
+  const [insumosPainelAberto, setInsumosPainelAberto] = useState(false);
   const receitaSelecionadaTravada = Boolean(receitaSelectId);
   /** Por insumo (modo QR): já com QR no local + saldo só em lote de compra (sem QR ainda). */
   const [disponivelInsumoQrLote, setDisponivelInsumoQrLote] = useState<
@@ -247,6 +251,33 @@ export default function ProducaoPage() {
       cancel = true;
     };
   }, [form.produto_id]);
+
+  /** Pré-seleciona receita «Açaí do Kim» (nome com acai + kim) quando o operador não escolheu outra. */
+  useEffect(() => {
+    if (receitaPadraoBloqueada) return;
+    if (receitasProducao.length === 0) return;
+    if (receitaSelectId) return;
+    const rec = encontrarReceitaAcaiDoKim(receitasProducao);
+    if (!rec) return;
+    const { linhas, avisos } = linhasInsumoAPartirDaReceita(
+      rec.producao_receita_itens ?? [],
+      produtos,
+      produtoElegivelInsumoFamilia
+    );
+    if (avisos.length) console.warn('[producao] receita padrão:', avisos.join(' | '));
+    setLinhasInsumo(linhas.length > 0 ? linhas : [novaLinhaInsumoVazia()]);
+    setInsumosExpanded(new Set());
+    setReceitaSelectId(rec.id);
+    if (rec.produto_acabado_id) {
+      setForm((f) => ({ ...f, produto_id: rec.produto_acabado_id! }));
+    }
+  }, [
+    receitaPadraoBloqueada,
+    receitaSelectId,
+    receitasProducao,
+    produtos,
+    produtoElegivelInsumoFamilia,
+  ]);
 
   useEffect(() => {
     let cancel = false;
@@ -352,6 +383,7 @@ export default function ProducaoPage() {
   const aoEscolherReceita = (receitaId: string) => {
     if (!receitaId) {
       setReceitaSelectId('');
+      setReceitaPadraoBloqueada(true);
       return;
     }
     const rec = receitasProducao.find((r) => r.id === receitaId);
@@ -374,9 +406,9 @@ export default function ProducaoPage() {
       alert(avisos.join('\n'));
     }
     setLinhasInsumo(linhas.length > 0 ? linhas : [novaLinhaInsumoVazia()]);
-    // Mantém tudo recolhido (usuário expande só o que precisar).
     setInsumosExpanded(new Set());
     setReceitaSelectId(receitaId);
+    setReceitaPadraoBloqueada(false);
   };
 
   const toggleInsumoExpanded = (key: string) => {
@@ -435,11 +467,13 @@ export default function ProducaoPage() {
       );
 
       setResultado({ itens: numBaldesInt, baldes: numBaldesInt });
+      setReceitaPadraoBloqueada(false);
+      setInsumosPainelAberto(false);
       setForm({
         produto_id: '',
         num_baldes: '',
-        local_id: '',
-        dias_validade: '',
+        local_id: defaultWarehouseId || '',
+        dias_validade: '7',
         observacoes: '',
       });
       setLinhasInsumo([novaLinhaInsumoVazia()]);
@@ -615,9 +649,6 @@ export default function ProducaoPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Produção</h1>
-          <p className="text-sm text-gray-500">
-            Declare insumos (QR ou consumo por massa, conforme cadastro), baldes e validade do acabado
-          </p>
         </div>
       </div>
 
@@ -731,9 +762,6 @@ export default function ProducaoPage() {
           onChange={(e) => setForm({ ...form, num_baldes: e.target.value })}
           required
         />
-        <p className="text-xs text-gray-500 -mt-2">
-          Cada balde gera 1 unidade com QR do produto acabado (mesmo local).
-        </p>
         <Select
           label="Local (indústria)"
           required
@@ -747,7 +775,7 @@ export default function ProducaoPage() {
           <div className="flex items-end justify-between gap-2">
             <div className="flex-1 min-w-0">
               <Select
-                label="Receita (preencher insumos)"
+                label="Receita"
                 options={[
                   { value: '', label: 'Manual (sem receita)' },
                   ...receitasProducao.map((r) => ({ value: r.id, label: r.nome })),
@@ -756,31 +784,50 @@ export default function ProducaoPage() {
                 onChange={(e) => aoEscolherReceita(e.target.value)}
               />
             </div>
-            <Link href="/cadastros/receitas-producao" className="shrink-0">
-              <Button type="button" variant="outline" title="Abrir a tela de cadastro/edição de receitas">
-                Abrir receitas
-                <ArrowUpRight className="w-4 h-4 ml-2" />
+            <Link href="/cadastros/receitas-producao" className="shrink-0 self-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-10"
+                title="Receitas de produção"
+                aria-label="Abrir cadastro de receitas"
+              >
+                <ArrowUpRight className="w-4 h-4" />
               </Button>
             </Link>
           </div>
-          <p className="text-xs text-gray-500 -mt-2">
-            Cadastre receitas em <strong>Cadastros → Receitas de produção</strong>. Ao escolher uma receita, as linhas de
-            insumo são substituídas pelos valores salvos (confirmação se já houver dados).
-          </p>
-          {receitaSelecionadaTravada && (
-            <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              Receita selecionada: os insumos ficam <strong>travados</strong> na Produção. Para alterar ou remover itens,
-              edite a receita em <strong>Cadastros → Receitas de produção</strong>.
-            </p>
-          )}
           {avisoReceitaAcabadoDivergente && (
             <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Esta receita foi cadastrada para <strong>outro produto acabado</strong>. Confira se o acabado selecionado
-              está correto antes de registrar.
+              Esta receita foi cadastrada para <strong>outro produto acabado</strong>. Confira o acabado.
             </p>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setInsumosPainelAberto((aberto) => {
+                const next = !aberto;
+                if (next) {
+                  setInsumosExpanded(new Set(linhasInsumo.map((l) => l.key)));
+                }
+                return next;
+              });
+            }}
+            className="w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-slate-50/90 px-3 py-2.5 text-left text-sm font-medium text-gray-900 hover:bg-slate-100/90 active:bg-slate-100"
+            aria-expanded={insumosPainelAberto}
+          >
+            <span>Itens da receita</span>
+            {insumosPainelAberto ? (
+              <ChevronUp className="w-4 h-4 shrink-0 text-gray-600" />
+            ) : (
+              <ChevronDown className="w-4 h-4 shrink-0 text-gray-600" />
+            )}
+          </button>
+
+          {insumosPainelAberto && (
+            <>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-gray-900">Insumos gastos</h2>
+            <h2 className="text-sm font-semibold text-gray-900">Insumos</h2>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -797,15 +844,6 @@ export default function ProducaoPage() {
               </Button>
             </div>
           </div>
-          <p className="text-xs text-gray-500">
-            Só aparecem produtos <strong>ativos</strong> com família <strong>Insumo Industria</strong> em{' '}
-            <strong>Cadastros → Categorias</strong> (campo família no produto). Inclui origem{' '}
-            <strong>compra</strong>, <strong>ambos</strong> ou <strong>produção</strong> quando for o caso. Por padrão,{' '}
-            <strong>unidades com QR</strong> (FIFO). Com <strong>consumo por massa</strong> no cadastro, use{' '}
-            <strong>doses</strong> ou <strong>kg</strong> (g por dose; 0 = kg). <strong>Disp.</strong> em modo QR soma o
-            que já está com QR no local e o que ainda está só no lote de compra (NF); ao confirmar, o sistema pode emitir
-            QR por FIFO.
-          </p>
           {!loadingFamilias && insumoFamiliaIds.size === 0 && (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               Não foi encontrada categoria <strong>Insumo Industria</strong> em{' '}
@@ -918,11 +956,6 @@ export default function ProducaoPage() {
                               setInsumosExpanded((prev) => new Set([...prev, linha.key]));
                             }}
                           />
-                          <p className="text-[11px] text-gray-500 leading-snug">
-                            {doseG > 0
-                              ? `Cadastro: ${doseG.toLocaleString('pt-BR')} g por dose. Na produção, isso vira gramas (doses × g/dose).`
-                              : 'Cadastro em kg: o sistema converte para gramas (kg × 1.000) ao registrar.'}
-                          </p>
                         </div>
                       ) : (
                         <div className="space-y-1">
@@ -943,9 +976,6 @@ export default function ProducaoPage() {
                               setInsumosExpanded((prev) => new Set([...prev, linha.key]));
                             }}
                           />
-                          <p className="text-[11px] text-gray-500 leading-snug">
-                            Unidades com QR neste local + saldo emitível pela compra (FIFO).
-                          </p>
                         </div>
                       )}
                     </>
@@ -1030,6 +1060,8 @@ export default function ProducaoPage() {
             );
             })}
           </div>
+            </>
+          )}
         </div>
 
         <Input

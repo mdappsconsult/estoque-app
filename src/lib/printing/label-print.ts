@@ -87,6 +87,11 @@ export interface EtiquetaParaImpressao {
   numBaldesLoteProducao?: number | null;
   /** Instante de criação do lançamento (`producoes.created_at`) para exibir «criado dd/mm/aa». */
   dataLoteProducaoIso?: string | null;
+  /**
+   * Remessa **Separar por Loja** (lote `SEP-…`): data de criação da `transferencias` (envio).
+   * Na 60×30, substitui a linha de **validade** por **Rem. dd/mm/aa** (dia civil BR).
+   */
+  dataCriacaoRemessaIso?: string | null;
 }
 
 /**
@@ -245,7 +250,7 @@ async function qrTokensParaDataUrlsEmLotes(
   return out;
 }
 
-/** Uma metade da folha 60×30: loja, produto, QR, validade (ou data de impressão) e operador. */
+/** Uma metade da folha 60×30: loja, produto, QR, remessa/validade/impressão e operador. */
 function gerarCelula60x30(
   item: EtiquetaParaImpressao,
   qrSizeMm: number,
@@ -257,13 +262,21 @@ function gerarCelula60x30(
   const tokenCurto = escaparHtml((item.tokenShort || item.id.slice(0, 8).toUpperCase()).trim());
   const qrPx = pixelsQrParaImpressao(qrSizeMm);
 
+  const rawRemessa = (item.dataCriacaoRemessaIso || '').trim();
+  const remessaFmt = rawRemessa
+    ? formatarValidadeDdMmAaEtiquetaBr(rawRemessa)
+    : '';
+  const temDataRemessa = Boolean(remessaFmt) && remessaFmt !== '-';
+
   const rawValYmd = (item.dataValidade || '').trim().slice(0, 10);
   const valFmt = formatarValidadeEtiquetaIndustria(item.dataValidade || '');
   const temValidade =
     Boolean(rawValYmd) && !rawValYmd.startsWith('2999') && valFmt !== '-';
-  const linhaValOuImp = temValidade
-    ? `Val. ${valFmt}`
-    : `Imp. ${formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao)}`;
+  const linhaValOuImp = temDataRemessa
+    ? `Rem. ${remessaFmt}`
+    : temValidade
+      ? `Val. ${valFmt}`
+      : `Imp. ${formatarDataPtBr(item.dataGeracaoIso || item.dataManipulacao)}`;
   const loteProducaoValidade = textoLoteBaldeProducaoAcopladoValidade(item);
   const opRaw = (item.responsavel || '').trim();
   const opCurto = opRaw.length > 18 ? `${opRaw.slice(0, 16)}…` : opRaw;
@@ -485,6 +498,7 @@ export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): E
         sequenciaNoLote: 1,
         numBaldesLoteProducao: 70,
         dataLoteProducaoIso: agora,
+        dataCriacaoRemessaIso: agora,
       },
       {
         ...mk('000000000002', 'AÇAÍ BALDE 5L FRUTAS VERMELHAS', 'ACA5L-T2', 13),
@@ -492,6 +506,7 @@ export function gerarEtiquetasDemonstracaoImpressao(formato: FormatoEtiqueta): E
         sequenciaNoLote: 2,
         numBaldesLoteProducao: 70,
         dataLoteProducaoIso: agora,
+        dataCriacaoRemessaIso: agora,
       },
     ];
   }

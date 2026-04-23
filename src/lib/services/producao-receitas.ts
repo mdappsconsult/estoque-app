@@ -50,6 +50,26 @@ export type ProducaoReceitaComItens = ProducaoReceita & {
   producao_receita_itens: ProducaoReceitaItem[];
 };
 
+/**
+ * Receita operacional padrão (Açaí do Kim): nome com «açaí»/«acai» e «kim», ignorando acentos/maiúsculas.
+ * Usada na tela Produção para pré-seleção.
+ */
+export function encontrarReceitaAcaiDoKim(
+  receitas: ProducaoReceitaComItens[]
+): ProducaoReceitaComItens | undefined {
+  const norm = (s: string) =>
+    s
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/ç/g, 'c')
+      .toLowerCase();
+  for (const r of receitas) {
+    const x = norm(r.nome);
+    if (x.includes('acai') && x.includes('kim')) return r;
+  }
+  return undefined;
+}
+
 const SELECT_RECEITA_COM_ITENS = `
   *,
   producao_receita_itens (
