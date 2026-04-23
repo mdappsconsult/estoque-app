@@ -5,7 +5,6 @@ import Link from 'next/link';
 import {
   Truck,
   Loader2,
-  QrCode,
   CheckCircle,
   X,
   Wand2,
@@ -13,19 +12,15 @@ import {
   Package,
   PencilLine,
   Trash2,
+  ChevronDown,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
-import QRScanner from '@/components/QRScanner';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import {
-  contarItensComQrPorProdutosNoLocal,
-  getItemPorCodigoEscaneado,
-} from '@/lib/services/itens';
 import {
   alterarDestinoRemessaMatrizParaLoja,
   cancelarRemessaMatrizParaLoja,
@@ -64,8 +59,6 @@ interface ResumoReposicaoTela {
 /** Estoque na origem (modo manual): inclui origem do cadastro para filtrar insumos de compra. */
 type LinhaEstoqueOrigemManual = ResumoEstoqueRow & {
   origemProduto: string | null;
-  /** Linhas em `itens` (QR); o total `quantidade` do resumo pode incluir lote ainda sem etiqueta. */
-  quantidadeComQr: number;
 };
 
 function chunkIds<T>(arr: T[], size: number): T[][] {
@@ -108,10 +101,8 @@ export default function SepararPorLojaPage() {
 
   const [origemId, setOrigemId] = useState('');
   const [destinoId, setDestinoId] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
-  const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
   const [itensEscaneados, setItensEscaneados] = useState<ItemEscaneado[]>([]);
-  const [modoSeparacao, setModoSeparacao] = useState<'reposicao' | 'manual'>('reposicao');
+  const [modoSeparacao, setModoSeparacao] = useState<'reposicao' | 'manual'>('manual');
   const [resumoReposicao, setResumoReposicao] = useState<ResumoReposicaoTela[]>([]);
   const [carregandoReposicao, setCarregandoReposicao] = useState(false);
   const [aplicandoSugestao, setAplicandoSugestao] = useState(false);
@@ -124,7 +115,7 @@ export default function SepararPorLojaPage() {
   const reposicaoSyncEpoch = useRef(0);
   const [linhasEstoqueOrigemManual, setLinhasEstoqueOrigemManual] = useState<LinhaEstoqueOrigemManual[]>([]);
   /** Insumos de fornecedor (origem COMPRA) ficam ocultos no manual até marcar isto — foco em acabados (PRODUCAO/AMBOS). */
-  const [incluirCompraNoManual, setIncluirCompraNoManual] = useState(false);
+  const [incluirCompraNoManual, setIncluirCompraNoManual] = useState(true);
   const [carregandoEstoqueOrigem, setCarregandoEstoqueOrigem] = useState(false);
   const [buscaEstoqueManual, setBuscaEstoqueManual] = useState('');
   const [qtdPorProdutoManual, setQtdPorProdutoManual] = useState<Record<string, string>>({});
@@ -140,7 +131,7 @@ export default function SepararPorLojaPage() {
   const [envioEditando, setEnvioEditando] = useState<EnvioMatrizLojaResumo | null>(null);
   const [destinoModalRemessa, setDestinoModalRemessa] = useState('');
   const [remessaEmAcaoId, setRemessaEmAcaoId] = useState<string | null>(null);
-  const ENVIOS_PAGE_SIZE = 10;
+  const ENVIOS_PAGE_SIZE = 3;
 
   /** Registro atômico no servidor: pede senha após o confirm. */
   const [modalSenhaSeparacaoAberto, setModalSenhaSeparacaoAberto] = useState(false);
@@ -443,11 +434,9 @@ export default function SepararPorLojaPage() {
         if (pe) throw pe;
         (prods || []).forEach((p: { id: string; origem: string }) => origemMap.set(p.id, p.origem));
       }
-      const qrPorProduto = await contarItensComQrPorProdutosNoLocal(ids, origemId);
       const merged: LinhaEstoqueOrigemManual[] = positivos.map((r) => ({
         ...r,
         origemProduto: origemMap.get(r.produto_id) ?? null,
-        quantidadeComQr: qrPorProduto.get(r.produto_id) ?? 0,
       }));
       setLinhasEstoqueOrigemManual(merged);
     } catch (err: unknown) {
@@ -546,58 +535,6 @@ export default function SepararPorLojaPage() {
     }
   };
 
-  const processarEscaneamento = async (codigo?: string) => {
-    const raw = (codigo ?? tokenInput).trim();
-    if (!raw) return;
-    if (!origemId) {
-      setErro('Selecione a origem (indústria) antes de escanear.');
-      return;
-    }
-    setErro('');
-    try {
-      const item = await getItemPorCodigoEscaneado(raw);
-      if (!item) {
-        setErro('Item não encontrado. Confira o código e tente novamente.');
-        return;
-      }
-      if (item.estado !== 'EM_ESTOQUE') {
-        setErro('Item não está em estoque');
-        return;
-      }
-      if (item.local_atual_id !== origemId) {
-        setErro('Item não está no local de origem selecionado');
-        return;
-      }
-
-      let adicionou = false;
-      setItensEscaneados((prev) => {
-        if (prev.some((i) => i.id === item.id)) {
-          return prev;
-        }
-        adicionou = true;
-        return [
-          ...prev,
-          {
-            id: item.id,
-            token_qr: item.token_qr,
-            token_short: item.token_short,
-            produto_id: item.produto_id,
-            produto_nome: item.produto?.nome || '',
-            data_validade: item.data_validade,
-          },
-        ];
-      });
-
-      if (!adicionou) {
-        setErro('Item já escaneado nesta separação');
-        return;
-      }
-      setTokenInput('');
-    } catch (err: unknown) {
-      setErro(err instanceof Error ? err.message : 'Não foi possível buscar o item. Tente novamente.');
-    }
-  };
-
   const removerItem = (id: string) => {
     setItensEscaneados(prev => prev.filter(i => i.id !== id));
   };
@@ -621,8 +558,7 @@ export default function SepararPorLojaPage() {
     setDestinoId('');
     setResumoReposicao([]);
     setMensagemReposicao('');
-    setMostrarEntradaManual(false);
-    void carregarEnviosRegistrados();
+    void carregarEnviosRegistrados({ replace: true });
   };
 
   const criarSeparacao = () => {
@@ -792,112 +728,126 @@ export default function SepararPorLojaPage() {
       </div>
 
       {origemId && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-4 mb-6 space-y-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="flex items-start gap-2 min-w-0">
-              <Package className="w-5 h-5 text-sky-700 shrink-0 mt-0.5" aria-hidden />
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-sky-950">Envios já registrados</p>
+        <details className="group rounded-xl border border-sky-200 bg-sky-50/80 mb-6">
+          <summary className="cursor-pointer list-none px-4 py-3 flex flex-wrap items-center gap-2 text-sky-950 [&::-webkit-details-marker]:hidden">
+            <ChevronDown
+              className="w-4 h-4 shrink-0 text-sky-700 transition-transform group-open:rotate-180"
+              aria-hidden
+            />
+            <Package className="w-5 h-5 text-sky-700 shrink-0" aria-hidden />
+            <span className="text-sm font-bold">Envios já registrados</span>
+            {erroEnvios ? <span className="text-xs font-semibold text-red-700">Erro</span> : null}
+            {carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios ? (
+              <span className="inline-flex" aria-hidden>
+                <Loader2 className="w-4 h-4 animate-spin text-sky-700 shrink-0" />
+              </span>
+            ) : null}
+            {!carregandoEnvios && enviosRegistrados.length > 0 ? (
+              <span className="text-xs font-semibold text-sky-800 tabular-nums">
+                {enviosRegistrados.length}
+                {enviosHasMore ? '+' : ''}
+              </span>
+            ) : null}
+            {!carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios ? (
+              <span className="text-xs text-sky-700">0</span>
+            ) : null}
+          </summary>
+
+          <div className="px-4 pb-1 space-y-3 border-t border-sky-100/80 pt-3">
+            {erroEnvios && (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{erroEnvios}</p>
+            )}
+
+            {carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
+              <div className="flex items-center gap-2 text-xs text-sky-800 py-1">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                Carregando…
               </div>
-            </div>
-          </div>
+            )}
 
-          {erroEnvios && (
-            <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{erroEnvios}</p>
-          )}
+            {!carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
+              <p className="text-xs text-sky-900 py-0.5">Nenhuma remessa.</p>
+            )}
 
-          {carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
-            <div className="flex items-center gap-2 text-xs text-sky-800 py-2">
-              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-              Carregando envios…
-            </div>
-          )}
-
-          {!carregandoEnvios && enviosRegistrados.length === 0 && !erroEnvios && (
-            <p className="text-xs text-sky-900 py-1">
-              Nenhuma remessa encontrada.
-            </p>
-          )}
-
-          {enviosRegistrados.length > 0 && (
-            <div className="space-y-2">
-              <ul className="space-y-2 max-h-[min(24rem,58vh)] overflow-y-auto text-xs border border-sky-100 rounded-lg bg-white/90 p-2">
-                {enviosRegistrados.map((env) => (
-                  <li
-                    key={env.transferencia_id}
-                    className="border-b border-sky-100 last:border-0 pb-2 last:pb-0 text-sky-950"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-1">
-                      <span className="font-semibold">
-                        {env.origem_nome} → {env.destino_nome}
-                      </span>
-                      <span className="text-[11px] text-sky-700">
-                        {new Date(env.created_at).toLocaleString('pt-BR', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-sky-800 mt-0.5">
-                      {legivelStatusEnvio(env.status)} · <strong>{env.qtd_unidades}</strong> unidade(s)
-                    </p>
-                    <p className="text-[11px] text-sky-900 mt-1 leading-snug">{env.resumo_produtos}</p>
-                    {env.lote_sep && (
-                      <p className="text-[10px] text-sky-700 mt-1">
-                        <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code>
-                      </p>
-                    )}
-                    {remessaPermiteEditarOuExcluir(env.status) && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        <button
-                          type="button"
-                          disabled={remessaEmAcaoId !== null}
-                          onClick={() => {
-                            setEnvioEditando(env);
-                            setDestinoModalRemessa(env.destino_id);
-                          }}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
-                        >
-                          <PencilLine className="w-3.5 h-3.5" aria-hidden />
-                          Editar destino
-                        </button>
-                        <button
-                          type="button"
-                          disabled={remessaEmAcaoId !== null}
-                          onClick={() => void excluirRemessaConfirmado(env)}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
-                        >
-                          {remessaEmAcaoId === env.transferencia_id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                          ) : (
-                            <Trash2 className="w-3.5 h-3.5" aria-hidden />
-                          )}
-                          Excluir remessa
-                        </button>
+            {enviosRegistrados.length > 0 && (
+              <div className="space-y-2">
+                <ul className="space-y-2 max-h-[min(24rem,58vh)] overflow-y-auto text-xs border border-sky-100 rounded-lg bg-white/90 p-2">
+                  {enviosRegistrados.map((env) => (
+                    <li
+                      key={env.transferencia_id}
+                      className="border-b border-sky-100 last:border-0 pb-2 last:pb-0 text-sky-950"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-1">
+                        <span className="font-semibold">
+                          {env.origem_nome} → {env.destino_nome}
+                        </span>
+                        <span className="text-[11px] text-sky-700">
+                          {new Date(env.created_at).toLocaleString('pt-BR', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })}
+                        </span>
                       </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                      <p className="text-[11px] text-sky-800 mt-0.5">
+                        {legivelStatusEnvio(env.status)} · <strong>{env.qtd_unidades}</strong> unidade(s)
+                      </p>
+                      <p className="text-[11px] text-sky-900 mt-1 leading-snug">{env.resumo_produtos}</p>
+                      {env.lote_sep && (
+                        <p className="text-[10px] text-sky-700 mt-1">
+                          <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code>
+                        </p>
+                      )}
+                      {remessaPermiteEditarOuExcluir(env.status) && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <button
+                            type="button"
+                            disabled={remessaEmAcaoId !== null}
+                            onClick={() => {
+                              setEnvioEditando(env);
+                              setDestinoModalRemessa(env.destino_id);
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
+                          >
+                            <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                            Editar destino
+                          </button>
+                          <button
+                            type="button"
+                            disabled={remessaEmAcaoId !== null}
+                            onClick={() => void excluirRemessaConfirmado(env)}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
+                          >
+                            {remessaEmAcaoId === env.transferencia_id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                            )}
+                            Excluir remessa
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
 
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] text-sky-900/70 tabular-nums">
-                  Mostrando {enviosRegistrados.length}
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="!px-3 !py-1.5 text-xs"
-                  disabled={!enviosHasMore || carregandoEnvios}
-                  onClick={() => void carregarEnviosRegistrados()}
-                >
-                  {carregandoEnvios ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
-                  Carregar mais
-                </Button>
+                {enviosHasMore ? (
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="!px-3 !py-1.5 text-xs"
+                      disabled={carregandoEnvios}
+                      onClick={() => void carregarEnviosRegistrados()}
+                    >
+                      {carregandoEnvios ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                      Carregar mais
+                    </Button>
+                  </div>
+                ) : null}
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </details>
       )}
 
       <Modal
@@ -1007,7 +957,6 @@ export default function SepararPorLojaPage() {
                   setResumoReposicao([]);
                   setMensagemReposicao('');
                   setErro('');
-                  setIncluirCompraNoManual(false);
                 }}
               >
                 Modo manual
@@ -1106,27 +1055,24 @@ export default function SepararPorLojaPage() {
                 {!carregandoEstoqueOrigem &&
                   linhasEstoqueOrigemManual.length > 0 &&
                   estoqueOrigemManual.length === 0 && (
-                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      Sem itens de produção no filtro atual.
+                    <p className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                      Só há produtos <strong>só de compra</strong> (fornecedor) e a opção está desligada — marque{' '}
+                      <strong>Incluir produtos só de compra</strong> para listá-los.
                     </p>
                   )}
                 {estoqueOrigemManual.length > 0 && (
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <div className="max-h-64 overflow-y-auto overflow-x-auto">
-                      <table className="w-full text-sm min-w-[520px]">
+                      <table className="w-full text-sm min-w-[320px]">
                         <thead className="bg-gray-50 sticky top-0">
                           <tr className="text-left text-gray-600">
                             <th className="px-3 py-2">Produto</th>
                             <th className="px-3 py-2 w-16" title="Saldo agregado (pode incluir compra sem QR)">
                               Total
                             </th>
-                            <th className="px-3 py-2 w-16" title="Unidades com etiqueta/QR no local">
-                              Com QR
-                            </th>
-                            <th className="px-3 py-2 w-12">Lista</th>
                             <th
                               className="px-3 py-2 w-14"
-                              title="Saldo total ainda fora da lista (o + pode emitir QR do lote se precisar)"
+                              title="Saldo ainda fora desta separação (o + pode emitir QR do lote se precisar)"
                             >
                               Livre
                             </th>
@@ -1137,7 +1083,6 @@ export default function SepararPorLojaPage() {
                         <tbody>
                           {estoqueOrigemManual.map((linha) => {
                             const naLista = jaNaListaPorProduto.get(linha.produto_id) || 0;
-                            const comQr = linha.quantidadeComQr;
                             const totalSaldo = Number(linha.quantidade);
                             const totalOk = Number.isFinite(totalSaldo) ? totalSaldo : 0;
                             const livre = Math.max(0, totalOk - naLista);
@@ -1145,8 +1090,6 @@ export default function SepararPorLojaPage() {
                               <tr key={linha.produto_id} className="border-t border-gray-100">
                                 <td className="px-3 py-2">{linha.produto_nome}</td>
                                 <td className="px-3 py-2 tabular-nums">{linha.quantidade}</td>
-                                <td className="px-3 py-2 tabular-nums">{comQr}</td>
-                                <td className="px-3 py-2 tabular-nums">{naLista}</td>
                                 <td className="px-3 py-2 font-medium tabular-nums">{livre}</td>
                                 <td className="px-3 py-2 align-middle w-24 min-w-[5.5rem]">
                                   <input
@@ -1204,42 +1147,6 @@ export default function SepararPorLojaPage() {
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
-                <QRScanner
-                  onScan={(code) => void processarEscaneamento(code)}
-                  label="Ativar leitor de QR (câmera)"
-                />
-                {!mostrarEntradaManual ? (
-                  <Button variant="outline" className="w-full" onClick={() => setMostrarEntradaManual(true)}>
-                    Digitar código QR ou token
-                  </Button>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Código QR ou token curto"
-                        value={tokenInput}
-                        onChange={(e) => setTokenInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && void processarEscaneamento()}
-                      />
-                      <Button variant="primary" onClick={() => void processarEscaneamento()} aria-label="Confirmar código">
-                        <QrCode className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      className="w-full"
-                      onClick={() => {
-                        setMostrarEntradaManual(false);
-                        setTokenInput('');
-                      }}
-                    >
-                      Fechar digitação
-                    </Button>
                   </div>
                 )}
               </div>

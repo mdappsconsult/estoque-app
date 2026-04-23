@@ -1025,8 +1025,6 @@ export default function EntradaCompraPage() {
                       <th className="py-2 pr-2 font-medium">Produto</th>
                       <th className="py-2 pr-2 font-medium">Local</th>
                       <th className="py-2 pr-2 font-medium tabular-nums">Qtd</th>
-                      <th className="py-2 pr-2 font-medium">Lote</th>
-                      <th className="py-2 pr-2 font-medium">NF</th>
                       <th className="py-2 pl-2 font-medium w-24" />
                     </tr>
                   </thead>
@@ -1042,7 +1040,6 @@ export default function EntradaCompraPage() {
                         l.local && typeof l.local === 'object' && 'nome' in l.local
                           ? (l.local as { nome: string }).nome
                           : '—';
-                      const nf = l.sem_nota_fiscal ? 'S/NF' : (l.nota_fiscal || '—');
                       return (
                         <tr key={l.id} className="border-b border-gray-100">
                           <td className="py-2 pr-2 whitespace-nowrap text-gray-700">{dataStr}</td>
@@ -1053,12 +1050,6 @@ export default function EntradaCompraPage() {
                             {nomeLoc}
                           </td>
                           <td className="py-2 pr-2 tabular-nums font-medium">{l.quantidade}</td>
-                          <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[100px]" title={l.lote_fornecedor}>
-                            {l.lote_fornecedor}
-                          </td>
-                          <td className="py-2 pr-2 truncate max-w-[80px]" title={nf}>
-                            {nf}
-                          </td>
                           <td className="py-2 pl-2">
                             <Button
                               type="button"

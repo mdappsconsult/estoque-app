@@ -1,5 +1,39 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Registrar Compra: tabela «Corrigir lançamentos recentes» sem Lote e NF
+- **Pedido:** retirar colunas **Lote** e **NF** da lista (detalhes seguem no modal **Editar**).
+- **Código:** `src/app/entrada-compra/page.tsx`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja (manual): «Incluir produtos só de compra» marcado por padrão
+- **Pedido:** checkbox **Incluir produtos só de compra** já vir marcado.
+- **Código:** `src/app/separar-por-loja/page.tsx` — `useState(true)`; ao trocar para modo manual não zera mais a opção; aviso quando só há compra com opção desligada. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja: sem leitor QR nem digitação de código
+- **Pedido:** remover **Ativar leitor de QR** e **Digitar código QR ou token** da página.
+- **Código:** `src/app/separar-por-loja/page.tsx` — remoção de `QRScanner`, fluxo manual de token e `processarEscaneamento` / `getItemPorCodigoEscaneado`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja (manual): tabela sem colunas Com QR e Lista
+- **Pedido:** retirar colunas **Com QR** e **Lista** (manter Produto, Total, Livre, Qtd e ação).
+- **Código:** `src/app/separar-por-loja/page.tsx` — remoção das colunas e da consulta `contarItensComQrPorProdutosNoLocal`; `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja (manual): aviso quando só há produto de compra
+- **Pedido:** esclarecer o aviso que aparecia como «Sem itens de produção no filtro atual».
+- **Código:** `src/app/separar-por-loja/page.tsx` — texto explica que o saldo é só de fornecedor e aponta para o checkbox **Incluir produtos só de compra**; estilo alinhado a faixa informativa neutra.
+
+### Sessão - 2026-04-22 - Separar por Loja: modo manual por padrão
+- **Pedido:** ao abrir a tela, **modo manual** já selecionado (em vez de reposição).
+- **Código:** `src/app/separar-por-loja/page.tsx` — `useState` inicial de `modoSeparacao` em `'manual'`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-22 - Separar por Loja: «Envios já registrados» retraído + 3 últimos
+- **Pedido:** painel minimizado, já carregando os **3** registros mais recentes; menos ruído no bloco (sem texto explicativo extra).
+- **Código:** `src/app/separar-por-loja/page.tsx` — `<details>` fechado por padrão, `ENVIOS_PAGE_SIZE = 3`, contagem/`+` no `<summary>`, remoção do rodapé «Mostrando…»; **Carregar mais** só se `enviosHasMore`; após registrar remessa, `carregarEnviosRegistrados({ replace: true })`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-22 - Produção: receita padrão no deploy + histórico enxuto
 - **Problema:** em produção (rede lenta), receitas carregavam antes de `produtos`/`familias` — pré-seleção «Açaí do Kim» gravava `receitaSelectId` com insumos vazios e o efeito não rodava de novo.
 - **Código:** `src/app/producao/page.tsx` — guardas `loadingProdutos`/`loadingFamilias` na pré-seleção; `useEffect` que reaplica insumos da receita escolhida quando o catálogo fica pronto (idempotente). `src/lib/services/producao-receitas.ts` — `encontrarReceitaAcaiDoKim` sem `\p{M}` (compatibilidade). **Produções registradas:** `<details>` fechado por padrão, sem parágrafo explicativo, tabela menor (cabeçalhos abreviados).
