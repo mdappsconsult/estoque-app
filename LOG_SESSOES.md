@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-23 - Separar por Loja: mensagem quando `fetch` falha ao gravar remessa
+- **Problema:** no modal **Senha para gravar remessa**, erro genérico `TypeError: fetch failed` (rede/timeout/serviço antes da resposta HTTP).
+- **Código:** `mensagemErroFetchClienteOperacional` em `src/lib/errMessage.ts`; uso no `catch` de `confirmarSeparacaoComSenhaNoServidor` em `src/app/separar-por-loja/page.tsx`; `export const maxDuration = 180` em `src/app/api/operacional/criar-separacao-matriz-loja/route.ts`. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-22 - Separar por Loja: desmarcar «Incluir compra» na origem indústria
 - **Pedido:** com origem **indústria** selecionada, **Incluir produtos só de compra** deve ficar desmarcado.
 - **Código:** `src/app/separar-por-loja/page.tsx` — heurística por nome do warehouse (`industria` / `indústria`) e por operador indústria com origem = `local_padrao_id`; ao trocar para outro armazém, volta a marcar por padrão. `CONTEXTO_ATUAL.md` alinhado.

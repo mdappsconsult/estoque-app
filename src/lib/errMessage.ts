@@ -42,3 +42,31 @@ export function formatNodeFetchError(e: unknown): string {
   }
   return msg;
 }
+
+/**
+ * Mensagem em PT-BR quando o `fetch` no navegador falha antes da resposta (rede, SSL, proxy, timeout de rota).
+ * Usado em fluxos operacionais (ex.: gravar remessa em Separar por Loja).
+ */
+export function mensagemErroFetchClienteOperacional(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return 'Não foi possível contatar o servidor. Verifique a internet e tente de novo.';
+  }
+  const m = err.message.trim();
+  const rede =
+    m === 'fetch failed' ||
+    m === 'Failed to fetch' ||
+    m === 'NetworkError when attempting to fetch resource.' ||
+    m === 'Load failed' ||
+    (err instanceof TypeError && /\bfetch\b/i.test(m));
+  if (!rede) {
+    return errMessage(err, 'Erro ao registrar separação');
+  }
+  const tech = formatNodeFetchError(err);
+  const sufixoTecnico =
+    tech.length > m.length + 3 || (tech !== m && tech !== 'Falha de rede') ? ` Detalhe técnico: ${tech}` : '';
+  return (
+    'Não foi possível gravar a remessa: a conexão com o servidor não completou (internet instável, firewall, certificado ou serviço temporariamente indisponível).' +
+    sufixoTecnico +
+    ' Mantenha esta aba aberta, aguarde até cerca de um minuto em remessas grandes e tente de novo; se repetir, teste outra rede ou Wi‑Fi.'
+  );
+}

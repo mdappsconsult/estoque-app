@@ -37,6 +37,7 @@ import {
 } from '@/lib/services/envios-matriz-lojas';
 import { Local } from '@/types/database';
 import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
+import { mensagemErroFetchClienteOperacional } from '@/lib/errMessage';
 
 interface ItemEscaneado {
   id: string;
@@ -678,7 +679,7 @@ export default function SepararPorLojaPage() {
       setSavingEtapa('');
       await finalizarUiAposSeparacaoServidor(snapshotItens, loteEtiqueta, nomeLojaDestino);
     } catch (err: unknown) {
-      setErroModalSeparacao(err instanceof Error ? err.message : 'Erro ao registrar separação');
+      setErroModalSeparacao(mensagemErroFetchClienteOperacional(err));
     } finally {
       setSavingEtapa('');
       setSaving(false);

@@ -8,6 +8,9 @@ import {
 } from '@/lib/services/separacao-matriz-loja-atomic';
 import type { UpsertEtiquetaSeparacaoItem } from '@/lib/services/etiquetas';
 
+/** Remessas grandes (centenas de upserts); evita corte prematuro em ambientes que honram o limite da rota. */
+export const maxDuration = 180;
+
 const PERFIS = new Set([
   'ADMIN_MASTER',
   'MANAGER',
