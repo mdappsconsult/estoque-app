@@ -255,6 +255,7 @@ export default function ProducaoPage() {
   /** Pré-seleciona receita «Açaí do Kim» (nome com acai + kim) quando o operador não escolheu outra. */
   useEffect(() => {
     if (receitaPadraoBloqueada) return;
+    if (loadingProdutos || loadingFamilias) return;
     if (receitasProducao.length === 0) return;
     if (receitaSelectId) return;
     const rec = encontrarReceitaAcaiDoKim(receitasProducao);
@@ -273,6 +274,40 @@ export default function ProducaoPage() {
     }
   }, [
     receitaPadraoBloqueada,
+    receitaSelectId,
+    receitasProducao,
+    produtos,
+    produtoElegivelInsumoFamilia,
+    loadingProdutos,
+    loadingFamilias,
+  ]);
+
+  /** Reaplica insumos da receita escolhida quando o catálogo (produtos/famílias) termina de carregar — evita receita «vazia» no deploy com rede lenta. */
+  useEffect(() => {
+    if (loadingProdutos || loadingFamilias) return;
+    if (!receitaSelectId) return;
+    const rec = receitasProducao.find((r) => r.id === receitaSelectId);
+    if (!rec) return;
+    const { linhas: novasLinhas } = linhasInsumoAPartirDaReceita(
+      rec.producao_receita_itens ?? [],
+      produtos,
+      produtoElegivelInsumoFamilia
+    );
+    if (novasLinhas.length === 0) return;
+    setLinhasInsumo((prev) => {
+      const same =
+        prev.length === novasLinhas.length &&
+        prev.every(
+          (p, i) =>
+            p.produto_id === novasLinhas[i]!.produto_id &&
+            String(p.quantidade) === String(novasLinhas[i]!.quantidade) &&
+            String(p.massa_valor) === String(novasLinhas[i]!.massa_valor)
+        );
+      return same ? prev : novasLinhas;
+    });
+  }, [
+    loadingProdutos,
+    loadingFamilias,
     receitaSelectId,
     receitasProducao,
     produtos,
@@ -1110,124 +1145,128 @@ export default function ProducaoPage() {
         </Button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 mb-8">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
+      <details className="group bg-white rounded-xl border border-gray-200 mb-8 overflow-hidden">
+        <summary className="list-none cursor-pointer flex items-center gap-3 px-4 py-3 sm:px-5 sm:py-3.5 hover:bg-slate-50/80 [&::-webkit-details-marker]:hidden">
+          <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
             <History className="w-4 h-4 text-slate-600" />
           </div>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Produções registradas</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Cada balde corresponde a 1 QR do acabado. «QRs acabado» = «Baldes». «Insumos» soma linhas de baixa por QR
-              mais linhas de consumo por massa (gramas) no mesmo lançamento.
-            </p>
+          <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-900">Produções registradas</span>
+            {!historicoLoading && historicoProducoes.length > 0 && (
+              <span className="text-[11px] font-medium tabular-nums text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
+                {historicoProducoes.length}
+              </span>
+            )}
             {filtroHistoricoLocal && (
-              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 mt-2">
-                Lista filtrada ao seu armazém padrão ({warehouses.find((w) => w.id === filtroHistoricoLocal[0]?.value)?.nome ?? 'local'}).
-              </p>
+              <span className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5">
+                {warehouses.find((w) => w.id === filtroHistoricoLocal[0]?.value)?.nome ?? 'Seu armazém'}
+              </span>
             )}
           </div>
-        </div>
+          <ChevronDown className="w-4 h-4 shrink-0 text-gray-500 transition-transform group-open:rotate-180" />
+        </summary>
 
-        {historicoError && (
-          <div className="text-sm text-red-700 mb-3 space-y-1">
-            <p>
-              Não foi possível carregar o histórico:{' '}
-              {errMessage(historicoError, 'Erro desconhecido')}
-            </p>
-            {/failed to fetch|load failed|networkerror/i.test(String(historicoError.message)) && (
-              <p className="text-xs text-red-900/90">
-                Falha de rede ao falar com o Supabase (URL longa, proxy, VPN, projeto pausado ou variáveis
-                NEXT_PUBLIC_SUPABASE_* incorretas). Rode <code className="text-[11px]">npm run test:historico-producao</code>{' '}
-                no mesmo ambiente do deploy para isolar o problema.
+        <div className="border-t border-gray-100 px-4 pb-3 sm:px-5 sm:pb-4 pt-2">
+          {historicoError && (
+            <div className="text-sm text-red-700 mb-3 space-y-1">
+              <p>
+                Não foi possível carregar o histórico:{' '}
+                {errMessage(historicoError, 'Erro desconhecido')}
               </p>
-            )}
-          </div>
-        )}
+              {/failed to fetch|load failed|networkerror/i.test(String(historicoError.message)) && (
+                <p className="text-xs text-red-900/90">
+                  Falha de rede ao falar com o Supabase (URL longa, proxy, VPN, projeto pausado ou variáveis
+                  NEXT_PUBLIC_SUPABASE_* incorretas). Rode <code className="text-[11px]">npm run test:historico-producao</code>{' '}
+                  no mesmo ambiente do deploy para isolar o problema.
+                </p>
+              )}
+            </div>
+          )}
 
-        {historicoLoading && historicoProducoes.length === 0 ? (
-          <div className="flex items-center gap-2 text-gray-600 text-sm py-6">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Carregando histórico…
-          </div>
-        ) : historicoProducoes.length === 0 ? (
-          <p className="text-sm text-gray-500 py-4">Nenhuma produção encontrada.</p>
-        ) : (
-          <div className="overflow-x-auto -mx-1 sm:mx-0">
-            <table className="min-w-[720px] w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-600">
-                  <th className="py-2 pr-3 font-medium whitespace-nowrap">Data / hora</th>
-                  <th className="py-2 pr-3 font-medium">Local</th>
-                  <th className="py-2 pr-3 font-medium">Produto</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Lote prod.</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Baldes</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Qtd gravada</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">QRs acabado</th>
-                  <th className="py-2 pr-3 font-medium text-right whitespace-nowrap">Insumos</th>
-                  <th className="py-2 pr-3 font-medium whitespace-nowrap">Conferência</th>
-                  <th className="py-2 font-medium">Resp.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historicoProducoes.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/80">
-                    <td className="py-2 pr-3 text-gray-800 whitespace-nowrap">
-                      {row.createdAt
-                        ? new Date(row.createdAt).toLocaleString('pt-BR', {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
-                          })
-                        : '—'}
-                    </td>
-                    <td className="py-2 pr-3 text-gray-700 max-w-[140px] truncate" title={row.localNome}>
-                      {row.localNome}
-                    </td>
-                    <td className="py-2 pr-3 text-gray-800 max-w-[200px] truncate" title={row.produtoNome}>
-                      {row.produtoNome}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
-                      {row.numeroLoteProducao != null ? row.numeroLoteProducao : '—'}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums font-medium text-gray-900">{row.numBaldes}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-gray-700">{row.quantidade}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
-                      {row.contagemAcabadoDisponivel ? row.qrsAcabado : '—'}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-gray-800">
-                      {row.contagemInsumoDisponivel ? row.qrsInsumoBaixados : '—'}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {!row.contagemAcabadoDisponivel || !row.contagemInsumoDisponivel ? (
-                        <span
-                          className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 text-xs font-medium"
-                          title="Contagem auxiliar não carregou (rede ou limite de URL). Recarregue a página."
-                        >
-                          N/D
-                        </span>
-                      ) : row.coerenteBaldes ? (
-                        <span className="inline-flex items-center rounded-full bg-green-50 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium">
-                          OK
-                        </span>
-                      ) : (
-                        <span
-                          className="inline-flex items-center rounded-full bg-red-50 text-red-800 border border-red-200 px-2 py-0.5 text-xs font-medium"
-                          title="Esperado: QRs acabado = baldes = qtd gravada"
-                        >
-                          Conferir
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 text-gray-600 max-w-[100px] truncate" title={row.responsavel}>
-                      {row.responsavel}
-                    </td>
+          {historicoLoading && historicoProducoes.length === 0 ? (
+            <div className="flex items-center gap-2 text-gray-600 text-xs py-3">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Carregando…
+            </div>
+          ) : historicoProducoes.length === 0 ? (
+            <p className="text-xs text-gray-500 py-2">Nenhuma produção encontrada.</p>
+          ) : (
+            <div className="overflow-x-auto -mx-1 sm:mx-0">
+              <table className="min-w-[560px] w-full text-[11px] border-collapse leading-tight">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-gray-500">
+                    <th className="py-1 pr-2 font-medium whitespace-nowrap">Data</th>
+                    <th className="py-1 pr-2 font-medium max-w-[72px]">Local</th>
+                    <th className="py-1 pr-2 font-medium max-w-[120px]">Produto</th>
+                    <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">Lote</th>
+                    <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">Bld</th>
+                    <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">Qtd</th>
+                    <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">QR ac.</th>
+                    <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">Ins.</th>
+                    <th className="py-1 pr-2 font-medium whitespace-nowrap">Conf.</th>
+                    <th className="py-1 font-medium max-w-[64px]">Resp.</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {historicoProducoes.map((row) => (
+                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/80">
+                      <td className="py-1 pr-2 text-gray-800 whitespace-nowrap">
+                        {row.createdAt
+                          ? new Date(row.createdAt).toLocaleString('pt-BR', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-gray-700 max-w-[72px] truncate" title={row.localNome}>
+                        {row.localNome}
+                      </td>
+                      <td className="py-1 pr-2 text-gray-800 max-w-[120px] truncate" title={row.produtoNome}>
+                        {row.produtoNome}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-gray-800">
+                        {row.numeroLoteProducao != null ? row.numeroLoteProducao : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums font-medium text-gray-900">{row.numBaldes}</td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-gray-700">{row.quantidade}</td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-gray-800">
+                        {row.contagemAcabadoDisponivel ? row.qrsAcabado : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-gray-800">
+                        {row.contagemInsumoDisponivel ? row.qrsInsumoBaixados : '—'}
+                      </td>
+                      <td className="py-1 pr-2">
+                        {!row.contagemAcabadoDisponivel || !row.contagemInsumoDisponivel ? (
+                          <span
+                            className="inline-flex items-center rounded bg-slate-100 text-slate-700 border border-slate-200 px-1 py-px text-[10px] font-medium"
+                            title="Contagem auxiliar não carregou. Recarregue a página."
+                          >
+                            N/D
+                          </span>
+                        ) : row.coerenteBaldes ? (
+                          <span className="inline-flex items-center rounded bg-green-50 text-green-800 border border-green-200 px-1 py-px text-[10px] font-medium">
+                            OK
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center rounded bg-red-50 text-red-800 border border-red-200 px-1 py-px text-[10px] font-medium"
+                            title="Esperado: QRs acabado = baldes = qtd gravada"
+                          >
+                            !
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1 text-gray-600 max-w-[64px] truncate" title={row.responsavel}>
+                        {row.responsavel}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </details>
 
       <Modal
         isOpen={confirmacaoAberta}

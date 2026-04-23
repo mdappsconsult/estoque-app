@@ -57,11 +57,12 @@ export type ProducaoReceitaComItens = ProducaoReceita & {
 export function encontrarReceitaAcaiDoKim(
   receitas: ProducaoReceitaComItens[]
 ): ProducaoReceitaComItens | undefined {
+  /** Sem `\p{M}` (Unicode property) para compatibilidade com engines JS mais antigas em PWA/navegadores. */
   const norm = (s: string) =>
     s
       .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .replace(/ç/g, 'c')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/ç/gi, 'c')
       .toLowerCase();
   for (const r of receitas) {
     const x = norm(r.nome);

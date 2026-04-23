@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Produção: receita padrão no deploy + histórico enxuto
+- **Problema:** em produção (rede lenta), receitas carregavam antes de `produtos`/`familias` — pré-seleção «Açaí do Kim» gravava `receitaSelectId` com insumos vazios e o efeito não rodava de novo.
+- **Código:** `src/app/producao/page.tsx` — guardas `loadingProdutos`/`loadingFamilias` na pré-seleção; `useEffect` que reaplica insumos da receita escolhida quando o catálogo fica pronto (idempotente). `src/lib/services/producao-receitas.ts` — `encontrarReceitaAcaiDoKim` sem `\p{M}` (compatibilidade). **Produções registradas:** `<details>` fechado por padrão, sem parágrafo explicativo, tabela menor (cabeçalhos abreviados).
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-22 - Deploy: Produção + etiquetas 60×30 (remessa) + receita Açaí do Kim
 - **Conteúdo do push:** (1) **Produção** — `encontrarReceitaAcaiDoKim`, painel recolhível **Itens da receita**, validade (dias) padrão **7**, reset pós-registro, UI enxuta; (2) **`producao-receitas.ts`** — função `encontrarReceitaAcaiDoKim`; (3) **`label-print`** — 60×30 com **`Rem. dd/mm/aa`** (criação da remessa `SEP-…`) no lugar da validade quando houver meta.
 - **Deploy:** `git push` em `main` (Railway pelo repositório; não empilhar `railway up` no mesmo minuto).
