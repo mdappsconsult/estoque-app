@@ -83,6 +83,34 @@ function remessaPermiteEditarOuExcluir(status: string): boolean {
   return status === 'AWAITING_ACCEPT' || status === 'ACCEPTED';
 }
 
+/** Nome do warehouse sugere indústria (vs. armazém «Estoque» etc.). */
+function warehouseNomeIndicaIndustria(local: Local | undefined): boolean {
+  if (!local || local.tipo !== 'WAREHOUSE') return false;
+  const n = local.nome
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return n.includes('industria');
+}
+
+function origemEhIndustriaSeparacao(opts: {
+  origemId: string;
+  local: Local | undefined;
+  restricaoIndustria: boolean;
+  localPadraoIndustriaId: string;
+}): boolean {
+  const id = opts.origemId.trim();
+  if (!id) return false;
+  if (
+    opts.restricaoIndustria &&
+    opts.localPadraoIndustriaId &&
+    id === opts.localPadraoIndustriaId.trim()
+  ) {
+    return true;
+  }
+  return warehouseNomeIndicaIndustria(opts.local);
+}
+
 export default function SepararPorLojaPage() {
   const { usuario } = useAuth();
   const { data: locais, loading } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
@@ -114,7 +142,10 @@ export default function SepararPorLojaPage() {
   const [erro, setErro] = useState('');
   const reposicaoSyncEpoch = useRef(0);
   const [linhasEstoqueOrigemManual, setLinhasEstoqueOrigemManual] = useState<LinhaEstoqueOrigemManual[]>([]);
-  /** Insumos de fornecedor (origem COMPRA) ficam ocultos no manual até marcar isto — foco em acabados (PRODUCAO/AMBOS). */
+  /**
+   * Insumos de fornecedor (origem COMPRA) no manual: visíveis quando marcado.
+   * Desliga sozinho quando a origem é indústria (nome do local ou operador travado em `local_padrao_id`).
+   */
   const [incluirCompraNoManual, setIncluirCompraNoManual] = useState(true);
   const [carregandoEstoqueOrigem, setCarregandoEstoqueOrigem] = useState(false);
   const [buscaEstoqueManual, setBuscaEstoqueManual] = useState('');
@@ -160,6 +191,7 @@ export default function SepararPorLojaPage() {
         setResumoReposicao([]);
         setMensagemReposicao('');
         setEnviosRegistrados([]);
+        setIncluirCompraNoManual(false);
       }
       return;
     }
@@ -708,10 +740,24 @@ export default function SepararPorLojaPage() {
           disabled={restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1}
           onChange={(e) => {
             if (restricaoOrigemIndustria && warehousesParaOrigemSelect.length === 1) return;
-            setOrigemId(e.target.value);
+            const nextId = e.target.value;
+            setOrigemId(nextId);
             setResumoReposicao([]);
             setMensagemReposicao('');
             setEnviosRegistrados([]);
+            const loc = warehouses.find((l) => l.id === nextId);
+            if (
+              origemEhIndustriaSeparacao({
+                origemId: nextId,
+                local: loc,
+                restricaoIndustria: restricaoOrigemIndustria,
+                localPadraoIndustriaId,
+              })
+            ) {
+              setIncluirCompraNoManual(false);
+            } else if (nextId) {
+              setIncluirCompraNoManual(true);
+            }
           }}
         />
         <Select

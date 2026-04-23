@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-04-22 - Separar por Loja: desmarcar «Incluir compra» na origem indústria
+- **Pedido:** com origem **indústria** selecionada, **Incluir produtos só de compra** deve ficar desmarcado.
+- **Código:** `src/app/separar-por-loja/page.tsx` — heurística por nome do warehouse (`industria` / `indústria`) e por operador indústria com origem = `local_padrao_id`; ao trocar para outro armazém, volta a marcar por padrão. `CONTEXTO_ATUAL.md` alinhado.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-22 - Registrar Compra: tabela «Corrigir lançamentos recentes» sem Lote e NF
 - **Pedido:** retirar colunas **Lote** e **NF** da lista (detalhes seguem no modal **Editar**).
 - **Código:** `src/app/entrada-compra/page.tsx`. `CONTEXTO_ATUAL.md` alinhado.
