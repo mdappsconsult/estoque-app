@@ -124,11 +124,32 @@ export type OpcoesGerarDocumentoHtmlEtiquetas = {
    * Default / omitido = pares consecutivos (0|1, 2|3…), adequado à sequência por produto após corte folha a folha.
    */
   preparar60x30PilhasPorLado?: boolean;
+  /**
+   * Número de ordem na **ordem de impressão** do array (1…N) **só na tela** — oculto em `@media print`.
+   */
+  mostrarIndicesPrevia?: boolean;
+  /**
+   * Número do primeiro item deste HTML (1-based). Default 1. Ex.: prévia do slice «51–100» → `51`.
+   */
+  indicePreviaInicio?: number;
 };
 
 /** Opções do HTML + texto opcional na faixa fixa da prévia (só texto puro; sem HTML arbitrário). */
 export type OpcoesPreviaEtiquetasJanela = OpcoesGerarDocumentoHtmlEtiquetas & {
   mensagemBarra?: string;
+  /** Link «Voltar» na página `/etiquetas/previa` (default `/etiquetas`). */
+  voltarPath?: string;
+};
+
+/** Prefixo de `sessionStorage` para payload em `/etiquetas/previa?id=…`. */
+export const SESSION_STORAGE_PREVIA_ETIQUETAS_PREFIX = 'estoque-app:previa-etiquetas:';
+
+export type PreviaEtiquetasSessionPayload = {
+  formato: FormatoEtiqueta;
+  etiquetas: EtiquetaParaImpressao[];
+  opcoesGerador?: OpcoesGerarDocumentoHtmlEtiquetas;
+  mensagemBarra?: string | null;
+  voltarPath: string;
 };
 
 function normalizarFormatoImpressao(valor: string | null): FormatoEtiqueta {
@@ -250,12 +271,43 @@ async function qrTokensParaDataUrlsEmLotes(
   return out;
 }
 
+function estilosNumeracaoSomentePrevia(): string {
+  return `
+    .previa-indice-etiqueta {
+      position: absolute;
+      top: 0.6mm;
+      left: 0.6mm;
+      z-index: 9;
+      min-width: 5.5mm;
+      height: 5mm;
+      padding: 0 1.2mm;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font: 800 6.5pt/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: -0.02em;
+      color: #fff;
+      background: #ea580c;
+      border-radius: 1.2mm;
+      box-shadow: 0 0.15mm 0.45mm rgba(0, 0, 0, 0.22);
+      pointer-events: none;
+    }
+    .celula-60x30 { position: relative; }
+    .folha-6060-wrap { position: relative; }
+    .folha-legado-wrap { position: relative; display: block; }
+    @media print {
+      .previa-indice-etiqueta { display: none !important; }
+    }
+  `;
+}
+
 /** Uma metade da folha 60×30: loja, produto, QR, remessa/validade/impressão e operador. */
 function gerarCelula60x30(
   item: EtiquetaParaImpressao,
   qrSizeMm: number,
   classeExtra: string,
-  qrDataUrl: string
+  qrDataUrl: string,
+  indicePrevia: number | null = null
 ): string {
   const loja = escaparHtml((item.nomeLoja || '—').trim() || '—');
   const produto = escaparHtml((item.produtoNome || 'Produto').toUpperCase().slice(0, 32));
@@ -287,8 +339,14 @@ function gerarCelula60x30(
     ? `<div class="cel-n-balde">BALDE Nº ${escaparHtml(String(nSeq))}</div>`
     : '';
 
+  const badgePrevia =
+    indicePrevia != null && Number.isFinite(indicePrevia)
+      ? `<span class="previa-indice-etiqueta" aria-hidden="true">${escaparHtml(String(indicePrevia))}</span>`
+      : '';
+
   return `
     <div class="celula-60x30${classeExtra}">
+      ${badgePrevia}
       <div class="celula-60x30-stack">
         <div class="cel-loja">${loja}</div>
         <div class="cel-prod">${produto}</div>
@@ -316,11 +374,13 @@ function gerarFolha60x30Par(
   direita: EtiquetaParaImpressao | null,
   qrSizeMm: number,
   qrDataUrlEsq: string,
-  qrDataUrlDir: string | null
+  qrDataUrlDir: string | null,
+  previaEsq: number | null,
+  previaDir: number | null
 ): string {
-  const celEsq = gerarCelula60x30(esquerda, qrSizeMm, '', qrDataUrlEsq);
+  const celEsq = gerarCelula60x30(esquerda, qrSizeMm, '', qrDataUrlEsq, previaEsq);
   const celDir = direita
-    ? gerarCelula60x30(direita, qrSizeMm, ' celula-direita-pontilhada', qrDataUrlDir!)
+    ? gerarCelula60x30(direita, qrSizeMm, ' celula-direita-pontilhada', qrDataUrlDir!, previaDir)
     : `<div class="celula-60x30 celula-vazia celula-direita-pontilhada"><span class="cel-vazia-txt">—</span></div>`;
   return `<div class="folha-60x30">${celEsq}${celDir}</div>`;
 }
@@ -1023,6 +1083,9 @@ export async function gerarDocumentoHtmlEtiquetas(
   const cfg = FORMATO_CONFIG[formato];
   let htmlCorpo: string;
   let estilos: string;
+  const cssPreviaIdx = opcoes?.mostrarIndicesPrevia ? estilosNumeracaoSomentePrevia() : '';
+  const showPrev = Boolean(opcoes?.mostrarIndicesPrevia);
+  const basePrev = opcoes?.indicePreviaInicio ?? 1;
 
   if (formato === '60x30') {
     const qrPorIndice = await qrTokensParaDataUrlsEmLotes(
@@ -1034,7 +1097,15 @@ export async function gerarDocumentoHtmlEtiquetas(
       const esq = itens[i];
       const dir = itens[i + 1] ?? null;
       pedacos.push(
-        gerarFolha60x30Par(esq, dir, cfg.qrSizeMm, qrPorIndice[i], dir ? qrPorIndice[i + 1] : null)
+        gerarFolha60x30Par(
+          esq,
+          dir,
+          cfg.qrSizeMm,
+          qrPorIndice[i],
+          dir ? qrPorIndice[i + 1] : null,
+          showPrev ? basePrev + i : null,
+          showPrev && dir ? basePrev + i + 1 : null
+        )
       );
     }
     htmlCorpo = pedacos
@@ -1052,6 +1123,7 @@ export async function gerarDocumentoHtmlEtiquetas(
         html, body { margin: 0 !important; padding: 0 !important; }
       }
       ${estilosGlobais60x30(cfg)}
+      ${cssPreviaIdx}
       .page-break { break-after: page; page-break-after: always; }
     `;
   } else {
@@ -1062,21 +1134,29 @@ export async function gerarDocumentoHtmlEtiquetas(
     const folha6060Css =
       formato === '60x60'
         ? `
-      .folha-6060 {
+      .folha-6060-wrap {
+        box-sizing: border-box;
+        position: relative;
+        width: 60mm;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+        page-break-after: always;
+        break-after: page;
+      }
+      .folha-6060-wrap:last-of-type {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      .folha-6060-wrap .folha-6060 {
         box-sizing: border-box;
         width: 60mm;
         height: 60mm;
         margin: 0;
         padding: 0;
         overflow: hidden;
-        page-break-after: always;
-        break-after: page;
       }
-      .folha-6060:last-of-type {
-        page-break-after: auto;
-        break-after: auto;
-      }
-      .folha-6060 .etiqueta.fmt-6060 {
+      .folha-6060-wrap .etiqueta.fmt-6060 {
         width: 100%;
         height: 100%;
       }
@@ -1085,11 +1165,17 @@ export async function gerarDocumentoHtmlEtiquetas(
     htmlCorpo = itens
       .map((item, index) => {
         const inner = gerarHtmlEtiquetaLegado(item, formato, qrLegado[index]);
+        const num = showPrev ? basePrev + index : null;
+        const badge =
+          num != null
+            ? `<span class="previa-indice-etiqueta" aria-hidden="true">${escaparHtml(String(num))}</span>`
+            : '';
         if (formato === '60x60') {
-          return `<div class="folha-6060">${inner}</div>`;
+          return `<div class="folha-6060-wrap">${badge}<div class="folha-6060">${inner}</div></div>`;
         }
+        const wrapped = showPrev ? `<div class="folha-legado-wrap">${badge}${inner}</div>` : inner;
         const quebra = index < itens.length - 1 ? '<div class="page-break"></div>' : '';
-        return `${inner}${quebra}`;
+        return `${wrapped}${quebra}`;
       })
       .join('');
     estilos = `
@@ -1105,6 +1191,7 @@ export async function gerarDocumentoHtmlEtiquetas(
       }
       ${estilosGlobaisLegado(formato)}
       ${folha6060Css}
+      ${cssPreviaIdx}
       .page-break { break-after: page; page-break-after: always; }
     `;
   }
@@ -1137,59 +1224,44 @@ export async function imprimirEtiquetasEmJobUnico(
 }
 
 /**
- * Abre nova aba com o mesmo HTML da impressão/Pi, **sem** `window.print` — para conferir layout antes de enviar à fila.
+ * Grava o lote na sessão do navegador e abre `/etiquetas/previa` — numeração só na tela e impressão por intervalo.
  */
-export async function abrirPreviaEtiquetasEmJanela(
+export function abrirPreviaEtiquetasEmJanela(
   etiquetas: EtiquetaParaImpressao[],
   formato: FormatoEtiqueta,
   opcoes?: OpcoesPreviaEtiquetasJanela
-): Promise<boolean> {
+): boolean {
   if (typeof window === 'undefined' || etiquetas.length === 0) return false;
 
-  const { mensagemBarra, ...opcoesGerador } = opcoes ?? {};
-  const doc = await gerarDocumentoHtmlEtiquetas(
-    etiquetas,
+  const { mensagemBarra, voltarPath, ...opcoesGerador } = opcoes ?? {};
+  const payload: PreviaEtiquetasSessionPayload = {
     formato,
-    Object.keys(opcoesGerador).length > 0 ? opcoesGerador : undefined
-  );
-  if (!doc) return false;
+    etiquetas,
+    opcoesGerador: Object.keys(opcoesGerador).length > 0 ? opcoesGerador : undefined,
+    mensagemBarra: mensagemBarra ?? null,
+    voltarPath: (voltarPath && voltarPath.trim()) || '/etiquetas',
+  };
 
-  const n = etiquetas.length;
-  const labelFmt = FORMATO_CONFIG[formato].label;
-  const backUrl = `${window.location.origin}/etiquetas`;
-  const extraLinha = mensagemBarra
-    ? `<div style="margin-top:6px;font-size:12px;opacity:0.92;font-weight:500;max-width:42rem;margin-left:auto;margin-right:auto;">${escaparHtml(mensagemBarra)}</div>`
-    : '';
-  const faixa = `
-    <div
-      id="previa-etiquetas-faixa"
-      role="status"
-      style="position:sticky;top:0;left:0;right:0;z-index:2147483647;background:#0f172a;color:#f8fafc;padding:10px 12px;font:13px/1.35 system-ui,-apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,0.25);"
-    >
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;max-width:56rem;margin:0 auto;">
-        <div style="display:flex;gap:10px;align-items:center;min-width:0;">
-          <a href="${escaparHtml(backUrl)}" style="display:inline-block;text-decoration:none;background:rgba(255,255,255,0.12);color:#f8fafc;padding:6px 10px;border-radius:999px;font-weight:700;white-space:nowrap;">
-            Voltar
-          </a>
-          <button onclick="window.close()" style="appearance:none;border:0;cursor:pointer;background:rgba(255,255,255,0.12);color:#f8fafc;padding:6px 10px;border-radius:999px;font-weight:700;white-space:nowrap;">
-            Fechar
-          </button>
-        </div>
-        <div style="text-align:right;min-width:0;">
-          <strong>Prévia</strong> — ${n} etiqueta(s) · ${escaparHtml(labelFmt)}
-        </div>
-      </div>
-      ${extraLinha}
-    </div>
-  `.trim();
+  const id =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const key = `${SESSION_STORAGE_PREVIA_ETIQUETAS_PREFIX}${id}`;
 
-  const comFaixa = doc.replace('<body>', `<body>${faixa}`);
+  try {
+    sessionStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    window.alert(
+      'Não coube na memória do navegador (lote muito grande). Reduza a seleção, imprima em partes ou feche outras abas.'
+    );
+    return false;
+  }
 
-  const janela = window.open('', '_blank', 'width=520,height=720');
-  if (!janela) return false;
-
-  janela.document.open();
-  janela.document.write(comFaixa);
-  janela.document.close();
+  const url = `${window.location.origin}/etiquetas/previa?id=${encodeURIComponent(id)}`;
+  const janela = window.open(url, '_blank', 'width=720,height=900');
+  if (!janela) {
+    sessionStorage.removeItem(key);
+    return false;
+  }
   return true;
 }

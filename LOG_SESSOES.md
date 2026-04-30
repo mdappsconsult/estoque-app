@@ -1,5 +1,28 @@
 # Log de Sessões
 
+### Sessão - 2026-04-30 - Etiquetas: prévia com ordem numerada e reimpressão por intervalo
+- **Mudança:** `abrirPreviaEtiquetasEmJanela` passa a usar `sessionStorage` + rota **`/etiquetas/previa`**. `gerarDocumentoHtmlEtiquetas` com `mostrarIndicesPrevia` / `indicePreviaInicio`: selo numérico só na tela (CSS oculta na impressão). Página com intervalo «Da / Até», prévia parcial e impressão navegador só do slice. **Produção:** `voltarPath: '/producao'`.
+- **Impacto:** operação pode continuar de onde parou sem reimprimir o lote inteiro após falha de ribbon/papel.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-25 - Dev: localhost no Chrome (IPv6)
+- **Problema:** `http://localhost:3000` falhava ou “fechava” no Chrome; `http://127.0.0.1:3000` ok — Node escutava só IPv4 (`next dev -H 0.0.0.0`); `localhost` resolve também para `::1`, onde nada escutava.
+- **Mudança:** `package.json` → `"dev": "next dev -H ::"` (dual-stack no dev). **Produção** (`next start -H 0.0.0.0`) inalterada.
+- **Validação:** diagnóstico `lsof` + `curl` para `[::1]:3000` com servidor IPv4-only recusava conexão.
+- **Ação do operador:** reiniciar `npm run dev` para aplicar.
+
+### Sessão - 2026-04-24 - Quiosque: telas e acessos (mock, sem Supabase)
+- **AuthGuard:** rotas que começam com `/f/` são públicas (sem login operacional).
+- **Permissões:** `/configuracoes/quiosque` e prefixo (`…/produto/…`) para `ADMIN_MASTER` / `MANAGER`; `hasAccessWithMap` resolve rota por prefixo mais longo.
+- **UI admin:** `QuiosqueConfigHub` (abas Pontos, Cardápio, Pagamentos, Pedidos) + `QuiosqueProdutoEditor`; item **Quiosque** no menu Configurações da `Sidebar`.
+- **Vitrine:** layout `QuiosqueVitrineShell`, páginas `/f/demo-barra`, PDP, carrinho, pagamento placeholder, pedido demo; mock em `src/lib/quiosque/mock-catalog.ts`.
+- **Validação:** `npm run lint`, `npm run build`. `CONTEXTO_ATUAL.md` atualizado.
+
+### Sessão - 2026-04-24 - Quiosque: prompt de implementação (pré-código)
+- **Documentação:** criado [`docs/PROMPT_IMPLEMENTACAO_QUIOSQUE.md`](docs/PROMPT_IMPLEMENTACAO_QUIOSQUE.md) — especificação única (domínios, UI, modelo de cardápio, abas admin, público `/f/[slug]`, MP/PIX, RLS, ordem de entrega, bloco copiável para sessões de código). Referências de UI: copiar prints para `docs/referencias-ui-quiosque/` quando for implementar.
+- **Impacto:** nenhum em runtime; alinhamento antes de migrations e código do módulo Quiosque.
+- **Validação:** não aplicável (só doc).
+
 ### Sessão - 2026-04-23 - Separar por Loja: gravação em fatias + Recebimento multi-remessa
 - **Separar por Loja:** listas **> 200** unidades gravam em **uma única remessa** em vários POSTs (`criar-separacao-matriz-loja` + `adicionar-itens-separacao-matriz-loja`); constante `CHUNK_ITENS_SEPARACAO_HTTP = 200`. Serviço `adicionarItensTransferenciaMatrizLoja` + `adicionarItensSeparacaoMatrizLojaNaTransferencia`.
 - **Recebimento:** modo **«Conferir várias remessas juntas»** (checkboxes; operador de loja pré-marca todas as pendentes); confirmação reparte por `transferencia_id` e chama `receberTransferencia` em sequência. Admin: sem escanear / divergência desligados no modo agrupado.

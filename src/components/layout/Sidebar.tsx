@@ -75,6 +75,7 @@ const menuExpandable = [
       { name: 'Perfil', href: '/configuracoes/perfil' },
       { name: 'Impressoras (Pi)', href: '/configuracoes/impressoras' },
       { name: 'Permissões', href: '/configuracoes/permissoes' },
+      { name: 'Quiosque', href: '/configuracoes/quiosque' },
     ]
   },
 ];
@@ -144,7 +145,9 @@ export default function Sidebar() {
         {/* Menus expansíveis */}
         {filteredMenuExpandable.map((section) => {
           const isExpanded = expanded.includes(section.name);
-          const hasActiveChild = section.items.some(item => pathname === item.href);
+          const hasActiveChild = section.items.some(
+            (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+          );
           
           return (
             <div key={section.name}>
@@ -170,7 +173,8 @@ export default function Sidebar() {
               {isExpanded && (
                 <div className="ml-12 space-y-1 mt-1">
                   {section.items.map((item) => {
-                    const isActive = pathname === item.href;
+                    const isActive =
+                      pathname === item.href || pathname.startsWith(`${item.href}/`);
                     return (
                       <Link
                         key={item.name}

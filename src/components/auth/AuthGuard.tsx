@@ -17,12 +17,18 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const permissionsMap = useEffectivePermissionsMap();
   const isLoginPage = pathname === '/login';
+  /** Vitrine pública do freezer (sem login operacional). */
+  const isQuiosqueVitrine = pathname?.startsWith('/f/') ?? false;
 
   useEffect(() => {
-    if (!loading && !usuario && !isLoginPage) {
+    if (!loading && !usuario && !isLoginPage && !isQuiosqueVitrine) {
       router.replace('/login');
     }
-  }, [loading, usuario, isLoginPage, router]);
+  }, [loading, usuario, isLoginPage, isQuiosqueVitrine, router]);
+
+  if (isQuiosqueVitrine) {
+    return <>{children}</>;
+  }
 
   // Loading
   if (loading) {

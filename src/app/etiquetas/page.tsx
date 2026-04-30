@@ -742,9 +742,7 @@ export default function EtiquetasPage() {
         );
         const mensagemBarra = somenteZebra6060Industria
           ? 'O Pi/Zebra recebe este mesmo layout. Feche a aba após conferir e use o botão Zebra 60×60.'
-          : formatoImpressao === '60x30'
-            ? 'O navegador imprimirá nesta ordem, com pares 60×30 por folha (pilhas por lado).'
-            : undefined;
+          : undefined;
         const ok = await abrirPreviaEtiquetasEmJanela(payload, formatoImpressao, {
           preparar60x30PilhasPorLado: formatoImpressao === '60x30' ? true : undefined,
           mensagemBarra,

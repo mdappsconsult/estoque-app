@@ -604,6 +604,7 @@ export default function ProducaoPage() {
       }));
       const ok = await abrirPreviaEtiquetasEmJanela(payload, FORMATO_ETIQUETA_INDUSTRIA, {
         mensagemBarra: `Amostra de ${amostras} etiqueta(s). Total ao registrar: ${numBaldesInt}. Número de lote/sequência reais só após confirmar o registro (ex.: Lote prod. 99 é fictício na prévia).`,
+        voltarPath: '/producao',
       });
       if (!ok) throw new Error('Não foi possível abrir a prévia. Libere pop-ups.');
     } catch (e: unknown) {
@@ -619,6 +620,7 @@ export default function ProducaoPage() {
     try {
       const ok = await abrirPreviaEtiquetasEmJanela(montarPayloadImpressao(), FORMATO_ETIQUETA_INDUSTRIA, {
         mensagemBarra: 'Mesmo layout enviado à Zebra/Pi. Feche a aba e use os botões de impressão quando estiver certo.',
+        voltarPath: '/producao',
       });
       if (!ok) {
         throw new Error('Não foi possível abrir a prévia. Libere pop-ups e tente novamente.');

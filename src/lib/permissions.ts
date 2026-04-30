@@ -43,6 +43,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/configuracoes/perfil': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
   '/configuracoes/impressoras': ['ADMIN_MASTER', 'MANAGER'],
   '/configuracoes/permissoes': ['ADMIN_MASTER'],
+  '/configuracoes/quiosque': ['ADMIN_MASTER', 'MANAGER'],
 };
 
 export const PERMISSIONS_STORAGE_KEY = 'estoque_permissions_matrix_v3';
@@ -100,6 +101,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/configuracoes/perfil', label: 'Config. — meu perfil', section: 'Configurações' },
   { path: '/configuracoes/impressoras', label: 'Config. — impressoras (Pi)', section: 'Configurações' },
   { path: '/configuracoes/permissoes', label: 'Config. — permissões', section: 'Configurações' },
+  { path: '/configuracoes/quiosque', label: 'Config. — Quiosque', section: 'Configurações' },
 ];
 
 /** Cópia do mapa padrão (sem localStorage). Use no 1º render do cliente para bater com o SSR. */
@@ -141,11 +143,25 @@ export function clearPermissionMatrix(): void {
 /** Rotas em que ADMIN_MASTER sempre mantém acesso (evita travar o sistema). */
 const ADMIN_ALWAYS_ACCESS: string[] = ['/configuracoes/permissoes', '/cadastros/usuarios'];
 
+/** Resolve perfis permitidos: rota exata ou prefixo da rota mais longa cadastrada (ex.: /configuracoes/quiosque/produto/x). */
+function rolesForPathname(pathname: string, map: Record<string, string[]>): string[] | undefined {
+  if (map[pathname] !== undefined) return map[pathname];
+  const keys = Object.keys(map)
+    .filter((k) => k !== '/')
+    .sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (pathname === key || pathname.startsWith(`${key}/`)) {
+      return map[key];
+    }
+  }
+  return undefined;
+}
+
 export function hasAccessWithMap(perfil: string, pathname: string, map: Record<string, string[]>): boolean {
   if (perfil === 'ADMIN_MASTER' && ADMIN_ALWAYS_ACCESS.includes(pathname)) {
     return true;
   }
-  const allowed = map[pathname];
+  const allowed = rolesForPathname(pathname, map) ?? map[pathname];
   if (!allowed) return true;
   if (allowed.includes('*')) return true;
   return allowed.includes(perfil);
