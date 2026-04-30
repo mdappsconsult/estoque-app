@@ -81,6 +81,9 @@ export default function RecebimentoPage() {
     orderBy: { column: 'created_at', ascending: false },
     filters: filtrosDestinoLoja,
     enabled: consultaRecebimentoHabilitada,
+    /** Evita lista vazia em falha de refetch após sucesso (realtime), que apagava escaneios locais. */
+    preserveDataOnRefetchError: true,
+    preserveDataWhileRefetching: true,
   });
 
   const emTransito = transferencias.filter((t) => t.status === 'IN_TRANSIT');

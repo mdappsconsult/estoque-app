@@ -1,5 +1,16 @@
 # Log de Sessões
 
+### Sessão - 2026-04-30 - Recebimento: refetch/realtime não zera lista de transferências
+- **Problema:** falha de rede no refetch do `useRealtimeQuery` (pós-evento realtime) fazia `setData([])`; na tela **Recebimento** a remessa sumia do array e o efeito limpava `itensRecebidos` — operador perdia confirmação e tinha que escanear de novo.
+- **Mudança:** `useRealtimeQuery` ganha opção **`preserveDataOnRefetchError`** (padrão `false`): após um fetch com sucesso, erros em refetch não esvaziam o snapshot. **Recebimento** ativa `preserveDataOnRefetchError` + `preserveDataWhileRefetching` na query de `transferencias`. Ref `hadSuccessfulFetchRef` distingue sucesso de “já tentou e falhou”.
+- **Impacto:** lista de entregas e escaneios locais resistem a picos/timeout do Supabase no meio da conferência.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-04-30 - MCP Supabase: escopo «lista grande» na Delivery
+- **Consulta:** local **Delivery** (`locais.id` `97cff1c2-6add-4f3a-a7ba-6024d6fd1fb6`). `loja_produtos_config`: **94** ativos na loja, **114** linhas totais (patamar semelhante a outras lojas). **Estoque (QR) na loja:** **705** itens `EM_ESTOQUE`. **Remessa `IN_TRANSIT` para Delivery (30/04/2026):** `transferencias.id` `f2787624-217b-41b7-8341-ef2578d5be5d` com **541** linhas em `transferencia_itens` — volume que explica conferência longa e risco de timeout/realtime no recebimento.
+- **Impacto:** nenhuma alteração de código nesta sessão; diagnóstico operacional.
+- **Validação:** `execute_sql` (MCP user-supabase).
+
 ### Sessão - 2026-04-30 - Etiquetas: prévia com ordem numerada e reimpressão por intervalo
 - **Mudança:** `abrirPreviaEtiquetasEmJanela` passa a usar `sessionStorage` + rota **`/etiquetas/previa`**. `gerarDocumentoHtmlEtiquetas` com `mostrarIndicesPrevia` / `indicePreviaInicio`: selo numérico só na tela (CSS oculta na impressão). Página com intervalo «Da / Até», prévia parcial e impressão navegador só do slice. **Produção:** `voltarPath: '/producao'`.
 - **Impacto:** operação pode continuar de onde parou sem reimprimir o lote inteiro após falha de ribbon/papel.

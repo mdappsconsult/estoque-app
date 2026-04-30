@@ -22,6 +22,11 @@ interface UseRealtimeQueryOptions<T> {
    * e não limpam a lista em caso de erro — evita piscar a tela inteira.
    */
   preserveDataWhileRefetching?: boolean;
+  /**
+   * Após pelo menos uma resposta bem-sucedida desta consulta, falhas em refetch não chamam `setData([])` —
+   * mantém o último snapshot (útil com realtime: rede falhou mas os dados anteriores continuam válidos).
+   */
+  preserveDataOnRefetchError?: boolean;
 }
 
 interface UseRealtimeQueryResult<T> {
@@ -46,6 +51,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     maxRows,
     refetchDebounceMs = 0,
     preserveDataWhileRefetching = false,
+    preserveDataOnRefetchError = false,
   } = options;
 
   const [data, setData] = useState<T[]>([]);
@@ -55,6 +61,8 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
   const inFlightRef = useRef<Promise<void> | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedOnceRef = useRef(false);
+  /** Só true após fetch completar com sucesso (inclui lista vazia legítima). Não usar `hasLoadedOnceRef`, que vira true também em erro. */
+  const hadSuccessfulFetchRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     if (inFlightRef.current) {
@@ -129,6 +137,7 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
             setData([]);
             setError(null);
             hasLoadedOnceRef.current = true;
+            hadSuccessfulFetchRef.current = true;
             return;
           }
 
@@ -174,11 +183,18 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
         setData(finalData);
         setError(null);
         hasLoadedOnceRef.current = true;
+        hadSuccessfulFetchRef.current = true;
       } catch (err) {
         console.error(`Erro ao buscar ${table}:`, err);
         if (!silent) {
-          setData([]);
-          setError(err as Error);
+          const manterSnapshot =
+            preserveDataOnRefetchError && hadSuccessfulFetchRef.current;
+          if (manterSnapshot) {
+            setError(err as Error);
+          } else {
+            setData([]);
+            setError(err as Error);
+          }
         }
         hasLoadedOnceRef.current = true;
       } finally {
@@ -206,11 +222,13 @@ export function useRealtimeQuery<T = Record<string, unknown>>(
     pageSize,
     maxRows,
     preserveDataWhileRefetching,
+    preserveDataOnRefetchError,
   ]);
 
   useEffect(() => {
     if (!enabled) {
       hasLoadedOnceRef.current = false;
+      hadSuccessfulFetchRef.current = false;
       setLoading(false);
       setData([]);
       setError(null);
