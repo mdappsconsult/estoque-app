@@ -18,6 +18,7 @@ import {
 } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
 import EnvioDiretoConferenciaCard from '@/components/recebimento/EnvioDiretoConferenciaCard';
+import RecebimentoDiretoCard from '@/components/recebimento/RecebimentoDiretoCard';
 
 interface TransRow {
   id: string;
@@ -631,6 +632,14 @@ export default function RecebimentoPage() {
           <p className="text-sm text-gray-500">Conferência por QR</p>
         </div>
       </div>
+
+      {usuario?.local_padrao_id && (usuario.perfil === 'OPERATOR_STORE' || usuario.perfil === 'MANAGER' || usuario.perfil === 'ADMIN_MASTER') && (
+        <RecebimentoDiretoCard
+          destinoId={usuario.local_padrao_id}
+          destinoNome="sua loja"
+          usuarioId={usuario.id}
+        />
+      )}
 
       {avisoRemessaEncerrada && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">

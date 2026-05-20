@@ -316,6 +316,208 @@ export async function bipQrEnvioDireto(
   };
 }
 
+export interface BipAvulsoInput {
+  codigoQr: string;
+  localDestinoId: string;
+  usuarioId: string;
+}
+
+export interface BipAvulsoResultado {
+  itemId: string;
+  produtoId: string;
+  produtoNome: string;
+  origemId: string;
+  origemNome: string;
+  destinoNome: string;
+  transferenciaId: string;
+  avisoFefo?: string | null;
+}
+
+/**
+ * **Bip avulso** (sem remessa prévia). O operador da loja escaneia um QR de balde físico que
+ * a indústria entregou. O sistema:
+ * - valida que o balde é de produção (`origem PRODUCAO|AMBOS`) e está **EM_ESTOQUE em uma indústria**;
+ * - cria uma `transferencias` indústria → loja **modo_bip_loja=TRUE**, `quantidade_demandada=1`,
+ *   status `DELIVERED`, com o `transferencia_itens(recebido=true)`;
+ * - move o item para a loja (`local_atual_id=loja`, `estado=EM_ESTOQUE`);
+ * - registra auditoria `BIP_AVULSO_PRODUCAO` (o operador da indústria vê em
+ *   `/envio-direto-producao` → «Saídas recentes»).
+ *
+ * Cada bip = 1 remessa fechada (rastreio forte e simples). A indústria não precisa abrir nada
+ * antes; ela só leva o balde para a loja e o funcionário da loja bipa na chegada.
+ */
+export async function bipQrAvulsoProducao(input: BipAvulsoInput): Promise<BipAvulsoResultado> {
+  const token = normalizarCodigoQrScaneado(input.codigoQr || '');
+  const destinoId = input.localDestinoId.trim();
+  const usuarioId = input.usuarioId.trim();
+  if (!token || !destinoId || !usuarioId) {
+    throw new Error('QR, loja destino e usuário são obrigatórios.');
+  }
+
+  const { data: locDestino, error: eLd } = await supabase
+    .from('locais')
+    .select('id, nome, tipo')
+    .eq('id', destinoId)
+    .single();
+  if (eLd) throw eLd;
+  if (locDestino?.tipo !== 'STORE') {
+    throw new Error('Destino do bip avulso precisa ser uma loja (STORE).');
+  }
+
+  const { data: itemPorQr, error: eItQr } = await supabase
+    .from('itens')
+    .select('id, token_qr, token_short, produto_id, estado, local_atual_id, created_at')
+    .eq('token_qr', token)
+    .maybeSingle();
+  let item = itemPorQr;
+  if (eItQr && eItQr.code !== 'PGRST116') throw eItQr;
+  if (!item) {
+    const short = token.replace(/\s/g, '').toUpperCase();
+    if (short.length >= 4 && short.length <= 16) {
+      const { data: porShort, error: eShort } = await supabase
+        .from('itens')
+        .select('id, token_qr, token_short, produto_id, estado, local_atual_id, created_at')
+        .eq('token_short', short)
+        .maybeSingle();
+      if (eShort && eShort.code !== 'PGRST116') throw eShort;
+      item = porShort;
+    }
+  }
+  if (!item) throw new Error('QR não encontrado no sistema. Confira a etiqueta.');
+
+  if (item.estado !== 'EM_ESTOQUE') {
+    throw new Error(
+      `Este balde está como «${item.estado}» — não dá para receber pelo bip avulso. Confira se já foi recebido em outra loja ou baixado.`
+    );
+  }
+  if (!item.local_atual_id) {
+    throw new Error('Balde sem local de origem. Fale com a gerência.');
+  }
+  if (item.local_atual_id === destinoId) {
+    throw new Error('Este balde já está nesta loja.');
+  }
+
+  const { data: origem, error: eOrig } = await supabase
+    .from('locais')
+    .select('id, nome, tipo')
+    .eq('id', item.local_atual_id)
+    .single();
+  if (eOrig) throw eOrig;
+  if (origem?.tipo !== 'WAREHOUSE') {
+    throw new Error(
+      'Este balde não está em uma indústria/armazém — bip avulso aceita só baldes vindos da indústria.'
+    );
+  }
+
+  const { data: produto, error: eProd } = await supabase
+    .from('produtos')
+    .select('id, nome, origem, status')
+    .eq('id', item.produto_id)
+    .single();
+  if (eProd) throw eProd;
+  if (!produto) throw new Error('Produto do balde não encontrado.');
+  if (produto.status !== 'ativo') {
+    throw new Error('Produto está inativo. Habilite no cadastro antes de receber.');
+  }
+  if (produto.origem !== 'PRODUCAO' && produto.origem !== 'AMBOS') {
+    throw new Error(
+      'Bip avulso aceita só baldes/caixas feitos na fábrica (origem PRODUCAO ou AMBOS). Para insumos de compra, use «Separar por Loja».'
+    );
+  }
+
+  const { data: outras, error: eO } = await supabase
+    .from('transferencia_itens')
+    .select('id, transferencia_id, transferencia:transferencias(status)')
+    .eq('item_id', item.id);
+  if (eO) throw eO;
+  type Linha = { id: string; transferencia_id: string; transferencia: { status?: string } | { status?: string }[] | null };
+  const conflito = (outras || []).find((raw) => {
+    const l = raw as unknown as Linha;
+    const trj = Array.isArray(l.transferencia) ? l.transferencia[0] : l.transferencia;
+    const st = trj?.status;
+    return st === 'AWAITING_ACCEPT' || st === 'ACCEPTED' || st === 'IN_TRANSIT';
+  });
+  if (conflito) {
+    throw new Error(
+      'Este balde já está em uma remessa aberta. Receba/encerre a remessa antes ou peça à indústria para cancelar.'
+    );
+  }
+
+  const { data: tr, error: eTr } = await supabase
+    .from('transferencias')
+    .insert({
+      tipo: 'WAREHOUSE_STORE',
+      origem_id: origem.id,
+      destino_id: destinoId,
+      criado_por: usuarioId,
+      status: 'DELIVERED',
+      modo_bip_loja: true,
+      produto_demandado_id: produto.id,
+      quantidade_demandada: 1,
+    })
+    .select('id')
+    .single();
+  if (eTr) throw eTr;
+  if (!tr) throw new Error('Falha ao registrar o recebimento avulso.');
+
+  const { error: eIns } = await supabase
+    .from('transferencia_itens')
+    .insert({ transferencia_id: tr.id, item_id: item.id, recebido: true });
+  if (eIns) {
+    await supabase.from('transferencias').delete().eq('id', tr.id);
+    throw eIns;
+  }
+
+  const { error: eUpItem } = await supabase
+    .from('itens')
+    .update({ local_atual_id: destinoId, estado: 'EM_ESTOQUE' })
+    .eq('id', item.id);
+  if (eUpItem) throw eUpItem;
+
+  await recalcularEstoqueProduto(produto.id);
+
+  let avisoFefo: string | null = null;
+  if (item.created_at) {
+    const { data: maisAntigo, error: eFifo } = await supabase
+      .from('itens')
+      .select('id, token_short, created_at')
+      .eq('produto_id', produto.id)
+      .eq('local_atual_id', origem.id)
+      .eq('estado', 'EM_ESTOQUE')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (!eFifo && maisAntigo && maisAntigo.id !== item.id) {
+      const created = new Date(item.created_at).getTime();
+      const antigo = new Date(maisAntigo.created_at as string).getTime();
+      if (Number.isFinite(created) && Number.isFinite(antigo) && antigo < created) {
+        avisoFefo = `Há balde mais antigo na indústria (token ${maisAntigo.token_short || '—'}). Próxima entrega use o mais antigo (FEFO).`;
+      }
+    }
+  }
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: destinoId,
+    item_id: item.id,
+    acao: 'BIP_AVULSO_PRODUCAO',
+    origem_id: origem.id,
+    destino_id: destinoId,
+    detalhes: { transferencia_id: tr.id, produto_id: produto.id },
+  });
+
+  return {
+    itemId: item.id,
+    produtoId: produto.id,
+    produtoNome: produto.nome as string,
+    origemId: origem.id,
+    origemNome: origem.nome as string,
+    destinoNome: locDestino.nome as string,
+    transferenciaId: tr.id,
+    avisoFefo,
+  };
+}
+
 /** Encerra remessa modo_bip_loja com sobra/falta (gera divergência FALTANTE se faltou). */
 export async function encerrarEnvioDiretoComDivergencia(
   transferenciaId: string,
@@ -600,4 +802,81 @@ export async function listarEnviosDiretosEmAndamento(
     origemNome: norm(r.origem)?.nome || 'Origem',
     destinoNome: norm(r.destino)?.nome || 'Destino',
   }));
+}
+
+export interface SaidaAvulsaAgrupada {
+  origemId: string;
+  destinoId: string;
+  destinoNome: string;
+  produtoId: string;
+  produtoNome: string;
+  quantidade: number;
+  primeiraEm: string;
+  ultimaEm: string;
+}
+
+/**
+ * Saídas avulsas (`bipQrAvulsoProducao`) das últimas 24h, agrupadas por loja+produto.
+ * Indústria vê na hora o que a loja recebeu sem planejamento prévio.
+ */
+export async function listarSaidasAvulsasRecentes(
+  origemId: string,
+  janelaHoras = 24
+): Promise<SaidaAvulsaAgrupada[]> {
+  const origem = origemId.trim();
+  if (!origem) return [];
+  const desde = new Date(Date.now() - janelaHoras * 3600 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('transferencias')
+    .select(
+      `id, origem_id, destino_id, status, created_at, produto_demandado_id, quantidade_demandada,
+       destino:locais!destino_id(nome),
+       produto:produtos!produto_demandado_id(nome)`
+    )
+    .eq('modo_bip_loja', true)
+    .eq('status', 'DELIVERED')
+    .eq('origem_id', origem)
+    .eq('quantidade_demandada', 1)
+    .gte('created_at', desde)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    origem_id: string;
+    destino_id: string;
+    created_at: string;
+    produto_demandado_id: string;
+    quantidade_demandada: number;
+    destino: { nome?: string } | { nome?: string }[] | null;
+    produto: { nome?: string } | { nome?: string }[] | null;
+  };
+  const norm = <T extends { nome?: string }>(v: T | T[] | null): T | null =>
+    !v ? null : Array.isArray(v) ? (v[0] ?? null) : v;
+
+  const grupos = new Map<string, SaidaAvulsaAgrupada>();
+  for (const raw of (data || []) as Row[]) {
+    const key = `${raw.destino_id}|${raw.produto_demandado_id}`;
+    const atual = grupos.get(key);
+    const destinoNome = norm(raw.destino)?.nome || 'Loja';
+    const produtoNome = norm(raw.produto)?.nome || 'Produto';
+    if (!atual) {
+      grupos.set(key, {
+        origemId: raw.origem_id,
+        destinoId: raw.destino_id,
+        destinoNome,
+        produtoId: raw.produto_demandado_id,
+        produtoNome,
+        quantidade: 1,
+        primeiraEm: raw.created_at,
+        ultimaEm: raw.created_at,
+      });
+    } else {
+      atual.quantidade += 1;
+      if (raw.created_at < atual.primeiraEm) atual.primeiraEm = raw.created_at;
+      if (raw.created_at > atual.ultimaEm) atual.ultimaEm = raw.created_at;
+    }
+  }
+  return [...grupos.values()].sort((a, b) => (a.ultimaEm < b.ultimaEm ? 1 : -1));
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Truck, Loader2, AlertTriangle, CheckCircle, X, Plus } from 'lucide-react';
+import { Truck, Loader2, AlertTriangle, CheckCircle, X, Plus, Zap, ChevronDown } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -13,8 +13,10 @@ import {
   cancelarEnvioDiretoSemBips,
   listarDemandaBaldesProducaoPorLoja,
   listarEnviosDiretosEmAndamento,
+  listarSaidasAvulsasRecentes,
   type DemandaPorLojaRow,
   type EnvioDiretoResumo,
+  type SaidaAvulsaAgrupada,
 } from '@/lib/services/envio-direto-producao';
 
 interface LocalLoja {
@@ -38,6 +40,7 @@ export default function EnvioDiretoProducaoPage() {
   const [quantidade, setQuantidade] = useState('');
   const [demanda, setDemanda] = useState<DemandaPorLojaRow[]>([]);
   const [envios, setEnvios] = useState<EnvioDiretoResumo[]>([]);
+  const [saidasAvulsas, setSaidasAvulsas] = useState<SaidaAvulsaAgrupada[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState('');
@@ -48,15 +51,18 @@ export default function EnvioDiretoProducaoPage() {
       if (!origem) {
         setDemanda([]);
         setEnvios([]);
+        setSaidasAvulsas([]);
         return;
       }
       try {
-        const [d, e] = await Promise.all([
+        const [d, e, sa] = await Promise.all([
           listarDemandaBaldesProducaoPorLoja(origem),
           listarEnviosDiretosEmAndamento(origem),
+          listarSaidasAvulsasRecentes(origem, 48),
         ]);
         setDemanda(d);
         setEnvios(e);
+        setSaidasAvulsas(sa);
       } catch (err) {
         console.error('Falha ao carregar painel envio direto:', err);
       }
@@ -190,7 +196,19 @@ export default function EnvioDiretoProducaoPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Envio direto da produção</h1>
           <p className="text-sm text-gray-500">
-            Baldes/caixas feitos na fábrica (origem PRODUCAO ou AMBOS). A loja bipa cada QR na chegada.
+            Indústria leva os baldes; a loja bipa cada QR e o sistema baixa daqui e soma lá.
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 flex items-start gap-3">
+        <Zap className="w-5 h-5 text-blue-700 shrink-0 mt-0.5" />
+        <div className="text-sm text-blue-900 leading-relaxed">
+          <p className="font-semibold">Caminho simples (recomendado)</p>
+          <p>
+            Não precisa criar nada aqui. Leve o balde até a loja. Na tela <strong>Receber Entrega</strong>{' '}
+            a loja toca em <strong>Bipar</strong> e escaneia cada QR — o app baixa da indústria e soma
+            na loja na hora, e essas saídas aparecem em <strong>Saídas recentes</strong> aqui embaixo.
           </p>
         </div>
       </div>
@@ -301,11 +319,18 @@ export default function EnvioDiretoProducaoPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-5 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-800">Criar envio</h2>
+      <details className="group bg-white rounded-xl border border-gray-200 mb-5 overflow-hidden">
+        <summary className="list-none cursor-pointer flex items-center gap-2 px-5 py-3 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+          <Plus className="w-4 h-4 text-gray-500" />
+          <span className="text-sm font-semibold text-gray-800">Criar envio com plano (opcional)</span>
+          <span className="text-[11px] text-gray-500">— quando quiser combinar quantidade antes</span>
+          <ChevronDown className="w-4 h-4 ml-auto text-gray-500 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="p-5 pt-3 space-y-4">
         <p className="text-xs text-gray-600 leading-relaxed">
-          A indústria só informa <strong>loja</strong>, <strong>produto</strong> e <strong>quantidade</strong>. Os
-          QRs específicos serão vinculados pela loja ao bipar cada balde na chegada.
+          Use só quando quiser <strong>combinar a quantidade</strong> antes (ex.: planejar entrega).
+          Para receber baldes já entregues, prefira o <strong>bip direto na loja</strong> (sem
+          burocracia).
         </p>
         <div className="grid sm:grid-cols-2 gap-3">
           <Select
@@ -345,6 +370,47 @@ export default function EnvioDiretoProducaoPage() {
           {criando ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
           Criar envio
         </Button>
+        </div>
+      </details>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Zap className="w-4 h-4 text-blue-700" />
+          <h2 className="text-sm font-semibold text-gray-800">Saídas recentes (bip direto na loja)</h2>
+        </div>
+        <p className="text-xs text-gray-600">Últimas 48 h. Cada linha é o que cada loja bipou — agrupado por produto.</p>
+        {saidasAvulsas.length === 0 ? (
+          <p className="text-sm text-gray-500">Nenhum bip direto nas últimas 48 h.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-2">
+            <table className="min-w-[480px] w-full text-xs sm:text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-600">
+                  <th className="py-1 px-2 font-medium">Loja</th>
+                  <th className="py-1 px-2 font-medium">Produto</th>
+                  <th className="py-1 px-2 font-medium text-right">Baldes</th>
+                  <th className="py-1 px-2 font-medium text-right">Último bip</th>
+                </tr>
+              </thead>
+              <tbody>
+                {saidasAvulsas.map((s) => (
+                  <tr key={`${s.destinoId}|${s.produtoId}`} className="border-b border-gray-100">
+                    <td className="py-1.5 px-2 text-gray-800 max-w-[140px] truncate" title={s.destinoNome}>
+                      {s.destinoNome}
+                    </td>
+                    <td className="py-1.5 px-2 text-gray-800 max-w-[160px] truncate" title={s.produtoNome}>
+                      {s.produtoNome}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums font-semibold text-blue-700">{s.quantidade}</td>
+                    <td className="py-1.5 px-2 text-right text-[11px] text-gray-600">
+                      {new Date(s.ultimaEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
