@@ -79,7 +79,7 @@ export default function EnvioDiretoProducaoPage() {
             .from('produtos')
             .select('id, nome')
             .eq('status', 'ativo')
-            .eq('origem', 'PRODUCAO')
+            .in('origem', ['PRODUCAO', 'AMBOS'])
             .order('nome', { ascending: true }),
         ]);
         if (eL) throw eL;
@@ -190,7 +190,7 @@ export default function EnvioDiretoProducaoPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Envio direto da produção</h1>
           <p className="text-sm text-gray-500">
-            Só baldes/caixas de produção. A loja bipa cada QR na chegada.
+            Baldes/caixas feitos na fábrica (origem PRODUCAO ou AMBOS). A loja bipa cada QR na chegada.
           </p>
         </div>
       </div>
@@ -234,7 +234,9 @@ export default function EnvioDiretoProducaoPage() {
 
         {demanda.length === 0 ? (
           <p className="text-sm text-gray-500">
-            Nenhuma loja com falta de baldes de produção neste momento.
+            Nenhuma loja com falta cadastrada (ou os mínimos por produto estão zerados em{' '}
+            <strong>Cadastros → Reposição</strong>). Você ainda pode criar um envio direto manualmente
+            no formulário abaixo — basta escolher loja, produto e quantidade.
           </p>
         ) : (
           <div className="overflow-x-auto -mx-2">

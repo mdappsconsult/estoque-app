@@ -12,7 +12,8 @@ import type { Transferencia } from '@/types/database';
  *
  * Restrições do produto:
  * - `produtos.status = 'ativo'`
- * - `produtos.origem = 'PRODUCAO'` (caixas e baldes feitos na fábrica)
+ * - `produtos.origem IN ('PRODUCAO','AMBOS')` — aceita produtos «feitos na fábrica» mesmo quando o
+ *   cadastro permite também entrada por compra (ex.: «Açaí Balde 11L» tem `origem='AMBOS'`).
  */
 
 export interface CriarEnvioDiretoInput {
@@ -84,9 +85,9 @@ export async function criarEnvioDiretoProducao(
   if (prod.status !== 'ativo') {
     throw new Error('Produto inativo — habilite no cadastro antes de enviar.');
   }
-  if (prod.origem !== 'PRODUCAO') {
+  if (prod.origem !== 'PRODUCAO' && prod.origem !== 'AMBOS') {
     throw new Error(
-      'Envio direto só vale para baldes/caixas de produção (origem PRODUCAO). Use «Separar por Loja» para compra/insumos.'
+      'Envio direto só vale para produtos feitos na fábrica (origem PRODUCAO ou AMBOS). Use «Separar por Loja» para itens de compra/insumo.'
     );
   }
 
@@ -415,7 +416,8 @@ export interface DemandaPorLojaRow {
 
 /**
  * Demanda por loja: `loja_produtos_config.estoque_minimo_loja` (ativo) − estoque atual (QR EM_ESTOQUE na loja).
- * Filtra produtos com `origem = 'PRODUCAO'`. Mostra também quanto há disponível na indústria de origem.
+ * Filtra produtos com `origem IN ('PRODUCAO','AMBOS')` — inclui itens cujo cadastro também permite compra
+ * (ex.: «Açaí Balde 11L»). Mostra também quanto há disponível na indústria de origem.
  */
 export async function listarDemandaBaldesProducaoPorLoja(
   origemIndustriaId: string
@@ -427,7 +429,7 @@ export async function listarDemandaBaldesProducaoPorLoja(
     .from('produtos')
     .select('id, nome')
     .eq('status', 'ativo')
-    .eq('origem', 'PRODUCAO');
+    .in('origem', ['PRODUCAO', 'AMBOS']);
   if (eP) throw eP;
   const pMap = new Map<string, string>();
   for (const p of produtos || []) pMap.set(p.id as string, p.nome as string);

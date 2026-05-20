@@ -319,7 +319,7 @@ export default function RecebimentoPage() {
       if (!item) { setErro('Item não encontrado. Confira o código e tente novamente.'); return; }
       if (itensEsperados.length > 0 && !itensEsperados.some((e) => e.id === item.id)) {
         setErro(
-          'Este item existe no sistema, mas não consta nesta transferência. Confira se a etiqueta é desta remessa e se a separação foi registrada com as mesmas unidades (imprimir após «Criar separação» evita divergência).'
+          'Este balde existe no sistema, mas não está nesta remessa. Peça à indústria para criar um «Envio direto da produção» (loja + produto + quantidade) — a partir daí você pode bipar cada QR aqui. Para itens de compra/insumo, ainda é via «Separar por Loja».'
         );
         return;
       }
@@ -1032,12 +1032,19 @@ export default function RecebimentoPage() {
       {pendentes.length === 0 && !exigePainelConferencia && (
         <div className="text-center py-12 text-gray-400">
           <Store className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>Nenhuma entrega em trânsito</p>
+          <p>Nenhuma entrega para receber agora</p>
           {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
-            <p className="text-xs text-gray-500 mt-2 max-w-xs mx-auto">
-              Só aparecem aqui pedidos com destino na <span className="font-medium">sua loja</span>{' '}
-              (local padrão do seu usuário).
-            </p>
+            <>
+              <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto">
+                Só aparecem aqui pedidos com destino na <span className="font-medium">sua loja</span>{' '}
+                (local padrão do seu usuário).
+              </p>
+              <p className="text-xs text-gray-600 mt-3 max-w-sm mx-auto bg-blue-50 border border-blue-200 rounded-lg p-3 text-left">
+                <strong>Chegou balde de produção que ninguém separou?</strong> Peça à indústria para
+                abrir um <strong>Envio direto da produção</strong> (escolhem loja + produto + quantidade
+                lá na indústria). Assim que abrir, a remessa aparece aqui e você bipa cada QR.
+              </p>
+            </>
           )}
           {usuario?.perfil === 'OPERATOR_STORE' && !usuario.local_padrao_id && (
             <p className="text-xs text-amber-700 mt-2 max-w-xs mx-auto">

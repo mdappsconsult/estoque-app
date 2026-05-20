@@ -1,5 +1,13 @@
 # Log de Sessões
 
+### Sessão - 2026-05-20 - Envio direto aceita produto AMBOS (lotes 12/13/15 do Açaí Balde 11L)
+- **Problema:** loja não conseguia bipar baldes do lote passado de **Açaí Balde 11L** no Recebimento — mensagem «este item existe no sistema, mas não consta nesta transferência». Diagnóstico via MCP: 214 baldes (lotes 12, 13 e 15) parados na indústria, **0** em qualquer `transferencia_itens`. Causa principal: o produto tem `origem='AMBOS'` (entrada por compra ou produção), e o **Envio direto da produção** só aceitava `origem='PRODUCAO'`, então a indústria não conseguia abrir a remessa.
+- **Mudança no serviço (`src/lib/services/envio-direto-producao.ts`):** `criarEnvioDiretoProducao` aceita `origem IN ('PRODUCAO','AMBOS')` (msg de erro atualizada). `listarDemandaBaldesProducaoPorLoja` filtra `origem IN ('PRODUCAO','AMBOS')` — Açaí Balde 11L passa a aparecer na demanda quando a loja tiver mínimo > 0.
+- **Tela `/envio-direto-producao`:** lista de produtos do `Select` carrega `origem IN ('PRODUCAO','AMBOS')`; subtítulo atualizado; quando não há demanda calculada, mostra orientação clara («mínimos zerados em Cadastros → Reposição; ainda é possível criar manualmente»).
+- **`/recebimento`:** mensagem do erro «item fora da remessa» reformulada para indicar o caminho — peça à indústria para abrir um **Envio direto da produção**. Tela vazia (sem entregas pendentes) ganhou banner azul para `OPERATOR_STORE` com o mesmo passo-a-passo, evitando que a loja ache que o app está «errado».
+- **Sem migração de banco.** Configuração das lojas (`loja_produtos_config.estoque_minimo_loja`) segue com mínimos 0 — isso só impacta a tabela de demanda; o formulário de criar envio direto sempre permite manual.
+- **Validação:** `npm run lint` OK; `npm run build` OK.
+
 ### Sessão - 2026-05-20 - Reimprimir etiquetas de produção mais visível
 - **Pedido:** «não consigo reimprimir as etiquetas do último lote da indústria — deu erro no Raspberry e fechei a página de produção»; o operador também procurou em `/etiquetas` por intuição.
 - **Mudanças em `/producao`:** seção **Produções registradas** passa a abrir **automaticamente** (`<details open>`), com microtexto «use Reimprimir para gerar de novo as etiquetas 60×60 deste lote». Botão da coluna **Etiquetas** renomeado para **Reimprimir** (mesmo handler `carregarEtiquetasDaProducaoHistorico` → painel azul com prévia + Zebra/Pi + navegador).
