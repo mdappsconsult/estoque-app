@@ -208,9 +208,12 @@ export async function baixarItem(itemId: string, localId: string, usuarioId: str
   if (fetchError) throw fetchError;
   if (!item) throw new Error('Item não encontrado');
   if (item.estado !== 'EM_ESTOQUE') throw new Error('Item não está em estoque');
-  if (item.local_atual_id !== localId) throw new Error('Item não está neste local');
+  if (item.local_atual_id !== localId) {
+    throw new Error(
+      'Este balde ainda não foi recebido pela sua loja — ele está na indústria. Abra «Receber Entrega» e use o card «Chegou balde direto da indústria? Bipar» no topo para dar entrada antes de baixar.'
+    );
+  }
 
-  // Atualizar estado
   await supabase.from('itens').update({ estado: 'BAIXADO' }).eq('id', itemId);
 
   await recalcularEstoqueProduto(item.produto_id);
@@ -232,7 +235,11 @@ export async function descartarItem(itemId: string, motivo: string, localId: str
   const { data: item } = await supabase.from('itens').select('*').eq('id', itemId).single();
   if (!item) throw new Error('Item não encontrado');
   if (item.estado !== 'EM_ESTOQUE') throw new Error('Item não está em estoque');
-  if (item.local_atual_id !== localId) throw new Error('Item não está neste local');
+  if (item.local_atual_id !== localId) {
+    throw new Error(
+      'Este balde está em outro local (provavelmente ainda na indústria). Dê entrada por «Receber Entrega» antes de registrar perda/descarte.'
+    );
+  }
 
   await supabase.from('itens').update({ estado: 'DESCARTADO' }).eq('id', itemId);
   await recalcularEstoqueProduto(item.produto_id);
