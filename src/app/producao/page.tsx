@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChefHat,
   Loader2,
@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowUpRight,
+  Printer,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -23,6 +24,8 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
 import {
   HISTORICO_PRODUCAO_SELECT,
+  buscarEtiquetasProducaoParaReimpressao,
+  excluirProducao,
   mapearHistoricoProducaoRows,
   registrarProducaoComItens,
   type ProducaoHistoricoResumo,
@@ -193,6 +196,11 @@ export default function ProducaoPage() {
   const [avisoHttpsPi, setAvisoHttpsPi] = useState(false);
   const [confirmacaoAberta, setConfirmacaoAberta] = useState(false);
   const [erroConfirmacao, setErroConfirmacao] = useState('');
+  /** Produção cujo botão «Etiquetas» está carregando no histórico. */
+  const [reimpressaoProducaoId, setReimpressaoProducaoId] = useState<string | null>(null);
+  const [excluindoProducaoId, setExcluindoProducaoId] = useState<string | null>(null);
+  const podeExcluirProducao = (usuario?.perfil || '').toUpperCase() === 'ADMIN_MASTER';
+  const painelImpressaoEtiquetasRef = useRef<HTMLDivElement>(null);
   const diasValidadeNumero = Number(form.dias_validade);
   const dataValidadePrevista = useMemo(() => {
     if (!Number.isInteger(diasValidadeNumero) || diasValidadeNumero <= 0) return null;
@@ -632,6 +640,54 @@ export default function ProducaoPage() {
     }
   };
 
+  const handleExcluirProducao = async (row: ProducaoHistoricoResumo) => {
+    if (!usuario) return;
+    if (!podeExcluirProducao) {
+      alert('Apenas o administrador pode excluir produções.');
+      return;
+    }
+    const lote = row.numeroLoteProducao != null ? `lote ${row.numeroLoteProducao}` : `produção ${row.id.slice(0, 8)}`;
+    const ok = window.confirm(
+      `Excluir esta produção (${lote}) — ${row.produtoNome}, ${row.numBaldes} balde(s)?\n\n` +
+        `• Os baldes gerados serão apagados (precisam estar todos ainda na indústria, sem remessa, sem baixa).\n` +
+        `• Os insumos consumidos voltam para o estoque (QRs reativados e gramas estornadas dos lotes).\n` +
+        `• A operação é registrada em auditoria.\n\n` +
+        `Não dá para desfazer.`
+    );
+    if (!ok) return;
+    setExcluindoProducaoId(row.id);
+    try {
+      const r = await excluirProducao(row.id, usuario.id);
+      alert(
+        `Produção excluída.\n` +
+          `${r.qrsAcabadoRevertidos} balde(s) removidos.\n` +
+          (r.insumosQrRevertidos > 0 ? `${r.insumosQrRevertidos} QR(s) de insumo devolvido(s).\n` : '') +
+          (r.gramasEstornadas > 0 ? `${r.gramasEstornadas} g devolvidos aos lotes de compra.` : '')
+      );
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Não foi possível excluir a produção'));
+    } finally {
+      setExcluindoProducaoId(null);
+    }
+  };
+
+  const carregarEtiquetasDaProducaoHistorico = async (row: ProducaoHistoricoResumo) => {
+    setReimpressaoProducaoId(row.id);
+    try {
+      const list = await buscarEtiquetasProducaoParaReimpressao(row.id);
+      setProdutoParaImpressao(row.produtoNome);
+      setLocalParaImpressao(row.localNome);
+      setEtiquetasPendentesImpressao(list);
+      window.setTimeout(() => {
+        painelImpressaoEtiquetasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    } catch (err: unknown) {
+      alert(errMessage(err, 'Não foi possível carregar as etiquetas desta produção'));
+    } finally {
+      setReimpressaoProducaoId(null);
+    }
+  };
+
   const imprimirEtiquetasNoPi = async () => {
     if (etiquetasPendentesImpressao.length === 0) return;
     if (!piPrintAvailable || !piConnection) {
@@ -699,11 +755,24 @@ export default function ProducaoPage() {
         </div>
       )}
 
-      {resultado && etiquetasPendentesImpressao.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+      {etiquetasPendentesImpressao.length > 0 && (
+        <div
+          ref={painelImpressaoEtiquetasRef}
+          className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6"
+        >
           <p className="text-sm text-blue-800 mb-2">
-            Confirmação concluída. Etiquetas no formato <strong>60×60 mm</strong> (indústria). Use o navegador ou a
-            Zebra ligada ao Raspberry da <strong>ponte indústria</strong>.
+            {resultado ? (
+              <>
+                Confirmação concluída. Etiquetas no formato <strong>60×60 mm</strong> (indústria). Use o navegador ou a
+                Zebra ligada ao Raspberry da <strong>ponte indústria</strong>.
+              </>
+            ) : (
+              <>
+                Etiquetas desta produção carregadas para impressão (<strong>60×60 mm</strong>, indústria). Use o
+                navegador ou a Zebra na <strong>ponte indústria</strong>. Para outro lote, carregue de novo em{' '}
+                <strong>Produções registradas</strong>.
+              </>
+            )}
           </p>
           {avisoHttpsPi && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-3">
@@ -1147,13 +1216,16 @@ export default function ProducaoPage() {
         </Button>
       </div>
 
-      <details className="group bg-white rounded-xl border border-gray-200 mb-8 overflow-hidden">
+      <details open className="group bg-white rounded-xl border border-gray-200 mb-8 overflow-hidden">
         <summary className="list-none cursor-pointer flex items-center gap-3 px-4 py-3 sm:px-5 sm:py-3.5 hover:bg-slate-50/80 [&::-webkit-details-marker]:hidden">
           <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
             <History className="w-4 h-4 text-slate-600" />
           </div>
           <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-900">Produções registradas</span>
+            <span className="text-[11px] text-gray-500 hidden sm:inline">
+              · use <strong>Reimprimir</strong> para gerar de novo as etiquetas 60×60 deste lote
+            </span>
             {!historicoLoading && historicoProducoes.length > 0 && (
               <span className="text-[11px] font-medium tabular-nums text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
                 {historicoProducoes.length}
@@ -1194,7 +1266,7 @@ export default function ProducaoPage() {
             <p className="text-xs text-gray-500 py-2">Nenhuma produção encontrada.</p>
           ) : (
             <div className="overflow-x-auto -mx-1 sm:mx-0">
-              <table className="min-w-[560px] w-full text-[11px] border-collapse leading-tight">
+              <table className="min-w-[640px] w-full text-[11px] border-collapse leading-tight">
                 <thead>
                   <tr className="border-b border-gray-200 text-left text-gray-500">
                     <th className="py-1 pr-2 font-medium whitespace-nowrap">Data</th>
@@ -1206,6 +1278,10 @@ export default function ProducaoPage() {
                     <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">QR ac.</th>
                     <th className="py-1 pr-2 font-medium text-right whitespace-nowrap">Ins.</th>
                     <th className="py-1 pr-2 font-medium whitespace-nowrap">Conf.</th>
+                    <th className="py-1 pr-2 font-medium whitespace-nowrap">Reimprimir</th>
+                    {podeExcluirProducao && (
+                      <th className="py-1 pr-2 font-medium whitespace-nowrap">Excluir</th>
+                    )}
                     <th className="py-1 font-medium max-w-[64px]">Resp.</th>
                   </tr>
                 </thead>
@@ -1258,6 +1334,46 @@ export default function ProducaoPage() {
                           </span>
                         )}
                       </td>
+                      <td className="py-1 pr-2 whitespace-nowrap">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="text-[11px] px-2 py-1 min-h-0 h-auto"
+                          title="Carregar as etiquetas 60×60 desta produção para prévia ou impressão (Zebra/Pi ou navegador)"
+                          disabled={reimpressaoProducaoId === row.id}
+                          onClick={() => void carregarEtiquetasDaProducaoHistorico(row)}
+                        >
+                          {reimpressaoProducaoId === row.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <>
+                              <Printer className="w-3.5 h-3.5 mr-1 inline" aria-hidden />
+                              Reimprimir
+                            </>
+                          )}
+                        </Button>
+                      </td>
+                      {podeExcluirProducao && (
+                        <td className="py-1 pr-2 whitespace-nowrap">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="text-[11px] px-2 py-1 min-h-0 h-auto text-red-700 border-red-300 hover:bg-red-50"
+                            title="Excluir esta produção (só se todos os baldes ainda estão na indústria)"
+                            disabled={excluindoProducaoId === row.id}
+                            onClick={() => void handleExcluirProducao(row)}
+                          >
+                            {excluindoProducaoId === row.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                            ) : (
+                              <>
+                                <Trash2 className="w-3.5 h-3.5 mr-1 inline" aria-hidden />
+                                Excluir
+                              </>
+                            )}
+                          </Button>
+                        </td>
+                      )}
                       <td className="py-1 text-gray-600 max-w-[64px] truncate" title={row.responsavel}>
                         {row.responsavel}
                       </td>

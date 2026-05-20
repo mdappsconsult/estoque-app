@@ -1,5 +1,58 @@
 # Log de Sessões
 
+### Sessão - 2026-05-20 - Reimprimir etiquetas de produção mais visível
+- **Pedido:** «não consigo reimprimir as etiquetas do último lote da indústria — deu erro no Raspberry e fechei a página de produção»; o operador também procurou em `/etiquetas` por intuição.
+- **Mudanças em `/producao`:** seção **Produções registradas** passa a abrir **automaticamente** (`<details open>`), com microtexto «use Reimprimir para gerar de novo as etiquetas 60×60 deste lote». Botão da coluna **Etiquetas** renomeado para **Reimprimir** (mesmo handler `carregarEtiquetasDaProducaoHistorico` → painel azul com prévia + Zebra/Pi + navegador).
+- **Mudanças em `/etiquetas`:** banner azul logo abaixo do título com ícone `ChefHat` explicando que aquela tela é de **remessa (SEP)** e mandando para `/producao → Produções registradas → Reimprimir` para etiquetas 60×60 da indústria.
+- **Nota:** reimpressão **não** muda `etiquetas.impressa`; é seguro chamar várias vezes.
+- **Validação:** `npm run lint` OK; `npm run build` OK.
+
+### Sessão - 2026-05-20 - Excluir produção (corrigir quantidade errada)
+- **Pedido:** «errei a quantidade de baldes na produção, põe opção de excluir»; **ajuste posterior:** «somente admin exclui produção».
+- **Serviço:** `excluirProducao(producaoId, usuarioId)` em `src/lib/services/producao.ts`. Valida perfil **`ADMIN_MASTER` (único permitido)**. Bloqueia se algum balde **não** está `EM_ESTOQUE` no local da produção, ou se há linha em `transferencia_itens`, `baixas`, `perdas` para os QRs. Reverte: insumos QR voltam a `EM_ESTOQUE` (`DELETE FROM baixas WHERE producao_id`, apaga `producao_consumo_itens`); consumo de massa estorna gramas em `lotes_compra.gramas_consumidas_acumulado` lendo `producao_consumo_massa.detalhes_lotes`; apaga `etiquetas` + `itens` do acabado e a linha em `producoes`. Recalcula `estoque` agregado (acabado + insumos). Auditoria `EXCLUIR_PRODUCAO`.
+- **UI:** botão **Excluir** (vermelho, ícone lixeira) **só aparece para `ADMIN_MASTER`** no histórico em `/producao` (coluna e célula condicionais; `podeExcluirProducao` baseado em `usuario.perfil`). `window.confirm` lista o que será feito; estado `excluindoProducaoId` evita duplo clique; alerta final mostra quantos QRs voltaram e gramas estornadas. Demais perfis (`MANAGER`, `OPERATOR_WAREHOUSE`, `OPERATOR_WAREHOUSE_DRIVER`) precisam pedir ao admin.
+- **Operação:** número do lote **não** retorna (`sequencia_lote_producao` segue em frente — se excluir o lote 13, o próximo será 14).
+- **Validação:** `npm run lint` OK; `npm run build` OK.
+
+### Sessão - 2026-05-20 - Envio direto da produção (loja bipa, indústria só escolhe qty)
+- **Pedido:** indústria não criar separação por QR para baldes da produção; só ver a demanda por loja, levar os baldes e deixar a loja bipar cada QR na chegada para baixar/somar estoque.
+- **Banco (MCP aplicada):** migração `transferencias_envio_direto_producao` (= **`20260520180000_…sql`**) adiciona `modo_bip_loja`, `produto_demandado_id`, `quantidade_demandada` + check `tipo=WAREHOUSE_STORE` quando modo ativo.
+- **Serviço:** **`src/lib/services/envio-direto-producao.ts`** com `criarEnvioDiretoProducao` (valida `origem=PRODUCAO`), `bipQrEnvioDireto` (move item, fecha em qty, aviso FEFO opcional), `encerrarEnvioDiretoComDivergencia`, `cancelarEnvioDiretoSemBips`, `listarDemandaBaldesProducaoPorLoja`, `listarEnviosDiretosEmAndamento`. Auditoria: `CRIAR_ENVIO_DIRETO_PRODUCAO`, `BIP_ENVIO_DIRETO_PRODUCAO`, `ENCERRAR_ENVIO_DIRETO_(OK|DIVERGENCIA)`, `CANCELAR_ENVIO_DIRETO_PRODUCAO`.
+- **UI indústria:** nova rota **`/envio-direto-producao`** (sidebar + home, perfis warehouse/gerência) com painel de demanda (loja × produto, mínimo/atual/falta/saldo indústria), formulário de envio, lista «em andamento» com cancelar (só sem bipes).
+- **UI loja:** componente **`EnvioDiretoConferenciaCard`** injetado em `/recebimento` quando `transferencias.modo_bip_loja = TRUE`: mostra qty esperada/bipados/falta, bipa via servidor, aviso de demanda incompleta, FEFO informativo, encerrar com falta. Multi-remessa não inclui envio direto.
+- **Tipos/permissões:** `transferencias` ganhou campos; `getTransferenciaComItensMinimo` lê `tipo`; permissions/Sidebar/home.
+- **Validação:** `npm run lint` OK; `npm run build` OK; coluna conferida no Supabase (`information_schema.columns`).
+
+### Sessão - 2026-05-20 - Recebimento matriz→loja sem exigir IN_TRANSIT (lote 13)
+- **Problema:** loja não conseguia ler QRs do **lote de produção 13**; operação esperava entrada só com escaneamento, sem motorista.
+- **Banco (MCP):** produção `ce1d7597-…` — **72** baldes, todos **`EM_ESTOQUE` na Indústria**, **0** em `transferencia_itens` (nunca passaram por **Separar por Loja**).
+- **Causa app:** Recebimento só listava remessas **`IN_TRANSIT`**; etiqueta na produção não substitui SEP — escaneio exige QR na remessa da loja.
+- **Mudança:** `transferenciaDisponivelParaRecebimento` / `remessaMatrizLojaPodeReceber` — matriz→loja recebe em `AWAITING_ACCEPT`/`ACCEPTED`/`IN_TRANSIT`; `receberTransferencia` alinhado; textos em `/recebimento`; SQL **`docs/consultas-sql/diagnostico-lote-producao-13.sql`**.
+- **Operação lote 13:** indústria deve **Separar por Loja** incluindo os QRs do lote 13 (não só FEFO de lotes antigos); depois loja escaneia na remessa.
+- **Validação:** `npm run lint` (pendente build se for para `main`).
+
+### Sessão - 2026-05-20 - Produção: histórico após migração envase (embed `produtos`)
+- **Problema:** «Produções registradas» em `/producao` falhava com «Could not embed because more than one relationship was found for 'producoes' and 'produtos'» — lista vazia.
+- **Causa:** coluna `envase_produto_balde_id` (segundo FK para `produtos`) na migração envase; select usava `produtos(nome)` ambíguo.
+- **Mudança:** `HISTORICO_PRODUCAO_SELECT` → `produtos!produto_id(nome)`; `getProducoes` em `estoque.ts`; script `test:historico-producao`.
+- **Impacto:** histórico volta a carregar; conferência de baldes/QRs e reimpressão de etiquetas acessíveis de novo.
+- **Validação:** `npm run test:historico-producao` OK (10 produções).
+
+### Sessão - 2026-05-15 - Supabase: migração envase + SKUs caixa no catálogo
+- **Mudança:** MCP **`apply_migration`** `producao_envase_caixa` (equivalente a **`20260515140000_producao_envase_caixa.sql`**). **`INSERT`** idempotente em `produtos`: **Caixa açaí 2L (envase)**, **5L**, **10L** (`origem` PRODUCAO, `escopo_reposicao` industria, `unidade_medida` l, validade 7 dias) — **Açaí Balde 11L** não alterado.
+- **Impacto:** insert de `producoes.tipo` / envase deixa de quebrar no deploy; tela **Envase caixa** lista os três SKUs de caixa junto aos demais acabados de produção.
+- **Validação:** `execute_sql` pós-insert com `RETURNING`; conferência prévia de colunas `produtos` e produtos existentes com «caixa»/«balde».
+
+### Sessão - 2026-05-15 - Envase caixa (balde → caixa) + migração `producoes`
+- **Mudança:** rota **`/producao-envase-caixa`** (bip baldes, proporção **baldes por caixa**, validade em dias, produto caixa + balde); serviço `registrarEnvaseCaixasComBalde` (`producao-envase-caixa.ts`); `producoes.tipo` (`PADRAO` | `ENVASE_CAIXA`), `envase_produto_balde_id`, `envase_baldes_por_caixa` (**`20260515140000_producao_envase_caixa.sql`**); `assertItensSemVinculoRemessaAberta` exportada em `transferencias.ts`; permissões, Sidebar, home; SQL **`docs/consultas-sql/producao-envase-caixa.sql`**.
+- **Impacto:** caixas nascem no **mesmo local** da indústria; baldes escaneados são baixados; relatório via `tipo` + colunas envase.
+- **Validação:** `npm run lint`, `npm run build`.
+
+### Sessão - 2026-05-15 - Produção: reimprimir etiquetas 60×60 pelo histórico
+- **Mudança:** serviço `buscarEtiquetasProducaoParaReimpressao` em `producao.ts`; em `/producao` → **Produções registradas**, coluna **Etiquetas** com **Carregar**; painel de prévia/impressão **60×60** aparece só com `etiquetasPendentesImpressao` (não exige mais o banner verde da mesma sessão).
+- **Impacto:** operador recupera impressão após recarregar a página ou fechar o aviso pós-registro.
+- **Validação:** `npm run lint`, `npm run build`.
+
 ### Sessão - 2026-04-30 - Recebimento: refetch/realtime não zera lista de transferências
 - **Problema:** falha de rede no refetch do `useRealtimeQuery` (pós-evento realtime) fazia `setData([])`; na tela **Recebimento** a remessa sumia do array e o efeito limpava `itensRecebidos` — operador perdia confirmação e tinha que escanear de novo.
 - **Mudança:** `useRealtimeQuery` ganha opção **`preserveDataOnRefetchError`** (padrão `false`): após um fetch com sucesso, erros em refetch não esvaziam o snapshot. **Recebimento** ativa `preserveDataOnRefetchError` + `preserveDataWhileRefetching` na query de `transferencias`. Ref `hadSuccessfulFetchRef` distingue sucesso de “já tentou e falhou”.

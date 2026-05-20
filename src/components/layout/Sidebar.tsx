@@ -9,6 +9,7 @@ import {
   FileImage,
   ChefHat,
   FlaskConical,
+  Boxes,
   Truck,
   Store,
   Repeat2,
@@ -34,6 +35,7 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
   { name: 'Registrar Compra', href: '/entrada-compra', icon: PackagePlus },
   { name: 'Compra (foto NF)', href: '/entrada-compra-nota', icon: FileImage },
   { name: 'Produção', href: '/producao', icon: ChefHat },
+  { name: 'Envase — caixas', href: '/producao-envase-caixa', icon: Boxes },
   {
     name: 'Prévia saldo parcial',
     href: '/producao-previa-saldo-parcial',
@@ -41,6 +43,7 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
     badge: 'demo',
   },
   { name: 'Separar por Loja', href: '/separar-por-loja', icon: Truck },
+  { name: 'Envio direto (produção)', href: '/envio-direto-producao', icon: Truck, badge: 'novo' },
   { name: 'Viagem / Aceite', href: '/viagem-aceite', icon: Truck },
   { name: 'Receber Entrega', href: '/recebimento', icon: Store },
   { name: 'Transf. Loja → Loja', href: '/transferencia-loja', icon: Repeat2 },

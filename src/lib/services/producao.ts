@@ -51,7 +51,8 @@ export const HISTORICO_PRODUCAO_SELECT = [
   'num_baldes',
   'local_id',
   'responsavel',
-  'produtos(nome)',
+  /** Dois FKs para `produtos` após envase (`produto_id` + `envase_produto_balde_id`). */
+  'produtos!produto_id(nome)',
   'locais(nome)',
 ].join(', ');
 
@@ -256,6 +257,141 @@ export interface EtiquetaGeradaProducao {
   sequenciaNoLote: number;
   numBaldesLote: number;
   dataLoteProducaoIso: string;
+}
+
+/** Mesmo formato usado na tela `/producao` para impressão 60×60 (nova produção ou reimpressão). */
+export type EtiquetaPendenteImpressaoProducao = {
+  id: string;
+  dataProducao: string;
+  dataValidade: string;
+  lote: string;
+  tokenQr: string;
+  tokenShort: string | null;
+  numeroLoteProducao: number;
+  sequenciaNoLote: number;
+  numBaldesLote: number;
+  dataLoteProducaoIso: string;
+};
+
+/**
+ * Carrega etiquetas + tokens de uma produção já gravada (ex.: reimprimir após sair da página).
+ * Ordem: `sequencia_no_lote_producao` nos itens.
+ */
+export async function buscarEtiquetasProducaoParaReimpressao(
+  producaoId: string
+): Promise<EtiquetaPendenteImpressaoProducao[]> {
+  const pid = producaoId.trim();
+  if (!pid) throw new Error('Produção inválida.');
+
+  const { data: prodRow, error: errProd } = await supabase
+    .from('producoes')
+    .select('numero_lote_producao, created_at')
+    .eq('id', pid)
+    .maybeSingle();
+
+  if (errProd) throw errProd;
+  const numeroLoteFallback = Number((prodRow as { numero_lote_producao?: number } | null)?.numero_lote_producao);
+  const createdProducaoIso = String((prodRow as { created_at?: string } | null)?.created_at || '').trim();
+  const dataLoteFallback = createdProducaoIso || new Date().toISOString();
+
+  const { data: itens, error: errItens } = await supabase
+    .from('itens')
+    .select('id, token_qr, token_short, data_producao, data_validade, sequencia_no_lote_producao')
+    .eq('producao_id', pid)
+    .order('sequencia_no_lote_producao', { ascending: true });
+
+  if (errItens) throw errItens;
+  const itemRows = (itens || []) as Array<{
+    id: string;
+    token_qr: string;
+    token_short: string | null;
+    data_producao: string | null;
+    data_validade: string | null;
+    sequencia_no_lote_producao: number | null;
+  }>;
+  if (itemRows.length === 0) {
+    throw new Error('Nenhuma unidade (QR) encontrada para esta produção.');
+  }
+
+  const ids = itemRows.map((r) => r.id);
+  const { data: ets, error: errEt } = await supabase
+    .from('etiquetas')
+    .select(
+      'id, lote, lote_producao_numero, sequencia_no_lote_producao, num_baldes_lote_producao, data_lote_producao, data_validade, excluida'
+    )
+    .in('id', ids);
+
+  if (errEt) throw errEt;
+
+  type EtRow = {
+    id: string;
+    lote: string | null;
+    lote_producao_numero: number | null;
+    sequencia_no_lote_producao: number | null;
+    num_baldes_lote_producao: number | null;
+    data_lote_producao: string | null;
+    data_validade: string | null;
+    excluida: boolean | null;
+  };
+
+  const porId = new Map<string, EtRow>((ets || []).map((e) => [String((e as EtRow).id), e as EtRow]));
+
+  const nBaldes = itemRows.length;
+
+  return itemRows.map((item) => {
+    const et = porId.get(item.id);
+    if (!et) {
+      throw new Error(
+        `Sem linha de etiqueta para o item ${item.id.slice(0, 8)}… — dados incompletos. Contate o suporte.`
+      );
+    }
+    if (et.excluida) {
+      throw new Error('Esta produção tem etiqueta marcada como excluída. Não é possível reimprimir automaticamente.');
+    }
+
+    const seqEt = et.sequencia_no_lote_producao;
+    const seqItem = item.sequencia_no_lote_producao;
+    const sequenciaNoLote =
+      Number.isFinite(Number(seqEt)) && Number(seqEt) > 0
+        ? Number(seqEt)
+        : Number.isFinite(Number(seqItem)) && Number(seqItem) > 0
+          ? Number(seqItem)
+          : 1;
+
+    const rawNum = et.lote_producao_numero;
+    const numeroLoteProducao =
+      Number.isFinite(Number(rawNum)) && Number(rawNum) > 0
+        ? Number(rawNum)
+        : Number.isFinite(numeroLoteFallback) && numeroLoteFallback > 0
+          ? numeroLoteFallback
+          : 0;
+
+    const loteStr = String(et.lote || '').trim() || '—';
+    const dataVal = String(et.data_validade || item.data_validade || '').trim();
+    if (!dataVal) {
+      throw new Error(`Etiqueta ${item.id.slice(0, 8)}… sem data de validade.`);
+    }
+
+    const dataLoteProducaoIso = String(et.data_lote_producao || '').trim() || dataLoteFallback;
+    const dataProducao = String(item.data_producao || '').trim() || dataLoteFallback;
+
+    const numBaldesEt = et.num_baldes_lote_producao;
+    const numBaldesLote =
+      Number.isFinite(Number(numBaldesEt)) && Number(numBaldesEt) > 0 ? Number(numBaldesEt) : nBaldes;
+
+    return {
+      id: item.id,
+      dataProducao,
+      dataValidade: dataVal,
+      lote: loteStr,
+      tokenQr: item.token_qr,
+      tokenShort: item.token_short,
+      numeroLoteProducao,
+      sequenciaNoLote,
+      numBaldesLote,
+      dataLoteProducaoIso,
+    };
+  });
 }
 
 function mergeConsumos(linhas: ConsumoProducaoLinha[]): ConsumoProducaoLinha[] {
@@ -589,4 +725,228 @@ export async function registrarProducaoComItens(input: RegistrarProducaoInput): 
     numBaldesLote: quantidadeAcabado,
     dataLoteProducaoIso: dataLoteProducaoIso || new Date().toISOString(),
   }));
+}
+
+const PERFIS_PODEM_EXCLUIR_PRODUCAO: ReadonlyArray<string> = ['ADMIN_MASTER'];
+
+const EXCLUIR_PROD_CHUNK = 100;
+
+function chunkIds<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Desfaz uma produção registrada **antes de qualquer balde sair da indústria**:
+ * - todos os QRs do acabado precisam estar **EM_ESTOQUE** no local da produção, **sem** vínculo em
+ *   `transferencia_itens`, `baixas` ou `perdas`;
+ * - insumos consumidos por QR (`producao_consumo_itens`) voltam a **EM_ESTOQUE**, baixas removidas;
+ * - consumo por massa (`producao_consumo_massa`) é estornado em `lotes_compra.gramas_consumidas_acumulado`;
+ * - etiquetas e itens do acabado são apagados; a linha em `producoes` também.
+ *
+ * Não devolve o número de lote (a sequência segue em frente — o lote 13 deletado não vira 13 outra vez).
+ */
+export async function excluirProducao(
+  producaoId: string,
+  usuarioId: string
+): Promise<{ qrsAcabadoRevertidos: number; insumosQrRevertidos: number; gramasEstornadas: number }> {
+  const pid = producaoId.trim();
+  if (!pid || !usuarioId.trim()) {
+    throw new Error('Produção e usuário são obrigatórios.');
+  }
+
+  const { data: opRow, error: opErr } = await supabase
+    .from('usuarios')
+    .select('perfil')
+    .eq('id', usuarioId)
+    .single();
+  if (opErr) throw opErr;
+  if (!opRow || !PERFIS_PODEM_EXCLUIR_PRODUCAO.includes(String(opRow.perfil))) {
+    throw new Error('Apenas o administrador (ADMIN_MASTER) pode excluir produções.');
+  }
+
+  const { data: prod, error: ePr } = await supabase
+    .from('producoes')
+    .select('id, produto_id, local_id, num_baldes, numero_lote_producao, created_at')
+    .eq('id', pid)
+    .single();
+  if (ePr) throw ePr;
+  if (!prod) throw new Error('Produção não encontrada.');
+  const localProducao = prod.local_id as string;
+  const produtoAcabadoId = prod.produto_id as string;
+
+  // 1. Itens do acabado: tudo precisa estar EM_ESTOQUE no local da produção.
+  const { data: itensAcabado, error: eItens } = await supabase
+    .from('itens')
+    .select('id, estado, local_atual_id')
+    .eq('producao_id', pid);
+  if (eItens) throw eItens;
+  const itemIdsAcabado = (itensAcabado || []).map((r) => r.id as string);
+
+  const baldesForaIndustria = (itensAcabado || []).filter(
+    (r) => r.estado !== 'EM_ESTOQUE' || r.local_atual_id !== localProducao
+  );
+  if (baldesForaIndustria.length > 0) {
+    throw new Error(
+      `Não é possível excluir: ${baldesForaIndustria.length} balde(s) desta produção já saíram da indústria (em remessa, recebidos por loja ou baixados).`
+    );
+  }
+
+  if (itemIdsAcabado.length > 0) {
+    for (const slice of chunkIds(itemIdsAcabado, EXCLUIR_PROD_CHUNK)) {
+      const { data: vinc, error: eV } = await supabase
+        .from('transferencia_itens')
+        .select('item_id')
+        .in('item_id', slice)
+        .limit(1);
+      if (eV) throw eV;
+      if (vinc && vinc.length > 0) {
+        throw new Error(
+          'Não é possível excluir: algum balde já está vinculado a uma remessa (Separar por Loja ou Envio direto). Cancele a remessa antes.'
+        );
+      }
+      const { data: baixasJa, error: eB } = await supabase
+        .from('baixas')
+        .select('item_id')
+        .in('item_id', slice)
+        .limit(1);
+      if (eB) throw eB;
+      if (baixasJa && baixasJa.length > 0) {
+        throw new Error('Não é possível excluir: algum balde já foi baixado (consumido).');
+      }
+      const { data: perdasJa, error: eP } = await supabase
+        .from('perdas')
+        .select('item_id')
+        .in('item_id', slice)
+        .limit(1);
+      if (eP) throw eP;
+      if (perdasJa && perdasJa.length > 0) {
+        throw new Error('Não é possível excluir: algum balde foi marcado como perda/descarte.');
+      }
+    }
+  }
+
+  // 2. Insumos QR: reverter para EM_ESTOQUE e apagar baixas/consumo.
+  const { data: consumoQr, error: eCons } = await supabase
+    .from('producao_consumo_itens')
+    .select('item_id')
+    .eq('producao_id', pid);
+  if (eCons) throw eCons;
+  const insumosItemIds = [...new Set((consumoQr || []).map((r) => String(r.item_id || '').trim()).filter(Boolean))];
+
+  const produtosInsumosParaSync = new Set<string>();
+  if (insumosItemIds.length > 0) {
+    const { data: insumosRows, error: eI } = await supabase
+      .from('itens')
+      .select('id, produto_id')
+      .in('id', insumosItemIds);
+    if (eI) throw eI;
+    for (const r of insumosRows || []) {
+      if (r.produto_id) produtosInsumosParaSync.add(String(r.produto_id));
+    }
+    for (const slice of chunkIds(insumosItemIds, EXCLUIR_PROD_CHUNK)) {
+      const { error: eUp } = await supabase
+        .from('itens')
+        .update({ estado: 'EM_ESTOQUE' })
+        .in('id', slice);
+      if (eUp) throw eUp;
+    }
+    const { error: eDelBx } = await supabase.from('baixas').delete().eq('producao_id', pid);
+    if (eDelBx) throw eDelBx;
+    const { error: eDelPCI } = await supabase
+      .from('producao_consumo_itens')
+      .delete()
+      .eq('producao_id', pid);
+    if (eDelPCI) throw eDelPCI;
+  }
+
+  // 3. Consumo por massa: estornar gramas nos lotes de compra.
+  const { data: consumoMassa, error: eCm } = await supabase
+    .from('producao_consumo_massa')
+    .select('id, produto_id, gramas_consumidas, detalhes_lotes')
+    .eq('producao_id', pid);
+  if (eCm) throw eCm;
+  type ConsumoMassaRow = {
+    id: string;
+    produto_id: string;
+    gramas_consumidas: number;
+    detalhes_lotes: { lote_compra_id?: string; gramas?: number }[] | null;
+  };
+  let gramasEstornadas = 0;
+  const ajustesLote = new Map<string, number>();
+  for (const row of (consumoMassa || []) as ConsumoMassaRow[]) {
+    produtosInsumosParaSync.add(String(row.produto_id));
+    gramasEstornadas += Math.max(0, Math.floor(Number(row.gramas_consumidas || 0)));
+    for (const d of row.detalhes_lotes || []) {
+      const lid = String(d?.lote_compra_id || '').trim();
+      const g = Math.max(0, Math.floor(Number(d?.gramas || 0)));
+      if (!lid || g <= 0) continue;
+      ajustesLote.set(lid, (ajustesLote.get(lid) || 0) + g);
+    }
+  }
+  if (ajustesLote.size > 0) {
+    const ids = [...ajustesLote.keys()];
+    const { data: lotesAtuais, error: eL } = await supabase
+      .from('lotes_compra')
+      .select('id, gramas_consumidas_acumulado')
+      .in('id', ids);
+    if (eL) throw eL;
+    for (const l of lotesAtuais || []) {
+      const atual = Math.max(0, Math.floor(Number(l.gramas_consumidas_acumulado || 0)));
+      const sub = ajustesLote.get(String(l.id)) || 0;
+      const novo = Math.max(0, atual - sub);
+      const { error: eUpL } = await supabase
+        .from('lotes_compra')
+        .update({ gramas_consumidas_acumulado: novo })
+        .eq('id', l.id);
+      if (eUpL) throw eUpL;
+    }
+  }
+  if ((consumoMassa || []).length > 0) {
+    const { error: eDelM } = await supabase
+      .from('producao_consumo_massa')
+      .delete()
+      .eq('producao_id', pid);
+    if (eDelM) throw eDelM;
+  }
+
+  // 4. Etiquetas + itens do acabado.
+  if (itemIdsAcabado.length > 0) {
+    for (const slice of chunkIds(itemIdsAcabado, EXCLUIR_PROD_CHUNK)) {
+      const { error: eEt } = await supabase.from('etiquetas').delete().in('id', slice);
+      if (eEt) throw eEt;
+    }
+    const { error: eDelI } = await supabase.from('itens').delete().eq('producao_id', pid);
+    if (eDelI) throw eDelI;
+  }
+
+  // 5. Apagar a produção.
+  const { error: eDelP } = await supabase.from('producoes').delete().eq('id', pid);
+  if (eDelP) throw eDelP;
+
+  // 6. Recalcular agregados de estoque.
+  const produtosParaSync = [produtoAcabadoId, ...produtosInsumosParaSync].filter(Boolean);
+  await recalcularEstoqueProdutos([...new Set(produtosParaSync)]);
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: localProducao,
+    acao: 'EXCLUIR_PRODUCAO',
+    detalhes: {
+      producao_id: pid,
+      produto_id: produtoAcabadoId,
+      numero_lote_producao: prod.numero_lote_producao ?? null,
+      num_baldes: prod.num_baldes ?? null,
+      qrs_acabado_revertidos: itemIdsAcabado.length,
+      insumos_qr_revertidos: insumosItemIds.length,
+      gramas_estornadas: gramasEstornadas,
+    },
+  });
+
+  return {
+    qrsAcabadoRevertidos: itemIdsAcabado.length,
+    insumosQrRevertidos: insumosItemIds.length,
+    gramasEstornadas,
+  };
 }

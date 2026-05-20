@@ -9,6 +9,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/entrada-compra': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/entrada-compra-nota': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
+  '/producao-envase-caixa': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao-previa-saldo-parcial': [
     'ADMIN_MASTER',
     'MANAGER',
@@ -18,6 +19,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/etiquetas': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/teste-impressao-etiqueta': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/separar-por-loja': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
+  '/envio-direto-producao': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/viagem-aceite': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'DRIVER', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/acompanhamento-viagens': ['ADMIN_MASTER', 'MANAGER'],
   '/recebimento': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE'],
@@ -68,6 +70,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/entrada-compra', label: 'Registrar compra', section: 'Operações' },
   { path: '/entrada-compra-nota', label: 'Registrar compra (foto NF)', section: 'Operações' },
   { path: '/producao', label: 'Produção', section: 'Operações' },
+  { path: '/producao-envase-caixa', label: 'Envase — caixas (balde → caixa)', section: 'Operações' },
   {
     path: '/producao-previa-saldo-parcial',
     label: 'Produção — prévia consumo massa (demo)',
@@ -76,6 +79,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/etiquetas', label: 'Etiquetas', section: 'Operações' },
   { path: '/teste-impressao-etiqueta', label: 'Teste de impressão (etiqueta)', section: 'Operações' },
   { path: '/separar-por-loja', label: 'Separar por loja', section: 'Operações' },
+  { path: '/envio-direto-producao', label: 'Envio direto (produção → loja)', section: 'Operações' },
   { path: '/viagem-aceite', label: 'Viagem / aceite', section: 'Operações' },
   { path: '/acompanhamento-viagens', label: 'Acompanhamento de viagens', section: 'Administração' },
   { path: '/recebimento', label: 'Receber entrega', section: 'Operações' },

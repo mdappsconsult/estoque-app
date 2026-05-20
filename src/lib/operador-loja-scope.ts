@@ -85,9 +85,24 @@ export function filtrarRecebimentoPorLoja<T extends { destino_id: string }>(
   return transferencias.filter((t) => t.destino_id === usuario.local_padrao_id);
 }
 
+/** Remessa matriz→loja liberada para escaneamento em Recebimento (sem exigir motorista / IN_TRANSIT). */
+export const STATUS_RECEBIMENTO_MATRIZ_LOJA = ['AWAITING_ACCEPT', 'ACCEPTED', 'IN_TRANSIT'] as const;
+
+export function remessaMatrizLojaPodeReceber(status: string): boolean {
+  return (STATUS_RECEBIMENTO_MATRIZ_LOJA as readonly string[]).includes(status);
+}
+
+/** Loja→loja e demais tipos: só em trânsito após despacho. */
+export function transferenciaDisponivelParaRecebimento<
+  T extends { status: string; tipo: string },
+>(t: T): boolean {
+  if (t.tipo === 'WAREHOUSE_STORE') return remessaMatrizLojaPodeReceber(t.status);
+  return t.status === 'IN_TRANSIT';
+}
+
 /**
  * Matriz → loja em **ACCEPTED** (viagem aceita pelo motorista) ainda sem **IN_TRANSIT** —
- * aparece na loja só como aviso até alguém tocar em «Iniciar viagem» em Viagem / Aceite.
+ * legado: recebimento já aceita ACCEPTED; lista vazia na prática.
  */
 export function filtrarRemessasMatrizAguardandoMotorista<
   T extends { destino_id: string; status: string; tipo: string },

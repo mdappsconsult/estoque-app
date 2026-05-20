@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { remessaMatrizLojaPodeReceber } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
 import { Transferencia, TransferenciaInsert } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
@@ -11,7 +12,7 @@ export interface TransferenciaCompleta extends Transferencia {
   itens?: { id: string; item_id: string; recebido: boolean; item?: { id: string; token_qr: string; produto?: { nome: string } } }[];
 }
 
-type TransferenciaComItensMinimo = Pick<Transferencia, 'id' | 'origem_id' | 'destino_id' | 'status'> & {
+type TransferenciaComItensMinimo = Pick<Transferencia, 'id' | 'origem_id' | 'destino_id' | 'status' | 'tipo'> & {
   transferencia_itens: { item_id: string }[];
 };
 
@@ -49,7 +50,7 @@ async function sincronizarEstoquePorProdutos(
 async function getTransferenciaComItensMinimo(id: string): Promise<TransferenciaComItensMinimo> {
   const { data, error } = await supabase
     .from('transferencias')
-    .select('id, origem_id, destino_id, status, transferencia_itens(item_id)')
+    .select('id, origem_id, destino_id, status, tipo, transferencia_itens(item_id)')
     .eq('id', id)
     .single();
 
@@ -120,7 +121,7 @@ const STATUS_REMESSA_RESERVA_ITEM: Transferencia['status'][] = ['AWAITING_ACCEPT
  * Impede dupla reserva: o mesmo `item_id` pode aparecer em várias linhas de `transferencia_itens`
  * (índice único só por remessa), o que gerava etiqueta com um destino e `local_atual` coerente com outro recebimento.
  */
-async function assertItensSemVinculoRemessaAberta(itemIds: string[], client: SupabaseClient): Promise<void> {
+export async function assertItensSemVinculoRemessaAberta(itemIds: string[], client: SupabaseClient): Promise<void> {
   if (itemIds.length === 0) return;
   const reservado = new Set<string>(STATUS_REMESSA_RESERVA_ITEM);
   for (let i = 0; i < itemIds.length; i += IN_CLAUSE_CHUNK) {
@@ -427,8 +428,16 @@ export async function receberTransferencia(
   options?: ReceberTransferenciaOptions
 ): Promise<{ divergencias: { tipo: 'FALTANTE' | 'EXCEDENTE'; item_id: string }[] }> {
   const transferencia = await getTransferenciaComItensMinimo(transferenciaId);
-  if (transferencia.status !== 'IN_TRANSIT') {
-    throw new Error('Somente transferências em trânsito podem ser recebidas');
+  const podeReceber =
+    transferencia.tipo === 'WAREHOUSE_STORE'
+      ? remessaMatrizLojaPodeReceber(transferencia.status)
+      : transferencia.status === 'IN_TRANSIT';
+  if (!podeReceber) {
+    throw new Error(
+      transferencia.tipo === 'WAREHOUSE_STORE'
+        ? 'Esta remessa indústria→loja não está disponível para recebimento (status inválido ou já encerrada).'
+        : 'Somente transferências em trânsito podem ser recebidas'
+    );
   }
   if (transferencia.destino_id !== localDestinoId) {
     throw new Error('Local de recebimento não corresponde ao destino da transferência');

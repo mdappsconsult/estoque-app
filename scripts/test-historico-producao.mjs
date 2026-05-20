@@ -48,7 +48,7 @@ const HISTORICO_PRODUCAO_SELECT = [
   'num_baldes',
   'local_id',
   'responsavel',
-  'produtos(nome)',
+  'produtos!produto_id(nome)',
   'locais(nome)',
 ].join(', ');
 

@@ -47,7 +47,7 @@ export async function createRecebimento(recebimento: RecebimentoInsert): Promise
 export async function getProducoes(): Promise<(Producao & { produto: { nome: string } })[]> {
   const { data, error } = await supabase
     .from('producoes')
-    .select('*, produto:produtos(nome)')
+    .select('*, produto:produtos!produto_id(nome)')
     .order('data_producao', { ascending: false });
 
   if (error) throw error;

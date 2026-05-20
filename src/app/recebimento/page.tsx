@@ -14,9 +14,10 @@ import { errMessage } from '@/lib/errMessage';
 import { receberTransferencia } from '@/lib/services/transferencias';
 import {
   filtrarRecebimentoPorLoja,
-  filtrarRemessasMatrizAguardandoMotorista,
+  transferenciaDisponivelParaRecebimento,
 } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
+import EnvioDiretoConferenciaCard from '@/components/recebimento/EnvioDiretoConferenciaCard';
 
 interface TransRow {
   id: string;
@@ -28,6 +29,10 @@ interface TransRow {
   origem: { nome: string };
   destino: { nome: string };
   transferencia_itens?: { id: string }[];
+  modo_bip_loja?: boolean;
+  produto_demandado_id?: string | null;
+  quantidade_demandada?: number | null;
+  produto_demandado?: { nome: string } | { nome: string }[] | null;
 }
 
 interface ItemEsperado {
@@ -77,7 +82,8 @@ export default function RecebimentoPage() {
 
   const { data: transferencias, loading } = useRealtimeQuery<TransRow>({
     table: 'transferencias',
-    select: '*, origem:locais!origem_id(nome), destino:locais!destino_id(nome), transferencia_itens(id)',
+    select:
+      '*, origem:locais!origem_id(nome), destino:locais!destino_id(nome), transferencia_itens(id), produto_demandado:produtos!produto_demandado_id(nome)',
     orderBy: { column: 'created_at', ascending: false },
     filters: filtrosDestinoLoja,
     enabled: consultaRecebimentoHabilitada,
@@ -86,15 +92,78 @@ export default function RecebimentoPage() {
     preserveDataWhileRefetching: true,
   });
 
-  const emTransito = transferencias.filter((t) => t.status === 'IN_TRANSIT');
-  const pendentes = filtrarRecebimentoPorLoja(emTransito, usuario);
+  const pendentes = filtrarRecebimentoPorLoja(
+    transferencias.filter(transferenciaDisponivelParaRecebimento),
+    usuario
+  );
 
   const conferenciaAgrupadaAtiva = modoMultiRemessas && remessasIdsConferencia.length >= 2;
   const remessaUnicaId =
     !modoMultiRemessas && remessasIdsConferencia.length === 1 ? remessasIdsConferencia[0]! : null;
+  const remessaSelecionada = useMemo(
+    () => (remessaUnicaId ? transferencias.find((t) => t.id === remessaUnicaId) ?? null : null),
+    [remessaUnicaId, transferencias]
+  );
+  const envioDiretoAtivo = Boolean(remessaSelecionada?.modo_bip_loja);
+  const produtoDemandadoNome = useMemo(() => {
+    const raw = remessaSelecionada?.produto_demandado;
+    if (!raw) return 'Produto';
+    if (Array.isArray(raw)) return raw[0]?.nome || 'Produto';
+    return raw.nome || 'Produto';
+  }, [remessaSelecionada]);
   const exigePainelConferencia = remessaUnicaId != null || conferenciaAgrupadaAtiva;
 
+  /** Mínimo cadastrado para o produto na loja (compara com qty mandada — só relevante em envio direto). */
+  const [demandaLojaProduto, setDemandaLojaProduto] = useState<{
+    estoqueMinimo: number;
+    estoqueAtual: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let ativo = true;
+    setDemandaLojaProduto(null);
+    if (!envioDiretoAtivo || !remessaSelecionada?.produto_demandado_id || !remessaSelecionada?.destino_id) {
+      return;
+    }
+    const carregar = async () => {
+      try {
+        const [{ data: cfg }, { count }] = await Promise.all([
+          supabase
+            .from('loja_produtos_config')
+            .select('estoque_minimo_loja')
+            .eq('loja_id', remessaSelecionada.destino_id)
+            .eq('produto_id', remessaSelecionada.produto_demandado_id!)
+            .maybeSingle(),
+          supabase
+            .from('itens')
+            .select('id', { count: 'exact', head: true })
+            .eq('local_atual_id', remessaSelecionada.destino_id)
+            .eq('produto_id', remessaSelecionada.produto_demandado_id!)
+            .eq('estado', 'EM_ESTOQUE'),
+        ]);
+        if (!ativo) return;
+        setDemandaLojaProduto({
+          estoqueMinimo: Math.max(0, Math.floor(Number(cfg?.estoque_minimo_loja || 0))),
+          estoqueAtual: count ?? 0,
+        });
+      } catch {
+        if (ativo) setDemandaLojaProduto(null);
+      }
+    };
+    void carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [envioDiretoAtivo, remessaSelecionada?.produto_demandado_id, remessaSelecionada?.destino_id]);
+
   const alternarRemessaNoModoMulti = (id: string) => {
+    const candidata = pendentes.find((p) => p.id === id);
+    if (candidata?.modo_bip_loja) {
+      setErro(
+        'Envio direto da produção só pode ser conferido isoladamente (bipe os QRs nesta tela).'
+      );
+      return;
+    }
     setRemessasIdsConferencia((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
       if (next.length === 0) {
@@ -113,12 +182,7 @@ export default function RecebimentoPage() {
     });
   };
 
-  const aguardandoMotorista = useMemo(
-    () => filtrarRemessasMatrizAguardandoMotorista(transferencias, usuario),
-    [transferencias, usuario]
-  );
-
-  /** Só informativo: encerradas não entram no <Select> (só IN_TRANSIT). Ex.: Silvania — dia 9 em divergência. */
+  /** Só informativo: encerradas não entram no <Select>. Ex.: Silvania — dia 9 em divergência. */
   const encerradasRecentesNaLoja = useMemo(() => {
     if (usuario?.perfil !== 'OPERATOR_STORE' || !usuario.local_padrao_id) return [];
     const dias = 14;
@@ -147,13 +211,13 @@ export default function RecebimentoPage() {
         setErro('');
         return;
       }
-      if (t.status !== 'IN_TRANSIT') {
+      if (!transferenciaDisponivelParaRecebimento(t)) {
         const msg =
           t.status === 'DELIVERED'
             ? 'Uma das entregas já foi concluída nesta conta em outro aparelho (ou por outro operador). Os QRs escaneados neste telefone não foram enviados ao servidor — use um único aparelho até confirmar, ou confira o estoque da loja.'
             : t.status === 'DIVERGENCE'
               ? 'Uma das remessas foi encerrada com divergência (faltante ou excedente). Não é possível continuar o recebimento aqui. Veja a tela Divergências ou fale com o gestor.'
-              : `Uma transferência não está mais em trânsito (status: ${t.status}).`;
+              : `Uma transferência não está mais disponível para recebimento (status: ${t.status}).`;
         setAvisoRemessaEncerrada(msg);
         setRemessasIdsConferencia([]);
         setModoMultiRemessas(false);
@@ -170,6 +234,11 @@ export default function RecebimentoPage() {
         (!modoMultiRemessas && remessasIdsConferencia.length === 1) ||
         (modoMultiRemessas && remessasIdsConferencia.length >= 2);
       if (!ok) {
+        setItensEsperados([]);
+        return;
+      }
+      if (envioDiretoAtivo) {
+        // Remessa de envio direto não tem lista de QRs; o servidor controla via `bipQrEnvioDireto`.
         setItensEsperados([]);
         return;
       }
@@ -221,7 +290,7 @@ export default function RecebimentoPage() {
       }
     };
     void carregarItensEsperados();
-  }, [remessasIdsConferencia, modoMultiRemessas]);
+  }, [remessasIdsConferencia, modoMultiRemessas, envioDiretoAtivo]);
 
   const idsEscaneados = useMemo(
     () => new Set(itensRecebidos.map((i) => i.id)),
@@ -296,7 +365,7 @@ export default function RecebimentoPage() {
       }
       for (const rid of remessasIdsConferencia) {
         const tr = transferencias.find((t) => t.id === rid);
-        if (!tr || tr.status !== 'IN_TRANSIT' || !pendentes.some((t) => t.id === rid)) {
+        if (!tr || !transferenciaDisponivelParaRecebimento(tr) || !pendentes.some((t) => t.id === rid)) {
           setErro('Uma das remessas não está mais disponível para recebimento. Atualize a lista.');
           return;
         }
@@ -348,7 +417,7 @@ export default function RecebimentoPage() {
       setErro(
         modoMultiRemessas
           ? 'Marque pelo menos duas remessas para conferir juntas, ou use «Voltar a conferir uma remessa por vez».'
-          : 'Selecione uma transferência em trânsito'
+          : 'Selecione uma remessa para receber'
       );
       return;
     }
@@ -358,13 +427,13 @@ export default function RecebimentoPage() {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
     }
-    if (transSelecionada.status !== 'IN_TRANSIT') {
+    if (!transferenciaDisponivelParaRecebimento(transSelecionada)) {
       setErro(
         transSelecionada.status === 'DELIVERED'
           ? 'Esta entrega já foi concluída. Se havia outro telefone escaneando a mesma conta, só um aparelho pode confirmar — a lista de escaneados é local até você tocar em «Confirmar recebimento».'
           : transSelecionada.status === 'DIVERGENCE'
             ? 'Esta remessa já foi encerrada com divergência. Não é possível confirmar de novo por aqui.'
-            : 'Esta transferência não está mais em trânsito.'
+            : 'Esta remessa não está mais disponível para recebimento.'
       );
       return;
     }
@@ -413,7 +482,7 @@ export default function RecebimentoPage() {
       return;
     }
     if (!remessaUnicaId) {
-      setErro('Selecione uma transferência em trânsito');
+      setErro('Selecione uma remessa para receber');
       return;
     }
     if (loadingEsperados || itensEsperados.length === 0) {
@@ -430,13 +499,13 @@ export default function RecebimentoPage() {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
     }
-    if (transSelecionada.status !== 'IN_TRANSIT') {
+    if (!transferenciaDisponivelParaRecebimento(transSelecionada)) {
       setErro(
         transSelecionada.status === 'DELIVERED'
           ? 'Esta entrega já foi concluída.'
           : transSelecionada.status === 'DIVERGENCE'
             ? 'Esta remessa já foi encerrada com divergência.'
-            : 'Esta transferência não está mais em trânsito.'
+            : 'Esta remessa não está mais disponível para recebimento.'
       );
       return;
     }
@@ -490,7 +559,7 @@ export default function RecebimentoPage() {
       return;
     }
     if (!remessaUnicaId) {
-      setErro('Selecione uma transferência em trânsito');
+      setErro('Selecione uma remessa para receber');
       return;
     }
     if (loadingEsperados || itensEsperados.length === 0) {
@@ -507,13 +576,13 @@ export default function RecebimentoPage() {
       setErro('Transferência não encontrada. Atualize a página e tente novamente.');
       return;
     }
-    if (transSelecionada.status !== 'IN_TRANSIT') {
+    if (!transferenciaDisponivelParaRecebimento(transSelecionada)) {
       setErro(
         transSelecionada.status === 'DELIVERED'
           ? 'Esta entrega já foi concluída.'
           : transSelecionada.status === 'DIVERGENCE'
             ? 'Esta remessa já foi encerrada com divergência.'
-            : 'Esta transferência não está mais em trânsito.'
+            : 'Esta remessa não está mais disponível para recebimento.'
       );
       return;
     }
@@ -591,33 +660,11 @@ export default function RecebimentoPage() {
         </div>
       )}
 
-      {aguardandoMotorista.length > 0 && usuario?.perfil === 'OPERATOR_STORE' && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-4 text-sm text-amber-950">
-          <p className="font-semibold text-amber-900">Envio a caminho — aguardando motorista</p>
-          <p className="mt-1 text-amber-900/90 leading-relaxed">
-            Há {aguardandoMotorista.length} remessa(s) para a sua loja já aceita(s) pelo motorista, mas ainda{' '}
-            <strong>sem saída registrada</strong> (falta <strong>Iniciar viagem</strong> em Viagem / Aceite). O
-            escaneamento no Recebimento libera quando o status passar a <strong>em trânsito</strong>.
-          </p>
-          <ul className="mt-2 space-y-1 text-xs text-amber-900/85">
-            {aguardandoMotorista.slice(0, 5).map((t) => (
-              <li key={t.id}>
-                {t.origem?.nome ?? '?'} → {t.destino?.nome ?? '?'} ·{' '}
-                {new Date(t.created_at).toLocaleString('pt-BR')}
-              </li>
-            ))}
-            {aguardandoMotorista.length > 5 ? (
-              <li className="text-amber-800/80">… e mais {aguardandoMotorista.length - 5}</li>
-            ) : null}
-          </ul>
-        </div>
-      )}
-
       {encerradasRecentesNaLoja.length > 0 && usuario?.perfil === 'OPERATOR_STORE' && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 mb-4 text-sm text-slate-800">
           <p className="font-semibold text-slate-900">Remessas já encerradas (últimos 14 dias)</p>
           <p className="mt-1 text-slate-700 leading-relaxed">
-            O menu <strong>Transferência em trânsito</strong> só lista envios ainda <strong>em trânsito</strong>. Por
+            O menu de remessas só lista envios <strong>ainda não recebidos</strong>. Por
             isso um pedido do dia pode «sumir» da lista se já foi <strong>recebido</strong> ou ficou com{' '}
             <strong>divergência</strong>.
           </p>
@@ -643,8 +690,8 @@ export default function RecebimentoPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
         {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
           <p className="text-xs text-gray-600">
-            Lista só entregas <span className="font-medium">em trânsito para a sua loja</span> (origem pode ser a
-            indústria ou outra loja — o que importa é o destino ser a unidade vinculada ao seu usuário).
+            Lista remessas da indústria para a sua loja (após <strong>Separar por Loja</strong>) e entregas loja→loja em
+            trânsito. Só escaneie QRs que constam na remessa escolhida.
           </p>
         )}
         {pendentes.length >= 2 && (
@@ -733,15 +780,23 @@ export default function RecebimentoPage() {
           </div>
         ) : (
           <Select
-            label="Transferência em trânsito"
+            label="Remessa para receber"
             options={[
               { value: '', label: 'Selecione...' },
               ...pendentes.map((t) => {
                 const qtdItens = t.transferencia_itens?.length || 0;
                 const data = new Date(t.created_at).toLocaleString('pt-BR');
+                const envioDireto = Boolean(t.modo_bip_loja);
+                const prodNomeRaw = t.produto_demandado;
+                const prodNome = Array.isArray(prodNomeRaw)
+                  ? prodNomeRaw[0]?.nome
+                  : prodNomeRaw?.nome;
+                const sufixo = envioDireto
+                  ? ` (envio direto: ${t.quantidade_demandada ?? 0} ${prodNome || 'produto'})`
+                  : ` • ${qtdItens} item(ns)`;
                 return {
                   value: t.id,
-                  label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'} • ${qtdItens} item(ns) • ${data}`,
+                  label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'}${sufixo} • ${data}`,
                 };
               }),
             ]}
@@ -758,7 +813,32 @@ export default function RecebimentoPage() {
         )}
       </div>
 
-      {exigePainelConferencia && (
+      {exigePainelConferencia && envioDiretoAtivo && remessaSelecionada && usuario && (
+        <EnvioDiretoConferenciaCard
+          transferenciaId={remessaSelecionada.id}
+          destinoId={remessaSelecionada.destino_id}
+          produtoNome={produtoDemandadoNome}
+          produtoId={remessaSelecionada.produto_demandado_id || ''}
+          quantidadeDemandada={remessaSelecionada.quantidade_demandada || 0}
+          origemNome={remessaSelecionada.origem?.nome || '?'}
+          destinoNome={remessaSelecionada.destino?.nome || '?'}
+          usuarioId={usuario.id}
+          podeEncerrarComFalta={
+            usuario.perfil === 'OPERATOR_STORE' ||
+            usuario.perfil === 'ADMIN_MASTER' ||
+            usuario.perfil === 'MANAGER'
+          }
+          estoqueMinimoLoja={demandaLojaProduto?.estoqueMinimo}
+          estoqueAtualLoja={demandaLojaProduto?.estoqueAtual}
+          onConcluida={() => {
+            setItensRecebidos([]);
+            setRemessasIdsConferencia([]);
+            setResultado({ divergencias: 0 });
+          }}
+        />
+      )}
+
+      {exigePainelConferencia && !envioDiretoAtivo && (
         <>
           <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
@@ -953,14 +1033,12 @@ export default function RecebimentoPage() {
         <div className="text-center py-12 text-gray-400">
           <Store className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>Nenhuma entrega em trânsito</p>
-          {usuario?.perfil === 'OPERATOR_STORE' &&
-            usuario.local_padrao_id &&
-            emTransito.length > 0 && (
-              <p className="text-xs text-gray-500 mt-2 max-w-xs mx-auto">
-                Há entregas em trânsito para outras lojas. Só aparecem aqui os pedidos com destino na{' '}
-                <span className="font-medium">sua loja</span> (local padrão do seu usuário).
-              </p>
-            )}
+          {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
+            <p className="text-xs text-gray-500 mt-2 max-w-xs mx-auto">
+              Só aparecem aqui pedidos com destino na <span className="font-medium">sua loja</span>{' '}
+              (local padrão do seu usuário).
+            </p>
+          )}
           {usuario?.perfil === 'OPERATOR_STORE' && !usuario.local_padrao_id && (
             <p className="text-xs text-amber-700 mt-2 max-w-xs mx-auto">
               Seu usuário não tem loja padrão cadastrada. Peça ao administrador para vincular sua loja em

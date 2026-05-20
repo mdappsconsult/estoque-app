@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Eye, QrCode, Loader2, Printer, Server } from 'lucide-react';
+import { ChefHat, Eye, QrCode, Loader2, Printer, Server } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
@@ -768,7 +768,7 @@ export default function EtiquetasPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
         <h1 className="text-2xl font-bold text-gray-900">Etiquetas</h1>
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
           <select
@@ -859,6 +859,20 @@ export default function EtiquetasPage() {
               )}
             </>
           )}
+        </div>
+      </div>
+
+      <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-900 flex items-start gap-2">
+        <ChefHat className="w-4 h-4 mt-0.5 shrink-0 text-blue-700" aria-hidden />
+        <div className="flex-1">
+          <p className="font-semibold text-blue-900">Esta tela mostra etiquetas de remessa (separação por loja).</p>
+          <p className="text-blue-900/90">
+            Para <strong>reimprimir as etiquetas 60×60 de uma produção</strong> (lote da indústria), abra{' '}
+            <Link href="/producao" className="text-red-700 font-medium underline underline-offset-2">
+              Produção
+            </Link>
+            , role até <strong>Produções registradas</strong> e clique em <strong>Reimprimir</strong> na linha do lote.
+          </p>
         </div>
       </div>
 

@@ -243,6 +243,9 @@ export type Database = {
           registrado_por: string | null;
           created_at: string;
           numero_lote_producao: number;
+          tipo: string;
+          envase_produto_balde_id: string | null;
+          envase_baldes_por_caixa: number | null;
         };
         Insert: {
           id?: string;
@@ -256,6 +259,9 @@ export type Database = {
           registrado_por?: string | null;
           created_at?: string;
           numero_lote_producao?: number;
+          tipo?: string;
+          envase_produto_balde_id?: string | null;
+          envase_baldes_por_caixa?: number | null;
         };
         Update: {
           id?: string;
@@ -268,6 +274,9 @@ export type Database = {
           observacoes?: string | null;
           registrado_por?: string | null;
           numero_lote_producao?: number;
+          tipo?: string;
+          envase_produto_balde_id?: string | null;
+          envase_baldes_por_caixa?: number | null;
         };
       };
       producao_consumo_itens: {
@@ -782,6 +791,9 @@ export type Database = {
           criado_por: string;
           aceito_por: string | null;
           created_at: string;
+          modo_bip_loja: boolean;
+          produto_demandado_id: string | null;
+          quantidade_demandada: number | null;
         };
         Insert: {
           id?: string;
@@ -793,6 +805,9 @@ export type Database = {
           criado_por: string;
           aceito_por?: string | null;
           created_at?: string;
+          modo_bip_loja?: boolean;
+          produto_demandado_id?: string | null;
+          quantidade_demandada?: number | null;
         };
         Update: {
           id?: string;
@@ -803,6 +818,9 @@ export type Database = {
           status?: 'AWAITING_ACCEPT' | 'ACCEPTED' | 'IN_TRANSIT' | 'DELIVERED' | 'DIVERGENCE';
           criado_por?: string;
           aceito_por?: string | null;
+          modo_bip_loja?: boolean;
+          produto_demandado_id?: string | null;
+          quantidade_demandada?: number | null;
         };
       };
       transferencia_itens: {
