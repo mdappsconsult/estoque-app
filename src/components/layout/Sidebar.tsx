@@ -43,7 +43,6 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
     badge: 'demo',
   },
   { name: 'Separar por Loja', href: '/separar-por-loja', icon: Truck },
-  { name: 'Envio direto (produção)', href: '/envio-direto-producao', icon: Truck, badge: 'novo' },
   { name: 'Viagem / Aceite', href: '/viagem-aceite', icon: Truck },
   { name: 'Receber Entrega', href: '/recebimento', icon: Store },
   { name: 'Transf. Loja → Loja', href: '/transferencia-loja', icon: Repeat2 },

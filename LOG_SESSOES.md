@@ -1,5 +1,12 @@
 # Log de Sessões
 
+### Sessão - 2026-05-20 - Bip direto vira padrão; envio direto sai do menu
+- **Pedido:** «entao o botao envio direto nao precisa ter correto?» — opção escolhida: **remover do menu/home**.
+- **Sidebar:** removido o item `Envio direto (produção)`.
+- **Home (`src/app/page.tsx`):** removido o card e todas as ocorrências de `/envio-direto-producao` nas seções por perfil (`OPERATOR_WAREHOUSE`, `OPERATOR_WAREHOUSE_DRIVER`, `MANAGER`, `ADMIN_MASTER`).
+- **Rota mantida em `/envio-direto-producao`** (não removida): quem precisar combinar quantidade antes ou ver «Saídas recentes» ainda pode acessar via URL — a permissão segue em `permissions.ts`.
+- **Validação:** `npm run lint` OK; `npm run build` OK.
+
 ### Sessão - 2026-05-20 - Bip direto na loja (sem burocracia de criar remessa)
 - **Pedido:** «ficou burocrático, pode ser mais simples — esses QR codes serem liberados pra bipar na loja e o funcionário da indústria saber que saiu».
 - **Serviço novo:** `bipQrAvulsoProducao({codigoQr, localDestinoId, usuarioId})` em `src/lib/services/envio-direto-producao.ts`. A cada bip cria **1 `transferencias` `modo_bip_loja=true`, `quantidade_demandada=1`, `status=DELIVERED`** com 1 `transferencia_itens(recebido=true)`, move o item para a loja, recalcula estoque, audita `BIP_AVULSO_PRODUCAO`. Valida origem (produto `PRODUCAO|AMBOS`, item `EM_ESTOQUE` em `WAREHOUSE`, sem outra remessa aberta). Aproveita o CHECK constraint existente (`modo_bip_loja → produto+qty obrigatórios`); **sem migração**.

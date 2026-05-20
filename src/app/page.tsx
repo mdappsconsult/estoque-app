@@ -43,7 +43,6 @@ const features: HomeFeature[] = [
   },
   { title: 'Etiquetas', description: 'Impressão de QR.', icon: QrCode, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/etiquetas' },
   { title: 'Separar por Loja', description: 'Warehouse → Store.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/separar-por-loja' },
-  { title: 'Envio direto (produção)', description: 'Indústria escolhe loja + qty; loja bipa cada balde na chegada.', icon: Truck, iconBg: 'bg-blue-50', iconColor: 'text-blue-700', href: '/envio-direto-producao' },
   { title: 'Viagem / Aceite', description: 'Aceite do motorista.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/viagem-aceite' },
   { title: 'Receber Entrega', description: 'Conferência por QR.', icon: Store, iconBg: 'bg-green-100', iconColor: 'text-green-600', href: '/recebimento' },
   { title: 'Transf. Loja → Loja', description: 'Emergencial com aceite.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/transferencia-loja' },
@@ -90,7 +89,6 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',
-        '/envio-direto-producao',
         '/viagem-aceite',
         '/recebimento',
       ],
@@ -113,7 +111,6 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',
-        '/envio-direto-producao',
         '/viagem-aceite',
         '/recebimento',
         '/qrcode',
@@ -131,7 +128,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/envio-direto-producao', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode'],
     },
     {
       title: 'Transporte',
@@ -145,7 +142,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE_DRIVER: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/envio-direto-producao', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode'],
     },
     {
       title: 'Transporte',
