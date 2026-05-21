@@ -82,7 +82,7 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/etiquetas', label: 'Etiquetas', section: 'Operações' },
   { path: '/teste-impressao-etiqueta', label: 'Teste de impressão (etiqueta)', section: 'Operações' },
   { path: '/separar-por-loja', label: 'Separar por loja', section: 'Operações' },
-  { path: '/envio-direto-producao', label: 'Envio direto (produção → loja)', section: 'Operações' },
+  { path: '/envio-direto-producao', label: 'Conferir entregas nas lojas', section: 'Operações' },
   { path: '/viagem-aceite', label: 'Viagem / aceite', section: 'Operações' },
   { path: '/acompanhamento-viagens', label: 'Acompanhamento de viagens', section: 'Administração' },
   { path: '/recebimento', label: 'Receber entrega', section: 'Operações' },

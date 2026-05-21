@@ -1,5 +1,20 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Conferência entregas: Realtime + lista de gripados
+- **Pedido:** Leonardo vê na hora cada balde gripado na loja (loja + quais QRs foram bipados).
+- **Realtime** em `src/app/envio-direto-producao/page.tsx`: canal `transferencia_itens` + `transferencias` (`origem_id`), debounce 200 ms; removido poll 15 s (fallback 60 s); indicador «Ao vivo» + hora da última sync.
+- **Serviço** `envio-direto-producao.ts`: `bipQrEnvioDireto` / `bipQrAvulsoProducao` gravam `recebido_por_usuario_id` + `recebido_em`; join `usuarios.nome` na lista de gripados.
+- **UI:** seção fixa «Baldes gripados» (token, hora, operador); barra de progresso.
+- **Validação:** `npm run lint` + `npm run build` OK.
+
+### Sessão - 2026-05-21 - Conferir entregas nas lojas (Leonardo)
+- **Pedido:** Leonardo leva baldes da produção às lojas; a loja prepara/bipa na hora; ele precisa ver quantos deixou em cada loja vs. quantos foram bipados (ex.: deixou 10, loja bipou 9).
+- **Tela `/envio-direto-producao` reformulada** como **«Conferir entregas nas lojas»**: formulário no topo (loja + produto + quantidade deixada); painel de acompanhamento com **N / total**, faltam, QRs já bipados, refresh 15 s; demanda e bips avulsos em `<details>`.
+- **Serviço** `listarConferenciaEntregasNasLojas` + enriquecimento de `listarEnviosDiretosEmAndamento` com `tokensBipados` / `faltam`.
+- **Loja `/recebimento`:** banner quando há envio planejado (`quantidade_demandada > 1`); card bip avulso **oculto** nesse caso para não desviar o fluxo.
+- **Home + menu:** card **Conferir entregas nas lojas** para perfis indústria.
+- **Validação:** `npm run lint` OK, `npm run build` OK.
+
 ### Sessão - 2026-05-21 - Protocolos com até 3 fotos + lightbox
 - **Pedido:** «a imagem do pedido de protocolo, seria interessante ter opção até 3 imagens, e quando clicado em cima da imagem abrir ela em tamanho real».
 - **Migração `20260521180000_protocolos_foto_paths.sql`** (aplicada via MCP no ref do `.env.local`): `protocolos` ganhou `foto_paths text[] NOT NULL DEFAULT '{}'`. Backfill `UPDATE … SET foto_paths = ARRAY[foto_path]` para registros antigos com 1 foto. `CHECK protocolos_foto_paths_max_check (array_length(foto_paths,1) <= 3)` no banco. `foto_path` virou DEPRECATED (mantido para auditoria e leitura de logs antigos). Conferi backfill: 4 protocolos no banco, 1 com `foto_path` antigo → 1 com `foto_paths` populado.

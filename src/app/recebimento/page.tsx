@@ -125,6 +125,15 @@ export default function RecebimentoPage() {
     usuario
   );
 
+  /** Indústria registrou quantidade antes de levar os baldes — loja deve usar remessa «envio direto», não bip avulso. */
+  const enviosDiretosPlanejadosPendentes = useMemo(
+    () =>
+      pendentes.filter(
+        (t) => Boolean(t.modo_bip_loja) && Math.floor(Number(t.quantidade_demandada ?? 0)) > 1
+      ),
+    [pendentes]
+  );
+
   const conferenciaAgrupadaAtiva = modoMultiRemessas && remessasIdsConferencia.length >= 2;
   const remessaUnicaId =
     !modoMultiRemessas && remessasIdsConferencia.length === 1 ? remessasIdsConferencia[0]! : null;
@@ -753,13 +762,36 @@ export default function RecebimentoPage() {
         </div>
       </div>
 
-      {usuario?.local_padrao_id && (usuario.perfil === 'OPERATOR_STORE' || usuario.perfil === 'RECEIVING_ASSIST' || usuario.perfil === 'MANAGER' || usuario.perfil === 'ADMIN_MASTER') && (
-        <RecebimentoDiretoCard
-          destinoId={usuario.local_padrao_id}
-          destinoNome="sua loja"
-          usuarioId={usuario.id}
-        />
+      {enviosDiretosPlanejadosPendentes.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mb-4">
+          <p className="text-sm font-semibold text-amber-900">Entrega da indústria com quantidade combinada</p>
+          <p className="text-sm text-amber-800 mt-1 leading-relaxed">
+            A indústria registrou{' '}
+            {enviosDiretosPlanejadosPendentes.map((t, i) => (
+              <span key={t.id}>
+                {i > 0 ? '; ' : null}
+                <strong>{t.quantidade_demandada}</strong> balde(s) ({t.origem?.nome || 'indústria'})
+              </span>
+            ))}
+            . Selecione a remessa <strong>envio direto</strong> abaixo e bipa cada QR —{' '}
+            <strong>não</strong> use o card «Chegou balde direto» no topo (esse é só quando não houve
+            registro de quantidade).
+          </p>
+        </div>
       )}
+
+      {usuario?.local_padrao_id &&
+        (usuario.perfil === 'OPERATOR_STORE' ||
+          usuario.perfil === 'RECEIVING_ASSIST' ||
+          usuario.perfil === 'MANAGER' ||
+          usuario.perfil === 'ADMIN_MASTER') &&
+        enviosDiretosPlanejadosPendentes.length === 0 && (
+          <RecebimentoDiretoCard
+            destinoId={usuario.local_padrao_id}
+            destinoNome="sua loja"
+            usuarioId={usuario.id}
+          />
+        )}
 
       {avisoRemessaEncerrada && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">

@@ -42,6 +42,12 @@ export interface BipQrEnvioDiretoResultado {
   avisoFefo?: string | null;
 }
 
+export interface EnvioDiretoTokenBipado {
+  tokenShort: string;
+  recebidoEm: string | null;
+  recebidoPorNome: string | null;
+}
+
 export interface EnvioDiretoResumo {
   id: string;
   origemId: string;
@@ -50,10 +56,12 @@ export interface EnvioDiretoResumo {
   produtoNome: string;
   quantidadeDemandada: number;
   bipados: number;
+  faltam: number;
   status: Transferencia['status'];
   criadoEm: string;
   origemNome: string;
   destinoNome: string;
+  tokensBipados: EnvioDiretoTokenBipado[];
 }
 
 /** Cria remessa modo_bip_loja com produto + qty, sem itens. */
@@ -239,9 +247,14 @@ export async function bipQrEnvioDireto(
     throw new Error(`Estado inválido do item: ${item.estado}. Não pode ser bipado.`);
   }
 
-  const { error: eIns } = await supabase
-    .from('transferencia_itens')
-    .insert({ transferencia_id: tid, item_id: item.id, recebido: true });
+  const recebidoEm = new Date().toISOString();
+  const { error: eIns } = await supabase.from('transferencia_itens').insert({
+    transferencia_id: tid,
+    item_id: item.id,
+    recebido: true,
+    recebido_por_usuario_id: usuarioId,
+    recebido_em: recebidoEm,
+  });
   if (eIns) throw eIns;
 
   const { error: eUpItem } = await supabase
@@ -460,9 +473,14 @@ export async function bipQrAvulsoProducao(input: BipAvulsoInput): Promise<BipAvu
   if (eTr) throw eTr;
   if (!tr) throw new Error('Falha ao registrar o recebimento avulso.');
 
-  const { error: eIns } = await supabase
-    .from('transferencia_itens')
-    .insert({ transferencia_id: tr.id, item_id: item.id, recebido: true });
+  const recebidoEmAvulso = new Date().toISOString();
+  const { error: eIns } = await supabase.from('transferencia_itens').insert({
+    transferencia_id: tr.id,
+    item_id: item.id,
+    recebido: true,
+    recebido_por_usuario_id: usuarioId,
+    recebido_em: recebidoEmAvulso,
+  });
   if (eIns) {
     await supabase.from('transferencias').delete().eq('id', tr.id);
     throw eIns;
@@ -741,6 +759,134 @@ export async function listarDemandaBaldesProducaoPorLoja(
   return linhasComSaldo;
 }
 
+function mapEnvioDiretoResumoRows(
+  rows: {
+    id: string;
+    origem_id: string;
+    destino_id: string;
+    status: Transferencia['status'];
+    created_at: string;
+    produto_demandado_id: string;
+    quantidade_demandada: number;
+    origem: { nome?: string } | { nome?: string }[] | null;
+    destino: { nome?: string } | { nome?: string }[] | null;
+    produto: { nome?: string } | { nome?: string }[] | null;
+  }[],
+  bipPorRemessa: Map<string, number>,
+  tokensPorRemessa: Map<string, EnvioDiretoTokenBipado[]>
+): EnvioDiretoResumo[] {
+  const norm = <T extends { nome?: string }>(v: T | T[] | null): T | null =>
+    !v ? null : Array.isArray(v) ? (v[0] ?? null) : v;
+
+  return rows.map((r) => {
+    const demandada = Math.max(0, Math.floor(Number(r.quantidade_demandada || 0)));
+    const bipados = bipPorRemessa.get(r.id) || 0;
+    return {
+      id: r.id,
+      origemId: r.origem_id,
+      destinoId: r.destino_id,
+      produtoId: r.produto_demandado_id,
+      produtoNome: norm(r.produto)?.nome || 'Produto',
+      quantidadeDemandada: demandada,
+      bipados,
+      faltam: Math.max(0, demandada - bipados),
+      status: r.status,
+      criadoEm: r.created_at,
+      origemNome: norm(r.origem)?.nome || 'Origem',
+      destinoNome: norm(r.destino)?.nome || 'Destino',
+      tokensBipados: tokensPorRemessa.get(r.id) || [],
+    };
+  });
+}
+
+async function carregarBipadosEnviosDiretos(ids: string[]): Promise<{
+  bipPorRemessa: Map<string, number>;
+  tokensPorRemessa: Map<string, EnvioDiretoTokenBipado[]>;
+}> {
+  const bipPorRemessa = new Map<string, number>();
+  const tokensPorRemessa = new Map<string, EnvioDiretoTokenBipado[]>();
+  if (ids.length === 0) return { bipPorRemessa, tokensPorRemessa };
+
+  type LinhaTi = {
+    transferencia_id: string;
+    recebido_em: string | null;
+    item: { token_short?: string | null; token_qr?: string | null } | { token_short?: string | null; token_qr?: string | null }[] | null;
+    recebedor: { nome?: string } | { nome?: string }[] | null;
+  };
+
+  for (let i = 0; i < ids.length; i += 40) {
+    const slice = ids.slice(i, i + 40);
+    const { data, error } = await supabase
+      .from('transferencia_itens')
+      .select(
+        'transferencia_id, recebido_em, item:itens(token_short, token_qr), recebedor:usuarios!recebido_por_usuario_id(nome)'
+      )
+      .in('transferencia_id', slice)
+      .order('recebido_em', { ascending: false });
+    if (error) throw error;
+    for (const raw of (data || []) as LinhaTi[]) {
+      const tid = raw.transferencia_id;
+      bipPorRemessa.set(tid, (bipPorRemessa.get(tid) || 0) + 1);
+      const item = Array.isArray(raw.item) ? raw.item[0] : raw.item;
+      const recebedor = Array.isArray(raw.recebedor) ? raw.recebedor[0] : raw.recebedor;
+      const short =
+        (item?.token_short || item?.token_qr || '').trim().slice(0, 12) || '—';
+      const lista = tokensPorRemessa.get(tid) || [];
+      lista.push({
+        tokenShort: short,
+        recebidoEm: raw.recebido_em,
+        recebidoPorNome: recebedor?.nome?.trim() || null,
+      });
+      tokensPorRemessa.set(tid, lista);
+    }
+  }
+  return { bipPorRemessa, tokensPorRemessa };
+}
+
+/** Lista remessas modo_bip_loja com quantidade planejada (conferência Leonardo). */
+export async function listarConferenciaEntregasNasLojas(
+  origemId: string,
+  janelaHoras = 48
+): Promise<EnvioDiretoResumo[]> {
+  const origem = origemId.trim();
+  if (!origem) return [];
+  const desde = new Date(Date.now() - janelaHoras * 3600 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('transferencias')
+    .select(
+      `id, origem_id, destino_id, status, created_at, produto_demandado_id, quantidade_demandada,
+       origem:locais!origem_id(nome), destino:locais!destino_id(nome),
+       produto:produtos!produto_demandado_id(nome)`
+    )
+    .eq('modo_bip_loja', true)
+    .eq('origem_id', origem)
+    .gt('quantidade_demandada', 1)
+    .gte('created_at', desde)
+    .in('status', ['AWAITING_ACCEPT', 'ACCEPTED', 'IN_TRANSIT', 'DELIVERED', 'DIVERGENCE'])
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    origem_id: string;
+    destino_id: string;
+    status: Transferencia['status'];
+    created_at: string;
+    produto_demandado_id: string;
+    quantidade_demandada: number;
+    origem: { nome?: string } | { nome?: string }[] | null;
+    destino: { nome?: string } | { nome?: string }[] | null;
+    produto: { nome?: string } | { nome?: string }[] | null;
+  };
+  const rows = (data || []) as Row[];
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((r) => r.id);
+  const { bipPorRemessa, tokensPorRemessa } = await carregarBipadosEnviosDiretos(ids);
+  return mapEnvioDiretoResumoRows(rows, bipPorRemessa, tokensPorRemessa);
+}
+
 /** Lista as remessas modo_bip_loja em andamento (para o painel da indústria acompanhar). */
 export async function listarEnviosDiretosEmAndamento(
   origemId?: string
@@ -775,33 +921,8 @@ export async function listarEnviosDiretosEmAndamento(
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
-  const { data: contagens, error: eC } = await supabase
-    .from('transferencia_itens')
-    .select('transferencia_id')
-    .in('transferencia_id', ids);
-  if (eC) throw eC;
-  const bipPorRemessa = new Map<string, number>();
-  for (const row of contagens || []) {
-    const k = row.transferencia_id as string;
-    bipPorRemessa.set(k, (bipPorRemessa.get(k) || 0) + 1);
-  }
-
-  const norm = <T extends { nome?: string }>(v: T | T[] | null): T | null =>
-    !v ? null : Array.isArray(v) ? (v[0] ?? null) : v;
-
-  return rows.map((r) => ({
-    id: r.id,
-    origemId: r.origem_id,
-    destinoId: r.destino_id,
-    produtoId: r.produto_demandado_id,
-    produtoNome: norm(r.produto)?.nome || 'Produto',
-    quantidadeDemandada: r.quantidade_demandada,
-    bipados: bipPorRemessa.get(r.id) || 0,
-    status: r.status,
-    criadoEm: r.created_at,
-    origemNome: norm(r.origem)?.nome || 'Origem',
-    destinoNome: norm(r.destino)?.nome || 'Destino',
-  }));
+  const { bipPorRemessa, tokensPorRemessa } = await carregarBipadosEnviosDiretos(ids);
+  return mapEnvioDiretoResumoRows(rows, bipPorRemessa, tokensPorRemessa);
 }
 
 export interface SaidaAvulsaAgrupada {
