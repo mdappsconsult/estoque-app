@@ -46,6 +46,8 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/configuracoes/impressoras': ['ADMIN_MASTER', 'MANAGER'],
   '/configuracoes/permissoes': ['ADMIN_MASTER'],
   '/configuracoes/quiosque': ['ADMIN_MASTER', 'MANAGER'],
+  '/configuracoes/protocolos': ['ADMIN_MASTER'],
+  '/protocolos': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE'],
 };
 
 export const PERMISSIONS_STORAGE_KEY = 'estoque_permissions_matrix_v3';
@@ -106,6 +108,8 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/configuracoes/impressoras', label: 'Config. — impressoras (Pi)', section: 'Configurações' },
   { path: '/configuracoes/permissoes', label: 'Config. — permissões', section: 'Configurações' },
   { path: '/configuracoes/quiosque', label: 'Config. — Quiosque', section: 'Configurações' },
+  { path: '/configuracoes/protocolos', label: 'Config. — prazos de protocolos', section: 'Configurações' },
+  { path: '/protocolos', label: 'Pedidos (protocolos)', section: 'Operações' },
 ];
 
 /** Cópia do mapa padrão (sem localStorage). Use no 1º render do cliente para bater com o SSR. */

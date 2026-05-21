@@ -3,7 +3,7 @@
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
   ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer,
-  FileImage,
+  FileImage, ClipboardList,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -72,6 +72,8 @@ const features: HomeFeature[] = [
   { title: 'Configurações', description: 'Perfil e sistema.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/perfil' },
   { title: 'Impressoras (Pi)', description: 'Ponte estoque e indústria.', icon: Printer, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-700', href: '/configuracoes/impressoras' },
   { title: 'Permissões', description: 'Quem acessa cada tela (admin).', icon: Shield, iconBg: 'bg-red-50', iconColor: 'text-red-600', href: '/configuracoes/permissoes' },
+  { title: 'Pedidos', description: 'Abrir e acompanhar pedidos da operação.', icon: ClipboardList, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/protocolos' },
+  { title: 'Prazos dos pedidos', description: 'Quanto tempo cada prioridade tem para ser atendida.', icon: Settings, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/configuracoes/protocolos' },
 ];
 
 const featuresByHref = Object.fromEntries(
@@ -91,6 +93,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/separar-por-loja',
         '/viagem-aceite',
         '/recebimento',
+        '/protocolos',
       ],
     },
     {
@@ -99,7 +102,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Configuração',
-      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes'],
+      items: ['/cadastros/produtos', '/cadastros/receitas-producao', '/cadastros/categorias', '/cadastros/embalagens', '/cadastros/reposicao-loja', '/cadastros/locais', '/cadastros/usuarios', '/configuracoes/perfil', '/configuracoes/impressoras', '/configuracoes/permissoes', '/configuracoes/protocolos'],
     },
   ],
   MANAGER: [
@@ -114,6 +117,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/viagem-aceite',
         '/recebimento',
         '/qrcode',
+        '/protocolos',
       ],
     },
     {
@@ -128,7 +132,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode', '/protocolos'],
     },
     {
       title: 'Transporte',
@@ -142,7 +146,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_WAREHOUSE_DRIVER: [
     {
       title: 'Operação',
-      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode'],
+      items: ['/entrada-compra', '/producao', '/producao-envase-caixa', '/etiquetas', '/separar-por-loja', '/qrcode', '/protocolos'],
     },
     {
       title: 'Transporte',
@@ -152,7 +156,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
   OPERATOR_STORE: [
     {
       title: 'Operação da Loja',
-      items: ['/recebimento', '/transferencia-loja', '/contagem-loja', '/qrcode'],
+      items: ['/recebimento', '/transferencia-loja', '/contagem-loja', '/qrcode', '/protocolos'],
     },
     {
       title: 'Conferência',

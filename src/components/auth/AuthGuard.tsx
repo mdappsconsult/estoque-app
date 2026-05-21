@@ -8,6 +8,7 @@ import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import MobileHeader from '@/components/layout/MobileHeader';
 import { ValidadeAlertProvider } from '@/components/validade/ValidadeAlertProvider';
 import { ValidadeBanner } from '@/components/validade/ValidadeBanner';
+import { ProtocoloAlertProvider } from '@/components/protocolos/ProtocoloAlertProvider';
 import { ShieldX } from 'lucide-react';
 import { LogoKim } from '@/components/branding/LogoKim';
 
@@ -79,9 +80,11 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   // Authenticated with access
   return (
     <ValidadeAlertProvider>
-      <MobileHeader />
-      <ValidadeBanner />
-      <main className="p-4 min-h-[calc(100vh-3.5rem)]">{children}</main>
+      <ProtocoloAlertProvider>
+        <MobileHeader />
+        <ValidadeBanner />
+        <main className="p-4 min-h-[calc(100vh-3.5rem)]">{children}</main>
+      </ProtocoloAlertProvider>
     </ValidadeAlertProvider>
   );
 }

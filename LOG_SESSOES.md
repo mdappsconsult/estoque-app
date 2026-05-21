@@ -1,5 +1,61 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Push notifications em protocolos (Web Push end-to-end)
+- **Pedido:** «push notifications seria interessante nos dispositivos dos envolvidos».
+- **Decisões alinhadas com o usuário** (`AskQuestion`):
+  - **Destinatários:** padrão sugerido — ABRIU → toda gestão; ACEITOU/RECUSOU/INICIOU/FECHOU/MUDOU_PRIORIDADE → autor; CONCLUIU → autor + toda gestão; COMENTOU → o "outro lado" (gestão fala → autor, operador fala → toda gestão). Sempre exclui quem disparou.
+  - **Onde ativar:** banner discreto no topo de `/protocolos` (some quando inscrito ou descartado).
+  - **iOS:** instrução clara «Compartilhar → Adicionar à Tela de Início» (push só funciona em PWA instalada, iOS 16.4+).
+- **Dependências:** `web-push` + `@types/web-push` instalados. VAPID gerado via `node -e "require('web-push').generateVAPIDKeys()"` e salvo em `.env.local` (`NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:marco@acaidokim.com.br`). **Para produção (Railway):** copiar as três variáveis lá.
+- **Banco:** `supabase/migrations/20260521140000_push_subscriptions.sql` (aplicada via MCP) — `push_subscriptions(id, usuario_id FK→usuarios, endpoint UNIQUE, p256dh, auth, user_agent, created_at, last_seen_at)` + índice em `usuario_id`. Sem RLS (acesso só via Service Role nas rotas `/api/push/*`).
+- **Service Worker (`public/sw.js`):** listeners `push` (mostra notificação com ícone do Açaí do Kim, tag por protocolo) e `notificationclick` (foca janela aberta do app ou abre `/protocolos`).
+- **Cliente (`src/lib/push/cliente.ts`):** detecta iOS, modo standalone, suporte do navegador, registra/obtém o SW, gera `PushSubscription`, sincroniza com `/api/push/inscrever` ou cancela via `/api/push/cancelar`. Senha operacional vem do `sessionStorage` (reusada do login).
+- **Servidor (`src/lib/push/servidor.ts`):** configura `webpush.setVapidDetails` (singleton), busca inscrições no Supabase Admin e envia em paralelo; **404/410 → apaga o endpoint automaticamente**; demais erros viram `falhas` no retorno.
+- **API `POST /api/push/disparar-protocolo`:** valida senha operacional, lê protocolo + autor/perfil de quem agiu, calcula destinatários por ação e envia o payload (`titulo`, `corpo`, `url`, `tag`).
+- **Integração em `protocolos.ts`:** depois de cada `await` bem-sucedido das mutações (`abrirProtocolo`/`aceitarProtocolo`/`recusarProtocolo`/`iniciarExecucao`/`marcarConcluido`/`fecharProtocolo`/`adicionarComentario`/`alterarPrioridade`), chama `notificarProtocoloEmBackground(id, acao, detalhe?)` em **fire-and-forget** com `keepalive: true` — não bloqueia a UI nem trava se o servidor de push falhar. No SSR a função detecta `typeof window === 'undefined'` e retorna sem ação.
+- **UI:** novo componente `src/components/protocolos/PushBanner.tsx` no topo de `/protocolos` com 3 estados: oferta (botão amarelo «Ativar avisos» + «Agora não»), inscrito (banner verde + botão «Desligar neste aparelho»), iOS-precisa-PWA (instrução azul curta). Estado «descartar» persiste em `localStorage.protocolos-push-banner-dismiss-v1`.
+- **TypeScript 5.7+ quirk:** `pushManager.subscribe({ applicationServerKey })` exige `BufferSource` com `ArrayBuffer` (não `SharedArrayBuffer`); `urlBase64ToUint8Array` agora aloca `new ArrayBuffer(len)` e retorna `Uint8Array<ArrayBuffer>` para satisfazer o tipo no build de produção.
+- **Validação:** `npm run lint` OK (1 warning trivial corrigido — `catch (e)` virou `catch`); `npm run build` OK.
+
+### Sessão - 2026-05-21 - Protocolos atualizam ao vivo (publication + realtime no detalhe)
+- **Pedido:** «quando funcionário abre o protocolo, se a secretaria está com a tela aberta, ela só vê depois de atualizar o browser; o certo é o banco atualizar a página de quem está aberta».
+- **Diagnóstico (MCP):** `SELECT … FROM pg_publication_tables WHERE pubname='supabase_realtime'` mostrou só `itens` e `transferencias` — `protocolos` e `protocolo_comentarios` não estavam inscritas. Tabelas novas no Supabase **não** entram automaticamente na publication, então o `useRealtimeQuery` ficava mudo apesar de já estar fazendo `subscribe`.
+- **Migração `20260521130000_protocolos_realtime_publication.sql`** (aplicada via MCP):
+  - `ALTER PUBLICATION supabase_realtime ADD TABLE public.protocolos / public.protocolo_comentarios` (guardado em `DO $$ … END $$` com checagem prévia em `pg_publication_tables`).
+  - `REPLICA IDENTITY FULL` em ambas — payload completo em UPDATE/DELETE.
+- **Detalhe do protocolo:** o modal carregava via `fetch` direto; agora também assina `postgres_changes` filtrado por `id=eq.<protocolo_id>` em `protocolos` e por `protocolo_id=eq.<protocolo_id>` em `protocolo_comentarios`, debounce 250 ms, e recarrega card + timeline. Cobre o caso da secretaria com o detalhe aberto vendo o comentário/aceite de outro usuário ao vivo.
+- **Outras telas:** `useRealtimeQuery` (lista de protocolos) e `ProtocoloAlertProvider` (badge no header) já estavam inscritos; passam a receber eventos imediatamente após a migração.
+- **Validação:** `npm run lint` OK; `npm run build` OK. `SELECT tablename FROM pg_publication_tables WHERE pubname='supabase_realtime' AND tablename IN ('protocolos','protocolo_comentarios')` retorna as duas.
+
+### Sessão - 2026-05-21 - Protocolos: só a secretaria/admin define urgência
+- **Pedido:** «quem deve decidir a urgência é a secretaria ou o admin» — operador não deve precisar pensar nisso.
+- **Service (`protocolos.ts`):** `abrirProtocolo` ignora `prioridade` quando o autor é operador e grava `MEDIA` (Insert default). O campo virou opcional na interface `AbrirProtocoloInput`. Auditoria de abertura ganhou `por_gestao: boolean`. Mesmo tratamento em `abrirProtocoloComClient` (Service Role).
+- **Service novo:** `alterarPrioridade(protocoloId, novaPrioridade, usuarioId, perfil)` — só gestão; recusa se o pedido estiver `FECHADO`/`RECUSADO`; no-op se a prioridade não mudou; grava auditoria `ALTERAR_PRIORIDADE_PROTOCOLO` com `{ de, para }`.
+- **Timeline:** novo tipo `MUDOU_PRIORIDADE`; mapeamento `ALTERAR_PRIORIDADE_PROTOCOLO → MUDOU_PRIORIDADE`; renderização «Secretaria mudou a urgência de Normal para Urgente!» com ícone âmbar `AlertTriangle`.
+- **UI `/protocolos`:**
+  - Modal **abrir** agora oculta o seletor de 4 botões coloridos para operador e mostra um aviso curto «A secretaria vai ver seu pedido e dizer se é urgente.». Operador envia sem campo de prioridade; gestão continua com os botões.
+  - Modal **detalhe** ganhou bloco amarelo «Definir urgência» (4 botões coloridos) visível apenas para gestão e enquanto o pedido não estiver encerrado. Clique pede `confirm`, chama `alterarPrioridade`, recarrega card+timeline.
+- **Sem migração** — campo `prioridade` já estava com default `MEDIA` no banco e o CHECK aceita só os 4 valores válidos.
+- **Validação:** `npm run lint` OK; `npm run build` OK.
+
+### Sessão - 2026-05-21 - Protocolos internos (pedidos da operação para a secretaria)
+- **Pedido:** «preciso de um sisteminha simples de protocolo dentro do controle… funcionário viu o ar parado → abre pedido → secretaria aceita → técnico arruma → secretaria fecha». Refinamentos: UI simples para funcionários com pouco estudo; secretaria também pode abrir; admin define prazos e vê atrasados; texto em 2 campos (resumo + detalhes); foto opcional; dois prazos por prioridade (aceitar + fechar); badge no header; timeline integrada.
+- **Migração `20260521120000_protocolos.sql`** (aplicada via MCP no ref do `.env.local`):
+  - `protocolos`: `id`, `numero` (identity), `titulo` (≤80), `descricao`, `local_id` (FK `locais`, nullable = administração), `prioridade` (BAIXA/MEDIA/ALTA/URGENTE), `status` (ABERTO/ACEITO/EM_EXECUCAO/CONCLUIDO/FECHADO/RECUSADO), `responsavel_externo`, `aberto_por` (FK `usuarios`), `gerente_id`, `motivo_recusa`, `observacao_fechamento`, `foto_path`, `reaberto_de` (auto-FK), timestamps por transição. Índices em (`status`, `created_at`), `aberto_por`, `local_id`, `prioridade`.
+  - `protocolo_comentarios`: histórico de mensagens livres.
+  - `protocolo_prazos_config`: prioridade PK + `horas_para_aceitar` + `dias_para_fechar`; seed Urgente 1 h/1 d, Alta 4 h/3 d, Normal 12 h/7 d, Baixa 24 h/15 d.
+  - Bucket privado `protocolos-fotos`.
+  - Índice expressional `auditoria_protocolo_id_idx` (WHERE `acao LIKE '%PROTOCOLO%'`) para alimentar timeline em `O(log n)`.
+- **Service `src/lib/services/protocolos.ts`:** CRUD + transições com validações (D1 recusa exige motivo+comentário; D2 operador autor pode marcar pronto em `EM_EXECUCAO`); listagem para operador (`listarMeusProtocolos`) e gestão (`listarProtocolosGestao`); badge (`contarProtocolosBadge` — gestão = pendentes globais, operador = próprios não encerrados); helpers puros `eAtrasadoParaAceitar`/`eAtrasadoParaFechar`; `listarPrazosConfig`/`salvarPrazoConfig`; `listarTimelineProtocolo` une `auditoria` + `protocolo_comentarios`. Todas mutações chamam `registrarAuditoria`.
+- **API `POST /api/operacional/upload-protocolo-foto`:** valida login operacional (`validarCredencialOperacional`) + assinatura JPEG/PNG/WebP, sobe ao bucket `protocolos-fotos` via Service Role. **API `POST /api/operacional/foto-protocolo-url`:** URL assinada (1 h) por `path`. Foto comprimida no cliente (`comprimirFotoProtocolo` em `src/lib/protocolos/foto-cliente.ts`: 1600 px lado maior, JPEG 0.7).
+- **Senha operacional na sessão:** reusa `setSenhaOperacionalSession`/`getSenhaOperacionalSession` já existentes em `src/lib/auth.ts` (mesmo padrão de `/entrada-compra-nota`); não foi necessário criar provider novo.
+- **Tela `/protocolos`** (`src/app/protocolos/page.tsx`): UI adaptativa por perfil; cards com bolinha de prioridade, chip de status, selos de atraso, ações inline; modal de abrir com 4 campos (operador) ou 5 (secretaria); modal detalhe com foto, timeline cronológica (ícone por ação) e box de comentário; uso de `useRealtimeQuery` com `preserveDataWhileRefetching` + `preserveDataOnRefetchError`.
+- **Tela `/configuracoes/protocolos`** (`ADMIN_MASTER` apenas): tabela editável dos 8 campos (4 prioridades × {horas, dias}); auditoria `EDITAR_PRAZO_PROTOCOLO`.
+- **Badge `ProtocoloAlertProvider`** + integração no `AuthGuard` + ícone `ClipboardList` no `MobileHeader` (antes do `Timer` de validade). Refetch via realtime `protocolos` com debounce + focus.
+- **Registros:** rotas em `permissions.ts` (`/protocolos` para os 5 perfis operacionais; `/configuracoes/protocolos` só ADMIN); cards na Home; itens na Sidebar.
+- **Validação:** `npm run lint` OK; `npm run build` OK (rotas `/protocolos` e `/configuracoes/protocolos` reconhecidas como `Static`).
+- **Pendências conhecidas:** B2 — UI de reabertura (campo `reaberto_de` já está no banco). Não foram criados RLS policies (a app segue o padrão do projeto, que controla acesso por `AuthGuard` + Service Role nas mutações sensíveis).
+
 ### Sessão - 2026-05-20 - Bip direto vira padrão; envio direto sai do menu
 - **Pedido:** «entao o botao envio direto nao precisa ter correto?» — opção escolhida: **remover do menu/home**.
 - **Sidebar:** removido o item `Envio direto (produção)`.

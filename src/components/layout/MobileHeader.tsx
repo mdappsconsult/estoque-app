@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronLeft, LogOut, Timer } from 'lucide-react';
+import { ChevronLeft, ClipboardList, LogOut, Timer } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useValidadeAlert } from '@/components/validade/ValidadeAlertProvider';
+import { useProtocoloAlert } from '@/components/protocolos/ProtocoloAlertProvider';
 import { LogoKim } from '@/components/branding/LogoKim';
 
 export default function MobileHeader() {
@@ -12,6 +13,7 @@ export default function MobileHeader() {
   const router = useRouter();
   const { usuario, logout } = useAuth();
   const validade = useValidadeAlert();
+  const protocolo = useProtocoloAlert();
   const showBack = pathname !== '/';
 
   const badgeValidade =
@@ -19,6 +21,8 @@ export default function MobileHeader() {
     !validade.loading &&
     validade.total > 0 &&
     validade.severidade !== 'nenhum';
+  const badgeProtocolo =
+    protocolo.podeProtocolos && !protocolo.loading && protocolo.total > 0;
 
   if (pathname === '/login') return null;
 
@@ -47,6 +51,20 @@ export default function MobileHeader() {
       </div>
 
       <div className="flex items-center gap-1">
+        {usuario && protocolo.podeProtocolos && (
+          <Link
+            href="/protocolos"
+            className="relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+            aria-label="Pedidos / Protocolos"
+          >
+            <ClipboardList className="h-5 w-5" />
+            {badgeProtocolo && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">
+                {protocolo.total > 99 ? '99+' : protocolo.total}
+              </span>
+            )}
+          </Link>
+        )}
         {usuario && validade.podeValidades && (
           <Link
             href="/validades"
