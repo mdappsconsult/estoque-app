@@ -1,5 +1,14 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Deploy do push: build no Railway falhou por `@types/web-push` ausente
+- **Sintoma:** push do commit `82c911b` → deploy `1e49c495` Railway **FAILED**.
+- **Erro do build (`railway logs --build`):** `./src/lib/push/servidor.ts:1:21 — Could not find a declaration file for module 'web-push'.`
+- **Causa raiz:** o `npm install -D @types/web-push` da sessão anterior **não persistiu** (sumiu de `package.json` e `package-lock.json`); localmente o `next build` ainda achava os tipos em `node_modules/@types/web-push` em cache, então passou aqui mas quebrou no Railway que parte do zero com `npm ci`.
+- **Fix:** `npm i -D @types/web-push` → confirmação `grep -c '@types/web-push' package.json package-lock.json` → build local OK → commit `7b22cd0` push.
+- **VAPID no Railway:** `railway variables --set ... --skip-deploys` para `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. Como `NEXT_PUBLIC_*` é embutido no bundle no build, fiz `railway redeploy --yes` após setar para garantir que o bundle do cliente saiu com a chave pública certa.
+- **Deploy final:** `b7cc04e4` SUCCESS em `7b22cd0`.
+- **Lição:** sempre validar `grep -c '<pacote>' package.json package-lock.json` após `npm install` — `npm` falha silenciosamente em alguns cenários, e build local pode mascarar o problema usando `node_modules/` em cache.
+
 ### Sessão - 2026-05-21 - Push notifications em protocolos (Web Push end-to-end)
 - **Pedido:** «push notifications seria interessante nos dispositivos dos envolvidos».
 - **Decisões alinhadas com o usuário** (`AskQuestion`):
