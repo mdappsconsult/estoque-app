@@ -51,6 +51,7 @@ import {
   eOperador,
   eAtrasadoParaAceitar,
   eAtrasadoParaFechar,
+  excluirProtocoloAdmin,
   fecharProtocolo,
   iniciarExecucao,
   listarPrazosConfig,
@@ -1145,6 +1146,30 @@ function ModalDetalheProtocolo({
     }
   };
 
+  /** Exclusão definitiva — só `ADMIN_MASTER`. Apaga banco + foto do bucket; mantém histórico em `auditoria`. */
+  const ehAdminMaster = usuario.perfil === 'ADMIN_MASTER';
+  const onExcluirProtocolo = async () => {
+    if (!ehAdminMaster) return;
+    if (
+      !confirm(
+        `Excluir definitivamente o pedido #${p.numero} «${p.titulo}»?\n\n` +
+          'Esta ação remove o pedido, os comentários e a foto. Não dá para desfazer. O histórico fica registrado em auditoria.'
+      )
+    ) {
+      return;
+    }
+    setAcaoEmAndamento(true);
+    try {
+      await excluirProtocoloAdmin(p.id, usuario.id);
+      await onAcaoConcluida();
+      onClose();
+    } catch (err) {
+      alert(errMessage(err, 'Erro ao excluir o pedido'));
+    } finally {
+      setAcaoEmAndamento(false);
+    }
+  };
+
   const acoesGestao = ehGestao && (
     <div className="space-y-2">
       {p.status === 'ABERTO' && (
@@ -1399,6 +1424,23 @@ function ModalDetalheProtocolo({
         {/* Ações */}
         {acoesGestao}
         {acaoOperador}
+
+        {ehAdminMaster && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={onExcluirProtocolo}
+              disabled={acaoEmAndamento}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-red-300 text-red-700 hover:bg-red-50 rounded-xl text-sm font-semibold disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              Excluir pedido (admin)
+            </button>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Remove o pedido, comentários e foto. Não dá para desfazer. O histórico fica em auditoria.
+            </p>
+          </div>
+        )}
 
         {/* Timeline */}
         <div>

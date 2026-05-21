@@ -777,3 +777,24 @@ export async function abrirProtocoloComClient(
   );
   return data as Protocolo;
 }
+
+/**
+ * Exclui um pedido de protocolagem — apenas `ADMIN_MASTER`.
+ * Chama a rota `/api/admin/excluir-protocolo` (rotina server-side com Service Role) que
+ * valida o perfil do solicitante, remove a foto do bucket privado e grava auditoria
+ * `EXCLUIR_PROTOCOLO` com snapshot dos campos principais.
+ */
+export async function excluirProtocoloAdmin(
+  protocoloId: string,
+  actorId: string
+): Promise<void> {
+  const r = await fetch('/api/admin/excluir-protocolo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ protocoloId, actorId }),
+  });
+  const j = (await r.json().catch(() => ({}))) as { error?: string };
+  if (!r.ok) {
+    throw new Error(j.error || 'Falha ao excluir o pedido');
+  }
+}
