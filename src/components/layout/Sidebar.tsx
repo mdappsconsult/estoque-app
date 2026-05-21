@@ -37,6 +37,8 @@ const menuItems: { name: string; href: string; icon: LucideIcon; badge?: string 
   { name: 'Compra (foto NF)', href: '/entrada-compra-nota', icon: FileImage },
   { name: 'Produção', href: '/producao', icon: ChefHat },
   { name: 'Envase — caixas', href: '/producao-envase-caixa', icon: Boxes },
+  { name: 'Coleta baldes (loja)', href: '/coleta-baldes-loja', icon: Truck },
+  { name: 'Triagem baldes (indústria)', href: '/retorno-baldes-industria', icon: Store },
   {
     name: 'Prévia saldo parcial',
     href: '/producao-previa-saldo-parcial',

@@ -10,6 +10,8 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/entrada-compra-nota': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao-envase-caixa': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
+  '/retorno-baldes-industria': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
+  '/coleta-baldes-loja': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/producao-previa-saldo-parcial': [
     'ADMIN_MASTER',
     'MANAGER',
@@ -74,6 +76,16 @@ export const ROUTE_UI_META: { path: string; label: string; section: string }[] =
   { path: '/entrada-compra-nota', label: 'Registrar compra (foto NF)', section: 'Operações' },
   { path: '/producao', label: 'Produção', section: 'Operações' },
   { path: '/producao-envase-caixa', label: 'Envase — caixas (balde → caixa)', section: 'Operações' },
+  {
+    path: '/coleta-baldes-loja',
+    label: 'Coleta — baldes vencidos (na loja)',
+    section: 'Operações',
+  },
+  {
+    path: '/retorno-baldes-industria',
+    label: 'Triagem — baldes retornados (indústria)',
+    section: 'Operações',
+  },
   {
     path: '/producao-previa-saldo-parcial',
     label: 'Produção — prévia consumo massa (demo)',

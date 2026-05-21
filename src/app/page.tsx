@@ -41,6 +41,22 @@ const features: HomeFeature[] = [
     iconColor: 'text-emerald-700',
     href: '/producao-envase-caixa',
   },
+  {
+    title: 'Coleta — baldes vencidos',
+    description: 'Na loja: bip vencidos → estoque indústria (triagem).',
+    icon: Truck,
+    iconBg: 'bg-sky-100',
+    iconColor: 'text-sky-700',
+    href: '/coleta-baldes-loja',
+  },
+  {
+    title: 'Triagem — baldes das lojas',
+    description: 'Na indústria: aprovar para caixa ou descartar.',
+    icon: Store,
+    iconBg: 'bg-amber-100',
+    iconColor: 'text-amber-700',
+    href: '/retorno-baldes-industria',
+  },
   { title: 'Etiquetas', description: 'Impressão de QR.', icon: QrCode, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/etiquetas' },
   { title: 'Separar por Loja', description: 'Warehouse → Store.', icon: Truck, iconBg: 'bg-blue-100', iconColor: 'text-blue-600', href: '/separar-por-loja' },
   {
@@ -96,6 +112,8 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
         '/qrcode',
         '/entrada-compra',
         '/producao',
+        '/coleta-baldes-loja',
+        '/retorno-baldes-industria',
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',
@@ -119,6 +137,8 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
       items: [
         '/entrada-compra',
         '/producao',
+        '/coleta-baldes-loja',
+        '/retorno-baldes-industria',
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',
@@ -143,6 +163,8 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
       items: [
         '/entrada-compra',
         '/producao',
+        '/coleta-baldes-loja',
+        '/retorno-baldes-industria',
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',
@@ -166,6 +188,8 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
       items: [
         '/entrada-compra',
         '/producao',
+        '/coleta-baldes-loja',
+        '/retorno-baldes-industria',
         '/producao-envase-caixa',
         '/etiquetas',
         '/separar-por-loja',

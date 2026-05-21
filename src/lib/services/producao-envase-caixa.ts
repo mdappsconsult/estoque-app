@@ -6,6 +6,7 @@ import type { EtiquetaInsert, Item } from '@/types/database';
 import { recalcularEstoqueProdutos } from './estoque-sync';
 import { calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos } from '@/lib/datas/validade-producao-br';
 import { assertItensSemVinculoRemessaAberta } from './transferencias';
+import { baldePermitidoNoEnvase, mensagemBloqueioEnvase } from './retorno-baldes-loja';
 import type { EtiquetaGeradaProducao } from './producao';
 
 const IN_CHUNK = 100;
@@ -26,13 +27,33 @@ export interface RegistrarEnvaseCaixasInput {
 
 async function carregarItensParaValidacao(
   itemIds: string[]
-): Promise<Map<string, { id: string; produto_id: string; local_atual_id: string | null; estado: string }>> {
-  const map = new Map<string, { id: string; produto_id: string; local_atual_id: string | null; estado: string }>();
+): Promise<
+  Map<
+    string,
+    {
+      id: string;
+      produto_id: string;
+      local_atual_id: string | null;
+      estado: string;
+      retorno_balde_status: string | null;
+    }
+  >
+> {
+  const map = new Map<
+    string,
+    {
+      id: string;
+      produto_id: string;
+      local_atual_id: string | null;
+      estado: string;
+      retorno_balde_status: string | null;
+    }
+  >();
   for (let i = 0; i < itemIds.length; i += IN_CHUNK) {
     const slice = itemIds.slice(i, i + IN_CHUNK);
     const { data, error } = await supabase
       .from('itens')
-      .select('id, produto_id, local_atual_id, estado')
+      .select('id, produto_id, local_atual_id, estado, retorno_balde_status')
       .in('id', slice);
     if (error) throw error;
     for (const row of data || []) {
@@ -41,6 +62,7 @@ async function carregarItensParaValidacao(
         produto_id: string;
         local_atual_id: string | null;
         estado: string;
+        retorno_balde_status: string | null;
       };
       map.set(r.id, r);
     }
@@ -138,6 +160,11 @@ export async function registrarEnvaseCaixasComBalde(
         `O QR lido não é do produto balde selecionado («${pBalde.nome}»). Remova o item e escaneie só baldes desse produto.`
       );
     }
+    const msgBloqueio = mensagemBloqueioEnvase(it.retorno_balde_status);
+    if (msgBloqueio) throw new Error(msgBloqueio);
+    if (!baldePermitidoNoEnvase(it.retorno_balde_status)) {
+      throw new Error('Este balde não pode entrar no envase neste status.');
+    }
   }
 
   const dataValidadeCalculada = calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos(diasValidade);
@@ -185,7 +212,10 @@ export async function registrarEnvaseCaixasComBalde(
   const producaoId = producaoRow.id as string;
   const dataLoteProducaoIso = String((producaoRow as { created_at?: string }).created_at || '');
 
-  const { error: updErr } = await supabase.from('itens').update({ estado: 'BAIXADO' }).in('id', itemIdsBalde);
+  const { error: updErr } = await supabase
+    .from('itens')
+    .update({ estado: 'BAIXADO', retorno_balde_status: null })
+    .in('id', itemIdsBalde);
   if (updErr) throw updErr;
 
   const baixasPayload = itemIdsBalde.map((itemId) => ({

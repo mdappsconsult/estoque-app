@@ -1,5 +1,21 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Retorno baldes vencidos (fluxo completo 3 etapas)
+- **Pedido:** funcionário da indústria coleta na loja só baldes vencidos → estoque indústria → triagem (caixa/descarte) → saída só no envase.
+- **Migração `20260521190000_itens_retorno_balde_status.sql`:** `itens.retorno_balde_status` (`AGUARDANDO_TRIAGEM` | `APROVADO_ENVASE` | NULL).
+- **`/coleta-baldes-loja`:** bip na loja, `coletarBaldeVencidoNaLoja`, auditoria `COLETA_BALDE_VENCIDO_LOJA`, contador vencidos.
+- **`/retorno-baldes-industria` refatorada:** só fila `AGUARDANDO_TRIAGEM`; `TRIAGEM_BALDE_APROVADO_ENVASE` / `TRIAGEM_BALDE_DESCARTE`.
+- **`/producao-envase-caixa`:** bloqueia `AGUARDANDO_TRIAGEM`; zera status ao baixar no envase.
+- **Validação:** `npm run lint` + `npm run build` OK.
+
+### Sessão - 2026-05-21 - Triagem baldes retornados das lojas + envase (layout dia de caixa)
+- **Pedido:** funcionário da produção coleta baldes vencidos nas lojas; na indústria alguém lê cada QR e decide **caixa** ou **descarte**; baldes entram de novo no estoque da indústria e só saem na **saída de caixas** (`/producao-envase-caixa`).
+- **Nova rota `/retorno-baldes-industria`:** bip → preview (produto, validade, loja origem) → **Entrar para caixa** ou **Descartar** (motivo). Histórico «Triagens recentes» via `auditoria`.
+- **Serviço** `retorno-baldes-loja.ts`: `triagemBaldeRetornoLoja` move loja→indústria (`RETORNO_BALDE_LOJA_PARA_ENVASE`) ou descarta (`RETORNO_BALDE_LOJA_DESCARTE`); idempotente se balde já estava na indústria (envase).
+- **`/producao-envase-caixa`:** layout em 3 passos (config recolhível, bip em destaque, registrar); banners cruzados com triagem.
+- **Permissões / home / Sidebar:** perfis indústria + gerência.
+- **Validação:** `npm run lint` + `npm run build` OK. Sem migração SQL.
+
 ### Sessão - 2026-05-21 - Conferência entregas: Realtime + lista de gripados
 - **Pedido:** Leonardo vê na hora cada balde gripado na loja (loja + quais QRs foram bipados).
 - **Realtime** em `src/app/envio-direto-producao/page.tsx`: canal `transferencia_itens` + `transferencias` (`origem_id`), debounce 200 ms; removido poll 15 s (fallback 60 s); indicador «Ao vivo» + hora da última sync.

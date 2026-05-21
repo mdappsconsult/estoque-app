@@ -735,6 +735,7 @@ export type Database = {
           created_at: string;
           producao_id: string | null;
           sequencia_no_lote_producao: number | null;
+          retorno_balde_status: 'AGUARDANDO_TRIAGEM' | 'APROVADO_ENVASE' | null;
         };
         Insert: {
           id?: string;
@@ -749,6 +750,7 @@ export type Database = {
           created_at?: string;
           producao_id?: string | null;
           sequencia_no_lote_producao?: number | null;
+          retorno_balde_status?: 'AGUARDANDO_TRIAGEM' | 'APROVADO_ENVASE' | null;
         };
         Update: {
           id?: string;
@@ -762,6 +764,7 @@ export type Database = {
           data_producao?: string | null;
           producao_id?: string | null;
           sequencia_no_lote_producao?: number | null;
+          retorno_balde_status?: 'AGUARDANDO_TRIAGEM' | 'APROVADO_ENVASE' | null;
         };
       };
       viagens: {
