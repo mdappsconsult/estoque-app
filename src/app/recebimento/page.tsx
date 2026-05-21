@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, ShieldCheck, Users, X } from 'lucide-react';
+import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, ShieldCheck, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import QRScanner from '@/components/QRScanner';
@@ -375,6 +375,37 @@ export default function RecebimentoPage() {
     if (loadingEsperados || itensEsperados.length === 0) return false;
     return itensEsperados.every((e) => e.recebido);
   }, [loadingEsperados, itensEsperados]);
+
+  /**
+   * Operação na loja: o funcionário precisa ver primeiro **o que ainda falta bipar** (em destaque)
+   * e depois conferir **o que já foi bipado** com auditor. Ordena por nome do produto pra agrupar
+   * unidades iguais visualmente; bipados em ordem cronológica reversa (mais recentes em cima).
+   */
+  const itensPendentes = useMemo(
+    () =>
+      itensEsperados
+        .filter((i) => !i.recebido)
+        .sort((a, b) =>
+          a.nome.localeCompare(b.nome, 'pt-BR') ||
+          (a.token_short || a.token_qr).localeCompare(b.token_short || b.token_qr)
+        ),
+    [itensEsperados]
+  );
+  const itensBipados = useMemo(
+    () =>
+      itensEsperados
+        .filter((i) => i.recebido)
+        .sort((a, b) => (b.recebido_em || '').localeCompare(a.recebido_em || '')),
+    [itensEsperados]
+  );
+  /** Resumo «o que falta» agrupado por produto — atalho mental para o funcionário. */
+  const pendentesPorProduto = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of itensPendentes) m.set(i.nome, (m.get(i.nome) ?? 0) + 1);
+    return Array.from(m.entries())
+      .map(([nome, qtd]) => ({ nome, qtd }))
+      .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
+  }, [itensPendentes]);
 
   const escanear = async (codigo?: string) => {
     const tk = (codigo || tokenInput).trim();
@@ -934,78 +965,7 @@ export default function RecebimentoPage() {
 
       {exigePainelConferencia && !envioDiretoAtivo && (
         <>
-          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="font-semibold text-gray-900">
-                {conferenciaAgrupadaAtiva
-                  ? `Itens esperados (${remessasIdsConferencia.length} remessas)`
-                  : 'Itens esperados desta entrega'}
-              </p>
-              <div className="flex items-center gap-2">
-                <Badge variant="info" size="sm">Total: {itensEsperados.length}</Badge>
-                <Badge variant="success" size="sm">Bipados: {totalRecebidos}</Badge>
-                <Badge variant="warning" size="sm">Faltando: {Math.max(itensEsperados.length - totalRecebidos, 0)}</Badge>
-              </div>
-            </div>
-            <div className="flex items-start gap-2 text-xs text-blue-900 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-3">
-              <Users className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>
-                Vários funcionários da loja podem bipar ao mesmo tempo — cada QR lido aparece em todos
-                os aparelhos na hora. Não precisa esperar um terminar.
-                {adminRecebimento && (
-                  <>
-                    {' '}
-                    Como administrador, você ainda pode <strong>confirmar a entrega inteira sem escanear</strong> ou{' '}
-                    <strong>encerrar com divergência</strong> se faltar/sobrar produto.
-                  </>
-                )}
-              </span>
-            </div>
-            {loadingEsperados ? (
-              <div className="py-6 flex items-center justify-center text-gray-400">
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                Carregando itens esperados...
-              </div>
-            ) : itensEsperados.length > 0 ? (
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {itensEsperados.map((item) => {
-                  const escaneado = item.recebido;
-                  const hora = horaCurtaBr(item.recebido_em);
-                  return (
-                    <div
-                      key={item.id}
-                      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                        escaneado
-                          ? 'border-green-200 bg-green-50'
-                          : 'border-gray-200 bg-gray-50'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{item.nome}</p>
-                        <p className="text-xs text-gray-400 font-mono">
-                          {item.token_short || item.token_qr}
-                        </p>
-                        {escaneado && item.recebedor_nome && (
-                          <p className="text-xs text-green-700 mt-0.5">
-                            bipado por <strong>{item.recebedor_nome}</strong>
-                            {hora ? ` às ${hora}` : ''}
-                          </p>
-                        )}
-                      </div>
-                      <Badge variant={escaneado ? 'success' : 'warning'} size="sm">
-                        {escaneado ? 'Bipado' : 'Pendente'}
-                      </Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">
-                Não foi possível carregar os itens da transferência.
-              </p>
-            )}
-          </div>
-
+          {/* 1) Scanner primeiro: o operador escaneia direto, sem rolar pra baixo. */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
             <label className="block text-sm font-medium text-gray-700">Escanear QR do item recebido</label>
             <QRScanner onScan={(code) => escanear(code)} label="Ativar leitor de QR (câmera)" />
@@ -1045,6 +1005,111 @@ export default function RecebimentoPage() {
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>
 
+          {/* 2) Itens desta entrega: pendentes em destaque, bipados em baixo (auditoria). */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <p className="font-semibold text-gray-900">
+                {conferenciaAgrupadaAtiva
+                  ? `Itens desta entrega (${remessasIdsConferencia.length} remessas)`
+                  : 'Itens desta entrega'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Badge variant="info" size="sm">Total: {itensEsperados.length}</Badge>
+                <Badge variant="success" size="sm">Bipados: {totalRecebidos}</Badge>
+                <Badge variant="warning" size="sm">Falta: {Math.max(itensEsperados.length - totalRecebidos, 0)}</Badge>
+              </div>
+            </div>
+            {loadingEsperados ? (
+              <div className="py-6 flex items-center justify-center text-gray-400">
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Carregando itens da entrega...
+              </div>
+            ) : itensEsperados.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                Não foi possível carregar os itens da transferência.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {/* Falta bipar — primeiro e em destaque */}
+                {itensPendentes.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-amber-900">
+                        Falta bipar
+                      </h3>
+                      <Badge variant="warning" size="sm">{itensPendentes.length}</Badge>
+                    </div>
+                    {pendentesPorProduto.length > 1 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {pendentesPorProduto.map((p) => (
+                          <span
+                            key={p.nome}
+                            className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] text-amber-900"
+                          >
+                            <span className="font-medium">{p.nome}</span>
+                            <span className="font-mono">×{p.qtd}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {itensPendentes.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 truncate">{item.nome}</p>
+                            <p className="text-xs text-gray-500 font-mono">
+                              {item.token_short || item.token_qr}
+                            </p>
+                          </div>
+                          <Badge variant="warning" size="sm">Falta bipar</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Já bipados — embaixo, em verde, mais recentes em cima */}
+                {itensBipados.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-green-800">Já bipados</h3>
+                      <Badge variant="success" size="sm">{itensBipados.length}</Badge>
+                    </div>
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {itensBipados.map((item) => {
+                        const hora = horaCurtaBr(item.recebido_em);
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-900 truncate">{item.nome}</p>
+                              <p className="text-xs text-gray-500 font-mono">
+                                {item.token_short || item.token_qr}
+                              </p>
+                              {item.recebedor_nome && (
+                                <p className="text-xs text-green-700 mt-0.5">
+                                  bipado por <strong>{item.recebedor_nome}</strong>
+                                  {hora ? ` às ${hora}` : ''}
+                                </p>
+                              )}
+                            </div>
+                            <Badge variant="success" size="sm">Bipado</Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 3) Confirmar recebimento + ações admin. */}
           <div className="space-y-2">
             <Button
               variant="primary"

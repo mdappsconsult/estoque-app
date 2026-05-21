@@ -1,5 +1,16 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Reorganização visual do `/recebimento` (operação na loja)
+- **Pedido:** «em receber entrega quero organizar as ordens de cada card para ficar fácil a utilização. Abaixo do botão "Não conseguiu ler" deve ficar os itens dessa entrega, e a ordem dos produtos mostrando qual QR ainda precisa ser lido (ao invés de só ver "Bipado" quando está em operação)». Depois pediu também para remover o banner azul «Vários funcionários da loja podem bipar ao mesmo tempo…».
+- **Ordem dos blocos invertida** em [`src/app/recebimento/page.tsx`](src/app/recebimento/page.tsx) (região `exigePainelConferencia && !envioDiretoAtivo`): antes era **(1)** Itens esperados → **(2)** Scanner → **(3)** Confirmar. Virou **(1)** Scanner (QRScanner + «Não conseguiu ler? Digitar código» + faixa de erro) → **(2)** «Itens desta entrega» → **(3)** Confirmar recebimento + ações `ADMIN_MASTER`. O funcionário chega na tela e o leitor está no topo, sem rolar.
+- **Lista dividida em duas seções claras** (antes era uma só, com pendentes e bipados misturados):
+  - **«Falta bipar (N)»** em **laranja** com `Badge variant="warning"`, ordenada por **nome do produto** + `token_short` (agrupa unidades iguais visualmente). Quando há mais de um produto pendente, mostra chips de resumo no topo da seção: «Açaí Balde 11L ×30», «Pote 200ml ×8» — atalho mental para o ajudante.
+  - **«Já bipados (N)»** em **verde** com `Badge variant="success"`, ordenada por `recebido_em desc` (mais recentes em cima, ajuda a ver «Joana bipou agora»), continua mostrando o auditor «bipado por **Joana** às 14:32».
+- **Memos novos** em paralelo a `idsEscaneados`: `itensPendentes`, `itensBipados`, `pendentesPorProduto` (`Map<nome, qtd>` ordenado por quantidade desc + nome).
+- **Banner colaborativo removido** (linhas 950-963 antigas): o título «Falta bipar» já carrega o significado operacional; o banner ocupava espaço em celulares pequenos. Import `Users` do `lucide-react` também removido (era só do banner).
+- **Trade-off escolhido:** badges «Total / Bipados / Falta» do cabeçalho do card mantidos (é a única linha de KPIs do progresso). Texto «Faltando: N» virou «Falta: N» pela consistência com o título «Falta bipar (N)».
+- **Validação:** `npm run lint` OK (sem warnings), `npm run build` OK (47 rotas). Sem mudança de banco, RLS, permissões ou tipos.
+
 ### Sessão - 2026-05-21 - Perfil `RECEIVING_ASSIST` (Ajudante de recebimento) + 3 usuários Delivery
 - **Pedido:** depois do recebimento colaborativo, criar 3 ajudantes só para bipar entrega na Delivery (`ajudante1` / sjk@1P, `ajudante2` / riufh@2L, `ajudante3` / iued#M). Acesso **restrito** ao card «Receber Entrega». Pedido específico: **criar um perfil novo** (não usar `OPERATOR_STORE`) porque o mesmo perfil pode ser reaproveitado em outras lojas no futuro.
 - **Perfil novo `RECEIVING_ASSIST`** — adicionado em [`src/lib/permissions.ts`](src/lib/permissions.ts) (`PERFIS_COLUNA` + `ROUTE_PERMISSIONS`). Rotas permitidas: **só** `/` (home), `/login`, `/recebimento` e `/configuracoes/perfil`. Sem `/qrcode`, sem `/estoque`, sem `/protocolos`, sem nada de cadastro/gestão. Home (`src/app/page.tsx`) recebeu uma `homeSectionsByProfile.RECEIVING_ASSIST` com **um único card** «Receber Entrega» — o filtro de `hasAccessWithMap` esconde qualquer outro automaticamente.
