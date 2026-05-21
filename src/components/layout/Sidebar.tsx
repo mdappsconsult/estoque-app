@@ -66,6 +66,7 @@ const menuExpandable = [
       { name: 'Divergências', href: '/divergencias' },
       { name: 'Dashboard', href: '/dashboard-admin' },
       { name: 'Acompanhamento de viagens', href: '/acompanhamento-viagens' },
+      { name: 'Entrada nas lojas (ao vivo)', href: '/painel-recebimento-lojas' },
       { name: 'Relatório — Baldes', href: '/relatorios/baldes' },
 
       // Cadastros

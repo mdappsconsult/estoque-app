@@ -21,6 +21,7 @@ import {
   transferenciaDisponivelParaRecebimento,
 } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
+import { inicioDiaBrIso } from '@/lib/datas/inicio-dia-br';
 import EnvioDiretoConferenciaCard from '@/components/recebimento/EnvioDiretoConferenciaCard';
 import RecebimentoDiretoCard from '@/components/recebimento/RecebimentoDiretoCard';
 
@@ -69,6 +70,29 @@ function horaCurtaBr(iso: string | null): string {
 /** Ações sensíveis no recebimento (divergência ou confirmar tudo sem QR): só `ADMIN_MASTER`. */
 function recebimentoSomenteAdminMaster(perfil: string | undefined): boolean {
   return perfil === 'ADMIN_MASTER';
+}
+
+function tipoFluxoRemessa(t: TransRow): 'gripagem' | 'sep' {
+  if (t.modo_bip_loja && Math.floor(Number(t.quantidade_demandada ?? 0)) > 1) return 'gripagem';
+  return 'sep';
+}
+
+/** Rótulo do select — data + tipo evitam confundir SEP antiga com gripagem do dia. */
+function rotuloOpcaoRemessa(t: TransRow): string {
+  const data = new Date(t.created_at).toLocaleString('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Sao_Paulo',
+  });
+  const fluxo = tipoFluxoRemessa(t) === 'gripagem' ? 'Gripagem' : 'SEP';
+  const qtdItens = t.transferencia_itens?.length || 0;
+  const prodNomeRaw = t.produto_demandado;
+  const prodNome = Array.isArray(prodNomeRaw) ? prodNomeRaw[0]?.nome : prodNomeRaw?.nome;
+  const detalhe =
+    tipoFluxoRemessa(t) === 'gripagem'
+      ? `${t.quantidade_demandada ?? 0} ${prodNome || 'balde(s)'}`
+      : `${qtdItens} QR na lista`;
+  return `[${fluxo}] ${t.origem?.nome || '?'} → ${t.destino?.nome || '?'} · ${detalhe} · ${data}`;
 }
 
 export default function RecebimentoPage() {
@@ -125,6 +149,18 @@ export default function RecebimentoPage() {
     usuario
   );
 
+  /** Gripagem primeiro; depois mais recente — reduz chance de abrir SEP velha por engano. */
+  const pendentesOrdenados = useMemo(
+    () =>
+      [...pendentes].sort((a, b) => {
+        const pa = tipoFluxoRemessa(a) === 'gripagem' ? 0 : 1;
+        const pb = tipoFluxoRemessa(b) === 'gripagem' ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }),
+    [pendentes]
+  );
+
   /** Indústria registrou quantidade antes de levar os baldes — loja deve usar remessa «envio direto», não bip avulso. */
   const enviosDiretosPlanejadosPendentes = useMemo(
     () =>
@@ -142,6 +178,39 @@ export default function RecebimentoPage() {
     [remessaUnicaId, transferencias]
   );
   const envioDiretoAtivo = Boolean(remessaSelecionada?.modo_bip_loja);
+
+  /**
+   * Admin sem loja fixa pode abrir SEP antiga enquanto a gripagem do dia já foi concluída
+   * (Leonardo vê 5/5 em «Conferir entregas»; Marco vê «falta bipar» na SEP de outro dia).
+   */
+  const avisoSepAntigaVsGripagemHoje = useMemo(() => {
+    if (!remessaSelecionada || envioDiretoAtivo || tipoFluxoRemessa(remessaSelecionada) !== 'sep') {
+      return null;
+    }
+    const destinoId = remessaSelecionada.destino_id;
+    const inicioHoje = inicioDiaBrIso();
+    const gripagemHojeConcluida = transferencias.some(
+      (t) =>
+        t.destino_id === destinoId &&
+        tipoFluxoRemessa(t) === 'gripagem' &&
+        t.status === 'DELIVERED' &&
+        t.created_at >= inicioHoje
+    );
+    if (!gripagemHojeConcluida) return null;
+    const idadeMs = Date.now() - new Date(remessaSelecionada.created_at).getTime();
+    if (idadeMs < 24 * 60 * 60 * 1000) return null;
+    const faltam = itensEsperados.filter((i) => !i.recebido).length;
+    if (faltam === 0) return null;
+    return {
+      destinoNome: remessaSelecionada.destino?.nome || 'esta loja',
+      faltam,
+      dataSep: new Date(remessaSelecionada.created_at).toLocaleString('pt-BR', {
+        dateStyle: 'short',
+        timeZone: 'America/Sao_Paulo',
+      }),
+    };
+  }, [remessaSelecionada, envioDiretoAtivo, transferencias, itensEsperados]);
+
   const produtoDemandadoNome = useMemo(() => {
     const raw = remessaSelecionada?.produto_demandado;
     if (!raw) return 'Produto';
@@ -907,7 +976,7 @@ export default function RecebimentoPage() {
               </p>
             )}
             <ul className="space-y-2 max-h-48 overflow-y-auto">
-              {pendentes.map((t) => {
+              {pendentesOrdenados.map((t) => {
                 const qtdItens = t.transferencia_itens?.length || 0;
                 const data = new Date(t.created_at).toLocaleString('pt-BR');
                 return (
@@ -941,22 +1010,10 @@ export default function RecebimentoPage() {
             label="Remessa para receber"
             options={[
               { value: '', label: 'Selecione...' },
-              ...pendentes.map((t) => {
-                const qtdItens = t.transferencia_itens?.length || 0;
-                const data = new Date(t.created_at).toLocaleString('pt-BR');
-                const envioDireto = Boolean(t.modo_bip_loja);
-                const prodNomeRaw = t.produto_demandado;
-                const prodNome = Array.isArray(prodNomeRaw)
-                  ? prodNomeRaw[0]?.nome
-                  : prodNomeRaw?.nome;
-                const sufixo = envioDireto
-                  ? ` (envio direto: ${t.quantidade_demandada ?? 0} ${prodNome || 'produto'})`
-                  : ` • ${qtdItens} item(ns)`;
-                return {
-                  value: t.id,
-                  label: `${t.origem?.nome || '?'} → ${t.destino?.nome || '?'}${sufixo} • ${data}`,
-                };
-              }),
+              ...pendentesOrdenados.map((t) => ({
+                value: t.id,
+                label: rotuloOpcaoRemessa(t),
+              })),
             ]}
             value={remessaUnicaId ?? ''}
             onChange={(e) => {
@@ -969,6 +1026,22 @@ export default function RecebimentoPage() {
           />
         )}
       </div>
+
+      {avisoSepAntigaVsGripagemHoje && (
+        <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 mb-4">
+          <p className="text-sm font-semibold text-sky-900">Outra remessa — não é a gripagem de hoje</p>
+          <p className="text-sm text-sky-800 mt-1 leading-relaxed">
+            Você está vendo uma remessa <strong>SEP</strong> de{' '}
+            <strong>{avisoSepAntigaVsGripagemHoje.dataSep}</strong> para{' '}
+            <strong>{avisoSepAntigaVsGripagemHoje.destinoNome}</strong> ({' '}
+            {avisoSepAntigaVsGripagemHoje.faltam} QR ainda sem bip nesta lista). A{' '}
+            <strong>gripagem de baldes de hoje</strong> (envio direto da produção) já foi concluída na
+            loja — Leonardo vê isso em «Conferir entregas nas lojas». Os QRs desta SEP antiga são outros
+            baldes (ainda na indústria no sistema). Se essa entrega não vai mais acontecer, encerre com{' '}
+            <strong>divergência</strong> (admin) ou alinhe com a indústria.
+          </p>
+        </div>
+      )}
 
       {exigePainelConferencia && envioDiretoAtivo && remessaSelecionada && usuario && (
         <EnvioDiretoConferenciaCard

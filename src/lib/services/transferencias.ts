@@ -805,19 +805,42 @@ export async function receberTransferencia(
 
 const STATUS_REMESSA_EDITAVEL = new Set(['AWAITING_ACCEPT', 'ACCEPTED']);
 
+export type CancelarRemessaMatrizLojaOptions = {
+  /** `ADMIN_MASTER`: cancela remessa SEP em `IN_TRANSIT` (ex.: teste) se nenhum QR foi bipado na loja. */
+  adminForcarCancelamento?: boolean;
+};
+
+async function assertUsuarioAdminMaster(usuarioId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('perfil')
+    .eq('id', usuarioId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.perfil !== 'ADMIN_MASTER') {
+    throw new Error('Somente administrador pode cancelar remessa em trânsito.');
+  }
+}
+
 /**
  * Cancela uma separação matriz → loja ainda **não despachada**: remove transferência, vínculos,
  * marca etiquetas do lote `SEP-…` como excluídas e apaga a viagem se ficar órfã.
  * Unidades devem seguir na **origem**, em **EM_ESTOQUE** (legado) ou **EM_TRANSFERENCIA** (reserva na criação da SEP);
  * antes de apagar a remessa, devolve **EM_ESTOQUE** e recalcula agregado.
+ *
+ * Com `adminForcarCancelamento`, aceita também `IN_TRANSIT` se nenhuma linha em `transferencia_itens` está `recebido`.
  */
 export async function cancelarRemessaMatrizParaLoja(
   transferenciaId: string,
-  usuarioId: string
+  usuarioId: string,
+  options?: CancelarRemessaMatrizLojaOptions
 ): Promise<void> {
+  const adminForcar = Boolean(options?.adminForcarCancelamento);
+  if (adminForcar) await assertUsuarioAdminMaster(usuarioId);
+
   const { data: tr, error: e1 } = await supabase
     .from('transferencias')
-    .select('id, tipo, status, origem_id, destino_id, viagem_id')
+    .select('id, tipo, status, origem_id, destino_id, viagem_id, modo_bip_loja')
     .eq('id', transferenciaId)
     .single();
   if (e1) throw e1;
@@ -825,10 +848,33 @@ export async function cancelarRemessaMatrizParaLoja(
   if (tr.tipo !== 'WAREHOUSE_STORE') {
     throw new Error('Somente remessas indústria → loja podem ser canceladas por este fluxo');
   }
-  if (!STATUS_REMESSA_EDITAVEL.has(tr.status)) {
+  if (tr.modo_bip_loja) {
     throw new Error(
-      'Só é possível cancelar remessas em «Aguardando aceite» ou «Aceita» (antes do despacho / trânsito).'
+      'Esta remessa é envio direto da produção (gripagem), não SEP. Cancele em «Conferir entregas nas lojas» ou encerre com divergência no recebimento.'
     );
+  }
+  const statusOk =
+    STATUS_REMESSA_EDITAVEL.has(tr.status) || (adminForcar && tr.status === 'IN_TRANSIT');
+  if (!statusOk) {
+    throw new Error(
+      adminForcar
+        ? 'Só é possível cancelar remessas SEP em «Aguardando aceite», «Aceita» ou «Em trânsito» (admin, sem bip na loja).'
+        : 'Só é possível cancelar remessas em «Aguardando aceite» ou «Aceita» (antes do despacho / trânsito).'
+    );
+  }
+
+  if (adminForcar && tr.status === 'IN_TRANSIT') {
+    const { count, error: eRec } = await supabase
+      .from('transferencia_itens')
+      .select('id', { count: 'exact', head: true })
+      .eq('transferencia_id', transferenciaId)
+      .eq('recebido', true);
+    if (eRec) throw eRec;
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        'Não é possível cancelar: já há unidade(s) bipada(s) na loja nesta remessa. Use divergência no recebimento.'
+      );
+    }
   }
 
   const { data: titens, error: e2 } = await supabase
@@ -905,6 +951,8 @@ export async function cancelarRemessaMatrizParaLoja(
       viagem_id: viagemId,
       lote_sep: loteSep,
       qtd_itens: itemIds.length,
+      status_anterior: tr.status,
+      admin_forcado: adminForcar && tr.status === 'IN_TRANSIT',
     },
   });
 }

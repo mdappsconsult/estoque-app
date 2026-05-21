@@ -79,6 +79,14 @@ const features: HomeFeature[] = [
   { title: 'Divergências', description: 'Pendências de envio.', icon: AlertTriangle, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-600', href: '/divergencias' },
   { title: 'Rastreio por QR', description: 'Linha do tempo.', icon: Search, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/rastreio-qr' },
   { title: 'Dashboard Admin', description: 'Visão gerencial.', icon: BarChart3, iconBg: 'bg-red-100', iconColor: 'text-red-600', href: '/dashboard-admin' },
+  {
+    title: 'Entrada nas lojas (ao vivo)',
+    description: 'Gripagem de baldes e bipagem SEP em todas as lojas.',
+    icon: Store,
+    iconBg: 'bg-emerald-100',
+    iconColor: 'text-emerald-700',
+    href: '/painel-recebimento-lojas',
+  },
   { title: 'Relatórios', description: 'Exportar dados.', icon: FileText, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', href: '/relatorios' },
   { title: 'Produtos', description: 'Cadastro.', icon: Boxes, iconBg: 'bg-gray-100', iconColor: 'text-gray-700', href: '/cadastros/produtos' },
   {
@@ -124,7 +132,14 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Controle e Gestão',
-      items: ['/estoque', '/validades', '/divergencias', '/dashboard-admin', '/relatorios'],
+      items: [
+        '/painel-recebimento-lojas',
+        '/estoque',
+        '/validades',
+        '/divergencias',
+        '/dashboard-admin',
+        '/relatorios',
+      ],
     },
     {
       title: 'Configuração',
@@ -150,7 +165,7 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
     },
     {
       title: 'Acompanhamento',
-      items: ['/estoque', '/validades', '/perdas', '/relatorios'],
+      items: ['/painel-recebimento-lojas', '/estoque', '/validades', '/perdas', '/relatorios'],
     },
     {
       title: 'Cadastros',

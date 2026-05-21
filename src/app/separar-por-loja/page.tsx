@@ -83,8 +83,14 @@ function legivelStatusEnvio(s: string): string {
   return LABEL_STATUS_ENVIO[s] ?? s;
 }
 
-function remessaPermiteEditarOuExcluir(status: string): boolean {
+function remessaPermiteEditarDestino(status: string): boolean {
   return status === 'AWAITING_ACCEPT' || status === 'ACCEPTED';
+}
+
+/** Excluir: operação normal antes do trânsito; admin também em `IN_TRANSIT` (teste / remessa órfã). */
+function remessaPermiteExcluir(status: string, admin: boolean): boolean {
+  if (status === 'AWAITING_ACCEPT' || status === 'ACCEPTED') return true;
+  return admin && status === 'IN_TRANSIT';
 }
 
 /** Nome do warehouse sugere indústria (vs. armazém «Estoque» etc.). */
@@ -117,6 +123,7 @@ function origemEhIndustriaSeparacao(opts: {
 
 export default function SepararPorLojaPage() {
   const { usuario } = useAuth();
+  const adminMaster = usuario?.perfil === 'ADMIN_MASTER';
   const { data: locais, loading } = useRealtimeQuery<Local>({ table: 'locais', orderBy: { column: 'nome', ascending: true } });
   const lojas = locais.filter(l => l.tipo === 'STORE');
   const warehouses = locais.filter(l => l.tipo === 'WAREHOUSE');
@@ -267,16 +274,21 @@ export default function SepararPorLojaPage() {
       alert('Faça login');
       return;
     }
+    const forcarAdmin = adminMaster && env.status === 'IN_TRANSIT';
     const msg =
-      `Cancelar esta remessa?\n\n` +
+      (forcarAdmin
+        ? 'Cancelar remessa em TRÂNSITO (admin)? Só use para teste ou remessa criada por engano.\n\n'
+        : 'Cancelar esta remessa?\n\n') +
       `${env.origem_nome} → ${env.destino_nome}\n` +
-      `${env.qtd_unidades} unidade(s)\n${env.resumo_produtos}\n\n` +
+      `${legivelStatusEnvio(env.status)} · ${env.qtd_unidades} unidade(s)\n${env.resumo_produtos}\n\n` +
       `A transferência será apagada e as etiquetas do lote ${env.lote_sep ?? '—'} ficam excluídas no sistema. ` +
-      `As unidades (QR) permanecem em estoque na indústria.`;
+      `As unidades (QR) voltam para estoque na indústria de origem.`;
     if (!window.confirm(msg)) return;
     setRemessaEmAcaoId(env.transferencia_id);
     try {
-      await cancelarRemessaMatrizParaLoja(env.transferencia_id, usuario.id);
+      await cancelarRemessaMatrizParaLoja(env.transferencia_id, usuario.id, {
+        adminForcarCancelamento: forcarAdmin,
+      });
       await carregarEnviosRegistrados({ replace: true });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Não foi possível cancelar a remessa');
@@ -899,33 +911,40 @@ export default function SepararPorLojaPage() {
                           <code className="bg-sky-100 px-1 rounded">{env.lote_sep}</code>
                         </p>
                       )}
-                      {remessaPermiteEditarOuExcluir(env.status) && (
+                      {(remessaPermiteEditarDestino(env.status) ||
+                        remessaPermiteExcluir(env.status, adminMaster)) && (
                         <div className="flex flex-wrap gap-2 mt-2">
-                          <button
-                            type="button"
-                            disabled={remessaEmAcaoId !== null}
-                            onClick={() => {
-                              setEnvioEditando(env);
-                              setDestinoModalRemessa(env.destino_id);
-                            }}
-                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
-                          >
-                            <PencilLine className="w-3.5 h-3.5" aria-hidden />
-                            Editar destino
-                          </button>
-                          <button
-                            type="button"
-                            disabled={remessaEmAcaoId !== null}
-                            onClick={() => void excluirRemessaConfirmado(env)}
-                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
-                          >
-                            {remessaEmAcaoId === env.transferencia_id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                            ) : (
-                              <Trash2 className="w-3.5 h-3.5" aria-hidden />
-                            )}
-                            Excluir remessa
-                          </button>
+                          {remessaPermiteEditarDestino(env.status) && (
+                            <button
+                              type="button"
+                              disabled={remessaEmAcaoId !== null}
+                              onClick={() => {
+                                setEnvioEditando(env);
+                                setDestinoModalRemessa(env.destino_id);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-900 bg-white border border-sky-200 rounded-lg px-2 py-1 hover:bg-sky-100 disabled:opacity-40"
+                            >
+                              <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                              Editar destino
+                            </button>
+                          )}
+                          {remessaPermiteExcluir(env.status, adminMaster) && (
+                            <button
+                              type="button"
+                              disabled={remessaEmAcaoId !== null}
+                              onClick={() => void excluirRemessaConfirmado(env)}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-800 bg-white border border-red-200 rounded-lg px-2 py-1 hover:bg-red-50 disabled:opacity-40"
+                            >
+                              {remessaEmAcaoId === env.transferencia_id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                              )}
+                              {env.status === 'IN_TRANSIT' && adminMaster
+                                ? 'Excluir remessa (admin)'
+                                : 'Excluir remessa'}
+                            </button>
+                          )}
                         </div>
                       )}
                     </li>

@@ -1,5 +1,32 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Separar por Loja: admin excluir SEP em trânsito
+- **Contexto:** remessa teste Santa Cruz (16/05, 7 baldes SEP `f30e5b8b…`, `IN_TRANSIT`) criada em **Separar por Loja** (`WAREHOUSE_STORE`, lote `SEP-d49ef93f…`).
+- **Serviço:** `cancelarRemessaMatrizParaLoja` aceita `adminForcarCancelamento` (`IN_TRANSIT`, sem `recebido`, recusa `modo_bip_loja`).
+- **UI `/separar-por-loja`:** botão **Excluir remessa (admin)** para `ADMIN_MASTER` em trânsito; editar destino continua só antes do trânsito.
+
+### Sessão - 2026-05-21 - Recebimento: Marco vs Leonardo (Santa Cruz)
+- **Sintoma:** Marco em «Receber Entrega» via baldes «não bipados» em Santa Cruz; Leonardo já via gripagem concluída.
+- **Causa (Supabase):** remessas **diferentes** — gripagem de hoje `a55e6f5f…` (5 baldes, `DELIVERED`, tokens `68ZDTM`…) vs SEP antiga `f30e5b8b…` de **16/05** (7 QRs, `IN_TRANSIT`, 0 bipados, ainda na Indústria). Marco (`ADMIN_MASTER`, sem `local_padrao_id`) enxerga todas as abertas; Leonardo usa «Conferir entregas» (só `modo_bip_loja`).
+- **UI:** `/recebimento` — rótulos `[Gripagem]`/`[SEP]` + data no select, ordem (gripagem primeiro), banner azul quando admin abre SEP velha com gripagem do dia já `DELIVERED`.
+- **Operação:** encerrar SEP `f30e5b8b…` com divergência se a entrega de 16/05 não vai mais ocorrer.
+
+### Sessão - 2026-05-21 - Ajudante JK (recebimento — bip colaborativo)
+- **Pedido:** login `ajudantejk` na **Loja JK**, perfil **`RECEIVING_ASSIST`** (só bip/entrada, igual `ajudante1`/`ajudante2` no Delivery e `vitoria` no Jardim Paraíso).
+- **Banco (MCP):** usuário já existia (`615adf1c-…`, telefone `550000000017`); senha operacional atualizada (`credenciais_login_operacional`).
+
+### Sessão - 2026-05-21 - Usuária Vitória (ajudante recebimento — Jardim Paraíso)
+- **Pedido:** criar login operacional para reforço de bipagem na loja Jardim Paraíso.
+- **Banco (MCP):** `usuarios` **Vitória** — login `vitoria`, perfil **`RECEIVING_ASSIST`**, `local_padrao_id` = **Loja Jardim Paraíso** (`8148a1c8-…`), telefone `550000000016`; credencial bcrypt em `credenciais_login_operacional`.
+- **Escopo:** home (card Receber Entrega), `/recebimento`, `/configuracoes/perfil` — sem estoque, validades nem demais telas de loja.
+
+### Sessão - 2026-05-21 - Painel admin «Entrada nas lojas (ao vivo)»
+- **Pedido:** administrador precisa acompanhar em tempo real a entrada de baldes e produtos nas lojas (gripagem + bip SEP), ver o que falta bipar por loja e quem está conferindo.
+- **Rota `/painel-recebimento-lojas`** (`ADMIN_MASTER` / `MANAGER`): KPIs, filtros (hoje BR / 48 h, loja, só pendência), cards por loja com gripagem / SEP / avulsos, operadores por loja e ranking na rede, indicador «Ao vivo» + Realtime.
+- **Serviço** `painel-recebimento-lojas.ts` + helper `inicio-dia-br.ts`.
+- **Permissões / home / Sidebar** atualizados.
+- **Validação:** `npm run lint` + `npm run build` OK.
+
 ### Sessão - 2026-05-21 - Retorno baldes vencidos (fluxo completo 3 etapas)
 - **Pedido:** funcionário da indústria coleta na loja só baldes vencidos → estoque indústria → triagem (caixa/descarte) → saída só no envase.
 - **Migração `20260521190000_itens_retorno_balde_status.sql`:** `itens.retorno_balde_status` (`AGUARDANDO_TRIAGEM` | `APROVADO_ENVASE` | NULL).
