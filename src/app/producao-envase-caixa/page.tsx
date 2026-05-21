@@ -99,6 +99,11 @@ export default function ProducaoEnvaseCaixaPage() {
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState('');
 
+  /** Câmera dispara o mesmo QR várias vezes — refs síncronos evitam duplicata na lista. */
+  const processandoRef = useRef(false);
+  const ultimoScanRef = useRef<{ token: string; ts: number } | null>(null);
+  const baldesIdsRef = useRef<Set<string>>(new Set());
+
   const [etiquetasPendentes, setEtiquetasPendentes] = useState<EtiquetaGeradaProducao[]>([]);
   const [nomeCaixaImpressao, setNomeCaixaImpressao] = useState('Caixa');
   const [nomeLocalImpressao, setNomeLocalImpressao] = useState('Indústria');
@@ -187,12 +192,25 @@ export default function ProducaoEnvaseCaixaPage() {
   const processarCodigo = async (raw: string) => {
     const t = raw.trim();
     if (!t) return;
+
+    const agora = Date.now();
+    const ultimo = ultimoScanRef.current;
+    if (ultimo && ultimo.token === t && agora - ultimo.ts < 1500) {
+      return;
+    }
+    ultimoScanRef.current = { token: t, ts: agora };
+
+    if (processandoRef.current) return;
+    processandoRef.current = true;
+
     if (!produtoBaldeId) {
       setErro('Produto balde não configurado. Abra «Ajustes» ou peça ao supervisor.');
+      processandoRef.current = false;
       return;
     }
     if (!localId) {
       setErro('Local da indústria não definido.');
+      processandoRef.current = false;
       return;
     }
     setErro('');
@@ -201,6 +219,10 @@ export default function ProducaoEnvaseCaixaPage() {
       const item = await getItemPorCodigoEscaneado(t);
       if (!item) {
         setErro('QR não encontrado. Leia de novo ou confira a etiqueta.');
+        return;
+      }
+      if (baldesIdsRef.current.has(item.id)) {
+        setErro('Este balde já foi lido.');
         return;
       }
       if (item.produto_id !== produtoBaldeId) {
@@ -220,25 +242,33 @@ export default function ProducaoEnvaseCaixaPage() {
         setErro(msgBloqueio);
         return;
       }
-      if (baldesEscaneados.some((b) => b.id === item.id)) {
-        setErro('Este balde já foi lido.');
-        return;
-      }
-      setBaldesEscaneados((prev) => [
-        ...prev,
-        {
-          id: item.id,
-          token_qr: item.token_qr,
-          token_short: item.token_short,
-          nomeProduto: item.produto?.nome ?? nomeBalde,
-        },
-      ]);
+
+      baldesIdsRef.current.add(item.id);
+      setBaldesEscaneados((prev) => {
+        if (prev.some((b) => b.id === item.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: item.id,
+            token_qr: item.token_qr,
+            token_short: item.token_short,
+            nomeProduto: item.produto?.nome ?? nomeBalde,
+          },
+        ];
+      });
       setTokenManual('');
+      setErro('');
     } catch (e: unknown) {
       setErro(errMessage(e, 'Falha ao buscar o item.'));
     } finally {
       setBuscandoQr(false);
+      processandoRef.current = false;
     }
+  };
+
+  const removerBalde = (itemId: string) => {
+    baldesIdsRef.current.delete(itemId);
+    setBaldesEscaneados((prev) => prev.filter((x) => x.id !== itemId));
   };
 
   const registrar = async () => {
@@ -273,6 +303,7 @@ export default function ProducaoEnvaseCaixaPage() {
       setNomeCaixaImpressao(nomeCaixa);
       setNomeLocalImpressao(warehouses.find((w) => w.id === localId)?.nome ?? 'Indústria');
       setEtiquetasPendentes(res.etiquetas);
+      baldesIdsRef.current = new Set();
       setBaldesEscaneados([]);
       setNumCaixasStr('');
       setCaixasEditadasManual(false);
@@ -463,7 +494,7 @@ export default function ProducaoEnvaseCaixaPage() {
                   variant="ghost"
                   className="shrink-0 p-1 h-9 w-9"
                   aria-label="Remover"
-                  onClick={() => setBaldesEscaneados((prev) => prev.filter((x) => x.id !== b.id))}
+                  onClick={() => removerBalde(b.id)}
                 >
                   <Trash2 className="w-4 h-4 text-red-600" />
                 </Button>
