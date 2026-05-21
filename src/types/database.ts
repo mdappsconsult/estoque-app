@@ -829,18 +829,24 @@ export type Database = {
           transferencia_id: string;
           item_id: string;
           recebido: boolean;
+          recebido_por_usuario_id: string | null;
+          recebido_em: string | null;
         };
         Insert: {
           id?: string;
           transferencia_id: string;
           item_id: string;
           recebido?: boolean;
+          recebido_por_usuario_id?: string | null;
+          recebido_em?: string | null;
         };
         Update: {
           id?: string;
           transferencia_id?: string;
           item_id?: string;
           recebido?: boolean;
+          recebido_por_usuario_id?: string | null;
+          recebido_em?: string | null;
         };
       };
       divergencias: {

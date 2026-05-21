@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, ShieldCheck, X } from 'lucide-react';
+import { Store, Loader2, QrCode, CheckCircle, AlertTriangle, ShieldCheck, Users, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import QRScanner from '@/components/QRScanner';
@@ -9,9 +9,12 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { useAuth } from '@/hooks/useAuth';
-import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
 import { errMessage } from '@/lib/errMessage';
-import { receberTransferencia } from '@/lib/services/transferencias';
+import {
+  bipQrRecebimentoColaborativo,
+  fecharRemessaRecebimentoColaborativo,
+  receberTransferencia,
+} from '@/lib/services/transferencias';
 import {
   filtrarRecebimentoPorLoja,
   transferenciaDisponivelParaRecebimento,
@@ -43,6 +46,23 @@ interface ItemEsperado {
   nome: string;
   /** Presente ao conferir mais de uma remessa na mesma sessão. */
   transferencia_id: string;
+  recebido: boolean;
+  recebido_em: string | null;
+  recebedor_nome: string | null;
+}
+
+/** Formata HH:MM curto, fuso América/SP (auditor visual sob cada linha bipada). */
+function horaCurtaBr(iso: string | null): string {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Sao_Paulo',
+    });
+  } catch {
+    return '';
+  }
 }
 
 /** Ações sensíveis no recebimento (divergência ou confirmar tudo sem QR): só `ADMIN_MASTER`. */
@@ -59,7 +79,12 @@ export default function RecebimentoPage() {
   const [modoMultiRemessas, setModoMultiRemessas] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [mostrarEntradaManual, setMostrarEntradaManual] = useState(false);
-  const [itensRecebidos, setItensRecebidos] = useState<{ id: string; token_qr: string; nome: string }[]>([]);
+  /**
+   * Estado único do painel de conferência colaborativa: cada linha de `transferencia_itens` da(s)
+   * remessa(s) selecionada(s), com `recebido` e auditor (`recebedor_nome`) já resolvido. Vem do
+   * banco e é mantido em sincronia por `postgres_changes` em `transferencia_itens` — vários
+   * funcionários da loja bipam em paralelo e a tela de todo mundo atualiza em segundos.
+   */
   const [itensEsperados, setItensEsperados] = useState<ItemEsperado[]>([]);
   const [loadingEsperados, setLoadingEsperados] = useState(false);
   const [erro, setErro] = useState('');
@@ -208,21 +233,19 @@ export default function RecebimentoPage() {
         );
         setRemessasIdsConferencia([]);
         setModoMultiRemessas(false);
-        setItensRecebidos([]);
         setErro('');
         return;
       }
       if (!transferenciaDisponivelParaRecebimento(t)) {
         const msg =
           t.status === 'DELIVERED'
-            ? 'Uma das entregas já foi concluída nesta conta em outro aparelho (ou por outro operador). Os QRs escaneados neste telefone não foram enviados ao servidor — use um único aparelho até confirmar, ou confira o estoque da loja.'
+            ? 'Uma das entregas já foi concluída por outro funcionário da loja. Cada bip já fica salvo no servidor — a página atualizou sozinha.'
             : t.status === 'DIVERGENCE'
               ? 'Uma das remessas foi encerrada com divergência (faltante ou excedente). Não é possível continuar o recebimento aqui. Veja a tela Divergências ou fale com o gestor.'
               : `Uma transferência não está mais disponível para recebimento (status: ${t.status}).`;
         setAvisoRemessaEncerrada(msg);
         setRemessasIdsConferencia([]);
         setModoMultiRemessas(false);
-        setItensRecebidos([]);
         setErro('');
         return;
       }
@@ -230,27 +253,32 @@ export default function RecebimentoPage() {
   }, [remessasIdsConferencia, transferencias, loading]);
 
   useEffect(() => {
-    const carregarItensEsperados = async () => {
-      const ok =
-        (!modoMultiRemessas && remessasIdsConferencia.length === 1) ||
-        (modoMultiRemessas && remessasIdsConferencia.length >= 2);
-      if (!ok) {
-        setItensEsperados([]);
-        return;
-      }
-      if (envioDiretoAtivo) {
-        // Remessa de envio direto não tem lista de QRs; o servidor controla via `bipQrEnvioDireto`.
-        setItensEsperados([]);
-        return;
-      }
+    const ok =
+      (!modoMultiRemessas && remessasIdsConferencia.length === 1) ||
+      (modoMultiRemessas && remessasIdsConferencia.length >= 2);
+    if (!ok) {
+      setItensEsperados([]);
+      return;
+    }
+    if (envioDiretoAtivo) {
+      setItensEsperados([]);
+      return;
+    }
+
+    let cancelado = false;
+    const idsSelecionados = [...remessasIdsConferencia];
+
+    const carregar = async () => {
       setLoadingEsperados(true);
       try {
         const { data, error } = await supabase
           .from('transferencia_itens')
           .select(
-            'transferencia_id, item_id, item:itens!item_id(id, token_qr, token_short, produto:produtos(nome))'
+            'transferencia_id, item_id, recebido, recebido_em, recebido_por_usuario_id, ' +
+              'item:itens!item_id(id, token_qr, token_short, produto:produtos(nome)), ' +
+              'recebedor:usuarios!recebido_por_usuario_id(nome)'
           )
-          .in('transferencia_id', remessasIdsConferencia);
+          .in('transferencia_id', idsSelecionados);
         if (error) throw error;
         type ItemJoin = {
           id?: string;
@@ -258,87 +286,169 @@ export default function RecebimentoPage() {
           token_short?: string | null;
           produto?: { nome?: string } | { nome?: string }[] | null;
         };
+        type RecebedorJoin = { nome?: string | null } | { nome?: string | null }[] | null;
         type TiRow = {
           transferencia_id: string;
           item_id: string;
+          recebido: boolean | null;
+          recebido_em: string | null;
+          recebido_por_usuario_id: string | null;
           item: ItemJoin | ItemJoin[] | null;
+          recebedor: RecebedorJoin;
         };
-        const normItem = (item: TiRow['item']): ItemJoin | null => {
-          if (item == null) return null;
-          return Array.isArray(item) ? (item[0] ?? null) : item;
+        const norm1 = <T,>(v: T | T[] | null | undefined): T | null => {
+          if (v == null) return null;
+          return Array.isArray(v) ? (v[0] ?? null) : v;
         };
-        const normProd = (p: ItemJoin['produto']): { nome?: string } | null => {
-          if (p == null) return null;
-          return Array.isArray(p) ? (p[0] ?? null) : p;
-        };
-        const itens = ((data || []) as TiRow[])
+        const linhas = ((data || []) as unknown as TiRow[])
           .map((row) => {
-            const it = normItem(row.item);
+            const it = norm1(row.item);
+            const rec = norm1(row.recebedor);
             return {
               id: it?.id || row.item_id,
               token_qr: it?.token_qr || '',
               token_short: it?.token_short || null,
-              nome: normProd(it?.produto)?.nome || 'Produto',
+              nome: norm1(it?.produto)?.nome || 'Produto',
               transferencia_id: String(row.transferencia_id || ''),
-            };
+              recebido: Boolean(row.recebido),
+              recebido_em: row.recebido_em || null,
+              recebedor_nome: rec?.nome || null,
+            } satisfies ItemEsperado;
           })
-          .filter((item: ItemEsperado) => Boolean(item.id) && Boolean(item.transferencia_id));
-        setItensEsperados(itens);
+          .filter((linha) => Boolean(linha.id) && Boolean(linha.transferencia_id));
+        if (!cancelado) setItensEsperados(linhas);
       } catch {
-        setItensEsperados([]);
+        if (!cancelado) setItensEsperados([]);
       } finally {
-        setLoadingEsperados(false);
+        if (!cancelado) setLoadingEsperados(false);
       }
     };
-    void carregarItensEsperados();
+
+    void carregar();
+
+    /**
+     * Canal realtime sem filtro: aceita só `eq` no `postgres_changes`; usamos um único canal por
+     * tabela e refeitchamos apenas quando o evento toca uma das remessas selecionadas.
+     * Debounce curto evita refetch em rajadas (vários bips ao mesmo tempo).
+     */
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const refetchDebounced = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        void carregar();
+      }, 200);
+    };
+    const idsSet = new Set(idsSelecionados);
+    const channel = supabase
+      .channel(`recebimento-itens-${idsSelecionados.join('-')}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transferencia_itens' },
+        (payload) => {
+          const novo = (payload.new as { transferencia_id?: string } | null)?.transferencia_id;
+          const velho = (payload.old as { transferencia_id?: string } | null)?.transferencia_id;
+          if ((novo && idsSet.has(novo)) || (velho && idsSet.has(velho))) {
+            refetchDebounced();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelado = true;
+      if (debounce) clearTimeout(debounce);
+      supabase.removeChannel(channel);
+    };
   }, [remessasIdsConferencia, modoMultiRemessas, envioDiretoAtivo]);
 
+  /** Linhas já bipadas (`recebido=true`) — derivado do realtime, é a verdade do servidor. */
   const idsEscaneados = useMemo(
-    () => new Set(itensRecebidos.map((i) => i.id)),
-    [itensRecebidos]
+    () => new Set(itensEsperados.filter((e) => e.recebido).map((e) => e.id)),
+    [itensEsperados]
   );
+  const totalRecebidos = idsEscaneados.size;
 
   const conferenciaCompleta = useMemo(() => {
     if (loadingEsperados || itensEsperados.length === 0) return false;
-    if (itensRecebidos.length !== itensEsperados.length) return false;
-    const esperadosIds = new Set(itensEsperados.map((e) => e.id));
-    return itensRecebidos.every((r) => esperadosIds.has(r.id));
-  }, [loadingEsperados, itensEsperados, itensRecebidos]);
+    return itensEsperados.every((e) => e.recebido);
+  }, [loadingEsperados, itensEsperados]);
 
   const escanear = async (codigo?: string) => {
-    const tk = codigo || tokenInput.trim();
+    const tk = (codigo || tokenInput).trim();
     if (!tk) return;
     if (scanEmAndamentoRef.current) return;
+    if (!usuario) {
+      setErro('Faça login novamente para continuar');
+      return;
+    }
+    if (loadingEsperados) {
+      setErro('Aguarde carregar os itens esperados da transferência');
+      return;
+    }
+    if (envioDiretoAtivo) {
+      setErro('Esta remessa é envio direto — bipe no painel próprio acima.');
+      return;
+    }
+
+    /**
+     * Em conferência agrupada, a remessa do QR é resolvida em duas etapas: 1) tenta achar nas linhas
+     * já carregadas (pode falhar se a remessa for outra do mesmo dia); 2) se não achou, percorre as
+     * remessas selecionadas e deixa o servidor recusar — a primeira que aceitar é a correta.
+     */
+    const linhaEsperada = itensEsperados.find(
+      (e) => e.token_qr === tk || e.token_short === tk.toUpperCase()
+    );
+    const remessasAlvo = linhaEsperada
+      ? [linhaEsperada.transferencia_id]
+      : conferenciaAgrupadaAtiva
+        ? [...remessasIdsConferencia]
+        : remessaUnicaId
+          ? [remessaUnicaId]
+          : [];
+    if (remessasAlvo.length === 0) {
+      setErro('Selecione a remessa para bipar.');
+      return;
+    }
+    const destinoBip = linhaEsperada
+      ? pendentes.find((t) => t.id === linhaEsperada.transferencia_id)?.destino_id
+      : pendentes.find((t) => t.id === remessasAlvo[0])?.destino_id;
+    if (!destinoBip) {
+      setErro('Não foi possível identificar a loja destino da remessa.');
+      return;
+    }
+
     scanEmAndamentoRef.current = true;
     setErro('');
     try {
-      if (loadingEsperados) {
-        setErro('Aguarde carregar os itens esperados da transferência');
-        return;
-      }
-      const item = await getItemPorCodigoEscaneado(tk);
-      if (!item) { setErro('Item não encontrado. Confira o código e tente novamente.'); return; }
-      if (itensEsperados.length > 0 && !itensEsperados.some((e) => e.id === item.id)) {
-        setErro(
-          'Este balde existe no sistema, mas não está nesta remessa. Peça à indústria para criar um «Envio direto da produção» (loja + produto + quantidade) — a partir daí você pode bipar cada QR aqui. Para itens de compra/insumo, ainda é via «Separar por Loja».'
-        );
-        return;
-      }
-      let duplicado = false;
-      setItensRecebidos((prev) => {
-        if (prev.some((i) => i.id === item.id || i.token_qr === item.token_qr)) {
-          duplicado = true;
-          return prev;
+      let ultimoErro: string | null = null;
+      let sucesso = false;
+      for (const tid of remessasAlvo) {
+        try {
+          await bipQrRecebimentoColaborativo({
+            transferenciaId: tid,
+            codigoQr: tk,
+            localDestinoId: destinoBip,
+            usuarioId: usuario.id,
+          });
+          sucesso = true;
+          break;
+        } catch (err: unknown) {
+          ultimoErro = errMessage(err, 'Erro ao bipar o QR.');
+          if (
+            !ultimoErro.includes('não está nesta remessa') &&
+            !ultimoErro.includes('Item não encontrado')
+          ) {
+            break;
+          }
         }
-        return [...prev, { id: item.id, token_qr: item.token_qr, nome: item.produto?.nome || '' }];
-      });
-      if (duplicado) {
-        setErro('Já escaneado');
+      }
+      if (!sucesso && ultimoErro) {
+        setErro(ultimoErro);
         return;
       }
       setTokenInput('');
-    } catch { setErro('Não foi possível buscar o item. Tente novamente.'); }
-    finally {
+    } finally {
       scanEmAndamentoRef.current = false;
     }
   };
@@ -350,7 +460,7 @@ export default function RecebimentoPage() {
     }
     if (!conferenciaCompleta) {
       setErro(
-        'Escaneie todos os itens da lista antes de confirmar. Se faltar produto na entrega, peça ao administrador do sistema.'
+        'Bipe todos os QRs da lista antes de confirmar. Se faltar produto na entrega, peça ao administrador do sistema.'
       );
       return;
     }
@@ -372,38 +482,18 @@ export default function RecebimentoPage() {
         }
       }
 
-      const idParaTid = new Map(itensEsperados.map((e) => [e.id, e.transferencia_id]));
-      const porRemessa = new Map<string, string[]>();
-      for (const r of itensRecebidos) {
-        const tid = idParaTid.get(r.id);
-        if (!tid) continue;
-        porRemessa.set(tid, [...(porRemessa.get(tid) || []), r.id]);
-      }
-      for (const tid of remessasIdsConferencia) {
-        const esp = itensEsperados.filter((e) => e.transferencia_id === tid).map((e) => e.id);
-        const rec = porRemessa.get(tid) || [];
-        if (esp.length !== rec.length || esp.some((id) => !rec.includes(id))) {
-          setErro('Conferência incompleta para uma das remessas. Confira os totais escaneados.');
-          return;
-        }
-      }
-
       const confirmou = window.confirm(
-        `Confirmar recebimento completo de ${itensRecebidos.length} item(ns) em ${remessasIdsConferencia.length} remessa(s)? Cada uma será marcada como entregue.`
+        `Confirmar recebimento completo de ${totalRecebidos} item(ns) em ${remessasIdsConferencia.length} remessa(s)? Cada uma será marcada como entregue.`
       );
       if (!confirmou) return;
 
       setSaving(true);
       setErro('');
       try {
-        let divTot = 0;
         for (const tid of remessasIdsConferencia) {
-          const ids = porRemessa.get(tid) || [];
-          const res = await receberTransferencia(tid, ids, destinoIdPrim, usuario.id);
-          divTot += res.divergencias.length;
+          await fecharRemessaRecebimentoColaborativo(tid, destinoIdPrim, usuario.id);
         }
-        setResultado({ divergencias: divTot });
-        setItensRecebidos([]);
+        setResultado({ divergencias: 0 });
         setRemessasIdsConferencia([]);
         setModoMultiRemessas(false);
       } catch (err: unknown) {
@@ -431,7 +521,7 @@ export default function RecebimentoPage() {
     if (!transferenciaDisponivelParaRecebimento(transSelecionada)) {
       setErro(
         transSelecionada.status === 'DELIVERED'
-          ? 'Esta entrega já foi concluída. Se havia outro telefone escaneando a mesma conta, só um aparelho pode confirmar — a lista de escaneados é local até você tocar em «Confirmar recebimento».'
+          ? 'Esta entrega já foi concluída por outro funcionário. A página atualizou sozinha — pode iniciar a próxima.'
           : transSelecionada.status === 'DIVERGENCE'
             ? 'Esta remessa já foi encerrada com divergência. Não é possível confirmar de novo por aqui.'
             : 'Esta remessa não está mais disponível para recebimento.'
@@ -443,21 +533,19 @@ export default function RecebimentoPage() {
       return;
     }
     const confirmou = window.confirm(
-      `Confirmar recebimento completo de ${itensRecebidos.length} item(ns)? A remessa será marcada como entregue.`
+      `Confirmar recebimento completo de ${totalRecebidos} item(ns)? A remessa será marcada como entregue.`
     );
     if (!confirmou) return;
 
     setSaving(true);
     setErro('');
     try {
-      const res = await receberTransferencia(
+      await fecharRemessaRecebimentoColaborativo(
         remessaUnicaId,
-        itensRecebidos.map((i) => i.id),
         transSelecionada.destino_id,
         usuario.id
       );
-      setResultado({ divergencias: res.divergencias.length });
-      setItensRecebidos([]);
+      setResultado({ divergencias: 0 });
       setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao confirmar recebimento'));
@@ -535,7 +623,6 @@ export default function RecebimentoPage() {
         usuario.id
       );
       setResultado({ divergencias: res.divergencias.length });
-      setItensRecebidos([]);
       setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao confirmar recebimento integral (administrador)'));
@@ -593,26 +680,26 @@ export default function RecebimentoPage() {
     }
 
     const total = itensEsperados.length;
-    const escaneados = itensRecebidos.length;
+    const escaneados = totalRecebidos;
     const mensagemConfirm =
       escaneados === 0
-        ? `Nenhum item foi escaneado. A remessa tem ${total} unidade(s) — tudo será registrado como FALTANTE e a remessa ficará em DIVERGÊNCIA. Só use se realmente nada foi entregue. Continuar?`
-        : `Foram escaneados ${escaneados} de ${total} itens. O que faltar será registrado como divergência (faltante). A remessa será encerrada. Continuar?`;
+        ? `Nenhum item foi bipado. A remessa tem ${total} unidade(s) — tudo será registrado como FALTANTE e a remessa ficará em DIVERGÊNCIA. Só use se realmente nada foi entregue. Continuar?`
+        : `Foram bipados ${escaneados} de ${total} itens. O que faltar será registrado como divergência (faltante). A remessa será encerrada. Continuar?`;
 
     if (!window.confirm(mensagemConfirm)) return;
 
     setSaving(true);
     setErro('');
     try {
+      const idsRecebidosBanco = itensEsperados.filter((e) => e.recebido).map((e) => e.id);
       const res = await receberTransferencia(
         remessaUnicaId,
-        itensRecebidos.map((i) => i.id),
+        idsRecebidosBanco,
         transSelecionada.destino_id,
         usuario.id,
         { encerrarComDivergencia: true }
       );
       setResultado({ divergencias: res.divergencias.length });
-      setItensRecebidos([]);
       setRemessasIdsConferencia([]);
     } catch (err: unknown) {
       setErro(errMessage(err, 'Erro ao encerrar com divergência'));
@@ -713,7 +800,6 @@ export default function RecebimentoPage() {
                 onClick={() => {
                   setAvisoRemessaEncerrada(null);
                   setModoMultiRemessas(true);
-                  setItensRecebidos([]);
                   setErro('');
                   setMostrarEntradaManual(false);
                   if (usuario?.perfil === 'OPERATOR_STORE') {
@@ -734,7 +820,6 @@ export default function RecebimentoPage() {
                   setAvisoRemessaEncerrada(null);
                   setModoMultiRemessas(false);
                   setRemessasIdsConferencia([]);
-                  setItensRecebidos([]);
                   setErro('');
                   setMostrarEntradaManual(false);
                 }}
@@ -770,7 +855,6 @@ export default function RecebimentoPage() {
                         onChange={() => {
                           setAvisoRemessaEncerrada(null);
                           alternarRemessaNoModoMulti(t.id);
-                          setItensRecebidos([]);
                           setMostrarEntradaManual(false);
                         }}
                       />
@@ -814,7 +898,6 @@ export default function RecebimentoPage() {
               setAvisoRemessaEncerrada(null);
               const v = e.target.value;
               setRemessasIdsConferencia(v ? [v] : []);
-              setItensRecebidos([]);
               setErro('');
               setMostrarEntradaManual(false);
             }}
@@ -840,7 +923,6 @@ export default function RecebimentoPage() {
           estoqueMinimoLoja={demandaLojaProduto?.estoqueMinimo}
           estoqueAtualLoja={demandaLojaProduto?.estoqueAtual}
           onConcluida={() => {
-            setItensRecebidos([]);
             setRemessasIdsConferencia([]);
             setResultado({ divergencias: 0 });
           }}
@@ -858,28 +940,24 @@ export default function RecebimentoPage() {
               </p>
               <div className="flex items-center gap-2">
                 <Badge variant="info" size="sm">Total: {itensEsperados.length}</Badge>
-                <Badge variant="success" size="sm">Escaneados: {itensRecebidos.length}</Badge>
-                <Badge variant="warning" size="sm">Faltando: {Math.max(itensEsperados.length - itensRecebidos.length, 0)}</Badge>
+                <Badge variant="success" size="sm">Bipados: {totalRecebidos}</Badge>
+                <Badge variant="warning" size="sm">Faltando: {Math.max(itensEsperados.length - totalRecebidos, 0)}</Badge>
               </div>
             </div>
-            <p className="text-xs text-gray-500 mb-3">
-              Os QRs escaneados ficam só neste aparelho até você confirmar. Dois telefones na mesma conta não somam a lista — use um único aparelho até confirmar
-              {conferenciaAgrupadaAtiva ? ' todas as remessas desta conferência' : ' esta remessa'} (ou confira tudo antes de confirmar no primeiro).
-              {adminRecebimento ? (
-                <>
-                  {' '}
-                  Como administrador, você pode <strong>confirmar a entrega inteira sem escanear</strong> (carga ok na
-                  loja) ou usar <strong>Encerrar com divergência</strong> se faltar ou sobrar produto — ambos com
-                  confirmação explícita.
-                </>
-              ) : (
-                <>
-                  {' '}
-                  Se a carga chegou mas não dá para escanear, o <strong>administrador do sistema</strong> pode confirmar
-                  a entrega inteira sem QR ou tratar divergência nesta mesma tela.
-                </>
-              )}
-            </p>
+            <div className="flex items-start gap-2 text-xs text-blue-900 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-3">
+              <Users className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Vários funcionários da loja podem bipar ao mesmo tempo — cada QR lido aparece em todos
+                os aparelhos na hora. Não precisa esperar um terminar.
+                {adminRecebimento && (
+                  <>
+                    {' '}
+                    Como administrador, você ainda pode <strong>confirmar a entrega inteira sem escanear</strong> ou{' '}
+                    <strong>encerrar com divergência</strong> se faltar/sobrar produto.
+                  </>
+                )}
+              </span>
+            </div>
             {loadingEsperados ? (
               <div className="py-6 flex items-center justify-center text-gray-400">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -888,7 +966,8 @@ export default function RecebimentoPage() {
             ) : itensEsperados.length > 0 ? (
               <div className="space-y-2 max-h-56 overflow-y-auto">
                 {itensEsperados.map((item) => {
-                  const escaneado = idsEscaneados.has(item.id);
+                  const escaneado = item.recebido;
+                  const hora = horaCurtaBr(item.recebido_em);
                   return (
                     <div
                       key={item.id}
@@ -898,14 +977,20 @@ export default function RecebimentoPage() {
                           : 'border-gray-200 bg-gray-50'
                       }`}
                     >
-                      <div>
-                        <p className="font-medium text-gray-900">{item.nome}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{item.nome}</p>
                         <p className="text-xs text-gray-400 font-mono">
                           {item.token_short || item.token_qr}
                         </p>
+                        {escaneado && item.recebedor_nome && (
+                          <p className="text-xs text-green-700 mt-0.5">
+                            bipado por <strong>{item.recebedor_nome}</strong>
+                            {hora ? ` às ${hora}` : ''}
+                          </p>
+                        )}
                       </div>
                       <Badge variant={escaneado ? 'success' : 'warning'} size="sm">
-                        {escaneado ? 'Escaneado' : 'Pendente'}
+                        {escaneado ? 'Bipado' : 'Pendente'}
                       </Badge>
                     </div>
                   );
@@ -956,23 +1041,6 @@ export default function RecebimentoPage() {
             )}
             {erro && <p className="text-sm text-red-500 mt-2">{erro}</p>}
           </div>
-
-          {itensRecebidos.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="font-semibold">Itens recebidos</p>
-                <Badge variant="success">{itensRecebidos.length}</Badge>
-              </div>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {itensRecebidos.map(i => (
-                  <div key={i.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg text-sm">
-                    <span>{i.nome}</span>
-                    <span className="text-xs text-gray-400 font-mono">{i.token_qr}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="space-y-2">
             <Button

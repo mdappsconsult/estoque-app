@@ -3,6 +3,8 @@ import { remessaMatrizLojaPodeReceber } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
 import { Transferencia, TransferenciaInsert } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
+import { recalcularEstoqueProduto } from './estoque-sync';
+import { normalizarCodigoQrScaneado } from './itens';
 
 export interface TransferenciaCompleta extends Transferencia {
   origem?: { id: string; nome: string; tipo: string };
@@ -414,6 +416,262 @@ export async function despacharTransferencia(id: string, usuarioId: string): Pro
   });
 }
 
+export interface BipQrRecebimentoColaborativoInput {
+  transferenciaId: string;
+  /** Token completo / curto / URL do QR — passa pelo `normalizarCodigoQrScaneado`. */
+  codigoQr: string;
+  /** Loja destino (deve bater com `transferencias.destino_id`). */
+  localDestinoId: string;
+  usuarioId: string;
+}
+
+export interface BipQrRecebimentoColaborativoResultado {
+  itemId: string;
+  produtoId: string;
+  produtoNome: string;
+  /** Total já marcado como `recebido=true` na remessa, incluindo este bip. */
+  recebidos: number;
+  /** Total de unidades esperadas na lista da remessa. */
+  total: number;
+  /** Linhas que ainda faltam bipar (= total - recebidos). */
+  itensRestantes: number;
+}
+
+/**
+ * Bip colaborativo no fluxo SEP (matriz→loja e loja→loja com lista pré-criada).
+ *
+ * Cada bip vai direto ao banco: `transferencia_itens.recebido=true`, item movido para o destino,
+ * estoque recalculado e auditoria por linha. Vários funcionários da mesma loja podem bipar em paralelo —
+ * o realtime do `useRealtimeQuery` em `transferencia_itens` sincroniza a tela de todo mundo.
+ *
+ * Corridas (dois aparelhos no mesmo QR) resolvem-se pelo **UPDATE condicional** `WHERE recebido=false`:
+ * só uma linha é afetada; o segundo bip recebe `0 rows` e devolve erro «já bipado por outro funcionário».
+ */
+export async function bipQrRecebimentoColaborativo(
+  input: BipQrRecebimentoColaborativoInput
+): Promise<BipQrRecebimentoColaborativoResultado> {
+  const tid = input.transferenciaId.trim();
+  const token = normalizarCodigoQrScaneado(input.codigoQr || '');
+  const usuarioId = input.usuarioId.trim();
+  const destinoId = input.localDestinoId.trim();
+  if (!tid || !token || !usuarioId || !destinoId) {
+    throw new Error('Remessa, QR, usuário e loja destino são obrigatórios.');
+  }
+
+  const { data: tr, error: eTr } = await supabase
+    .from('transferencias')
+    .select('id, tipo, status, origem_id, destino_id, modo_bip_loja')
+    .eq('id', tid)
+    .single();
+  if (eTr) throw eTr;
+  if (!tr) throw new Error('Remessa não encontrada.');
+  if (tr.modo_bip_loja) {
+    throw new Error(
+      'Esta remessa é envio direto da produção — use o painel próprio (cada bip já cria o vínculo).'
+    );
+  }
+  if (tr.destino_id !== destinoId) {
+    throw new Error('Loja destino do bip não corresponde à remessa.');
+  }
+  const podeReceber =
+    tr.tipo === 'WAREHOUSE_STORE'
+      ? remessaMatrizLojaPodeReceber(tr.status)
+      : tr.status === 'IN_TRANSIT';
+  if (!podeReceber) {
+    throw new Error(
+      tr.status === 'DELIVERED'
+        ? 'Esta entrega já foi concluída.'
+        : tr.status === 'DIVERGENCE'
+          ? 'Esta remessa já foi encerrada com divergência.'
+          : `Esta remessa não está disponível para recebimento (status ${tr.status}).`
+    );
+  }
+
+  const { data: itemPorQr, error: eItQr } = await supabase
+    .from('itens')
+    .select('id, token_qr, token_short, produto_id, estado, local_atual_id')
+    .eq('token_qr', token)
+    .maybeSingle();
+  let item = itemPorQr;
+  if (eItQr && eItQr.code !== 'PGRST116') throw eItQr;
+  if (!item) {
+    const short = token.replace(/\s/g, '').toUpperCase();
+    if (short.length >= 4 && short.length <= 16) {
+      const { data: porShort, error: eShort } = await supabase
+        .from('itens')
+        .select('id, token_qr, token_short, produto_id, estado, local_atual_id')
+        .eq('token_short', short)
+        .maybeSingle();
+      if (eShort && eShort.code !== 'PGRST116') throw eShort;
+      item = porShort;
+    }
+  }
+  if (!item) throw new Error('Item não encontrado. Confira o código e tente novamente.');
+
+  const { data: vinculoRemessa, error: eVin } = await supabase
+    .from('transferencia_itens')
+    .select('id, recebido, recebido_por_usuario_id')
+    .eq('transferencia_id', tid)
+    .eq('item_id', item.id)
+    .maybeSingle();
+  if (eVin && eVin.code !== 'PGRST116') throw eVin;
+  if (!vinculoRemessa) {
+    throw new Error(
+      'Este balde existe no sistema, mas não está nesta remessa. Peça à indústria para criar um «Envio direto da produção» (loja + produto + quantidade) — a partir daí você pode bipar cada QR aqui. Para itens de compra/insumo, ainda é via «Separar por Loja».'
+    );
+  }
+  if (vinculoRemessa.recebido) {
+    let nomeQuemBipou: string | null = null;
+    if (vinculoRemessa.recebido_por_usuario_id) {
+      const { data: u } = await supabase
+        .from('usuarios')
+        .select('nome')
+        .eq('id', vinculoRemessa.recebido_por_usuario_id)
+        .maybeSingle();
+      nomeQuemBipou = u?.nome || null;
+    }
+    throw new Error(
+      nomeQuemBipou
+        ? `Este QR já foi bipado por ${nomeQuemBipou}.`
+        : 'Este QR já foi bipado nesta remessa.'
+    );
+  }
+
+  /** UPDATE condicional: se outro aparelho ganhou a corrida, `data` vem vazio e cancelamos. */
+  const { data: updated, error: eUp } = await supabase
+    .from('transferencia_itens')
+    .update({
+      recebido: true,
+      recebido_por_usuario_id: usuarioId,
+      recebido_em: new Date().toISOString(),
+    })
+    .eq('transferencia_id', tid)
+    .eq('item_id', item.id)
+    .eq('recebido', false)
+    .select('id');
+  if (eUp) throw eUp;
+  if (!updated || updated.length === 0) {
+    throw new Error('Este QR já foi bipado por outro funcionário.');
+  }
+
+  const { error: eUpItem } = await supabase
+    .from('itens')
+    .update({ local_atual_id: destinoId, estado: 'EM_ESTOQUE' })
+    .eq('id', item.id);
+  if (eUpItem) throw eUpItem;
+
+  // Versão completa (com massa em lotes de compra) — alinha com `bipQrEnvioDireto`.
+  await recalcularEstoqueProduto(item.produto_id);
+
+  const { count: totalRecebido, error: eCtRec } = await supabase
+    .from('transferencia_itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('transferencia_id', tid)
+    .eq('recebido', true);
+  if (eCtRec) throw eCtRec;
+  const { count: totalRemessa, error: eCtTot } = await supabase
+    .from('transferencia_itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('transferencia_id', tid);
+  if (eCtTot) throw eCtTot;
+  const recebidos = totalRecebido ?? 0;
+  const total = totalRemessa ?? 0;
+
+  const { data: prod } = await supabase
+    .from('produtos')
+    .select('nome')
+    .eq('id', item.produto_id)
+    .maybeSingle();
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: destinoId,
+    item_id: item.id,
+    acao: 'BIP_RECEBIMENTO_COLABORATIVO',
+    origem_id: tr.origem_id,
+    destino_id: destinoId,
+    detalhes: {
+      transferencia_id: tid,
+      recebidos,
+      total,
+      token_short: item.token_short || null,
+    },
+  });
+
+  return {
+    itemId: item.id,
+    produtoId: item.produto_id,
+    produtoNome: prod?.nome || 'Produto',
+    recebidos,
+    total,
+    itensRestantes: Math.max(0, total - recebidos),
+  };
+}
+
+/**
+ * Fecha a remessa SEP quando todos os QRs já foram bipados em paralelo (modo colaborativo).
+ * Não move itens nem mexe em estoque — esses efeitos já aconteceram em cada chamada de
+ * `bipQrRecebimentoColaborativo`. Só vira o status e registra auditoria final.
+ */
+export async function fecharRemessaRecebimentoColaborativo(
+  transferenciaId: string,
+  localDestinoId: string,
+  usuarioId: string
+): Promise<void> {
+  const transferencia = await getTransferenciaComItensMinimo(transferenciaId);
+  const podeReceber =
+    transferencia.tipo === 'WAREHOUSE_STORE'
+      ? remessaMatrizLojaPodeReceber(transferencia.status)
+      : transferencia.status === 'IN_TRANSIT';
+  if (!podeReceber) {
+    throw new Error(
+      transferencia.status === 'DELIVERED'
+        ? 'Esta entrega já foi concluída por outro aparelho.'
+        : transferencia.status === 'DIVERGENCE'
+          ? 'Esta remessa já foi encerrada com divergência.'
+          : `Esta remessa não está disponível para recebimento (status ${transferencia.status}).`
+    );
+  }
+  if (transferencia.destino_id !== localDestinoId) {
+    throw new Error('Local de recebimento não corresponde ao destino da transferência');
+  }
+
+  const { count: pendentes, error: ePend } = await supabase
+    .from('transferencia_itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('transferencia_id', transferenciaId)
+    .eq('recebido', false);
+  if (ePend) throw ePend;
+  if ((pendentes ?? 0) > 0) {
+    throw new Error(
+      `Ainda há ${pendentes} QR(s) pendente(s) na lista. Bipe todos antes de confirmar — ou peça ao administrador do sistema para encerrar com divergência.`
+    );
+  }
+
+  const { error: eUpTr } = await supabase
+    .from('transferencias')
+    .update({ status: 'DELIVERED' })
+    .eq('id', transferenciaId);
+  if (eUpTr) throw eUpTr;
+
+  const { count: totalRemessa } = await supabase
+    .from('transferencia_itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('transferencia_id', transferenciaId);
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    local_id: localDestinoId,
+    acao: 'RECEBER_TRANSFERENCIA',
+    detalhes: {
+      transferencia_id: transferenciaId,
+      recebidos: totalRemessa ?? 0,
+      divergencias: 0,
+      modo: 'colaborativo',
+    },
+  });
+}
+
 export type ReceberTransferenciaOptions = {
   /** Só quando faltar produto na entrega ou conferência incompleta de propósito; sem isso o servidor recusa divergência. */
   encerrarComDivergencia?: boolean;
@@ -493,11 +751,15 @@ export async function receberTransferencia(
   }
 
   // Marcar recebidos e mover itens válidos — em lote (evita 2×N round-trips ao Supabase).
+  // `eq('recebido', false)` preserva `recebido_por_usuario_id`/`recebido_em` das linhas que já
+  // foram bipadas colaborativamente (mantém o auditor original em vez de sobrescrever pelo admin).
   if (itensRecebidosIds.length > 0) {
+    const agora = new Date().toISOString();
     const { error: errTi } = await supabase
       .from('transferencia_itens')
-      .update({ recebido: true })
+      .update({ recebido: true, recebido_por_usuario_id: usuarioId, recebido_em: agora })
       .eq('transferencia_id', transferenciaId)
+      .eq('recebido', false)
       .in('item_id', itensRecebidosIds);
     if (errTi) throw errTi;
 
