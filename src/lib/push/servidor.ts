@@ -80,7 +80,11 @@ export async function enviarPushParaUsuarios(
             keys: { p256dh: s.p256dh as string, auth: s.auth as string },
           },
           body,
-          { TTL: 60 * 60 }
+          {
+            TTL: 60 * 60,
+            // iOS Safari agrupa/silencia pushes "normal"; "high" força entrega imediata e visual.
+            urgency: 'high',
+          }
         );
         enviadas++;
       } catch (e) {

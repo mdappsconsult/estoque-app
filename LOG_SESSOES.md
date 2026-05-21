@@ -1,5 +1,12 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Push chegava no Apple mas iOS suprimia: `urgency: 'high'`
+- **Sintoma após o fix da senha:** servidor confirmou `[push] result { enviadas: 1, falhas: 0 }` (Apple Push aceitou com 201), mas o iPhone do Marco continuou silencioso.
+- **Teste isolado:** disparei uma push manual via `node -e` direto no endpoint do Marco com `urgency: 'high'` → **chegou**. Mesmo payload via API (com `urgency` default = normal) → não chega.
+- **Causa:** no iOS Safari/Web Push, push com `urgency: 'normal'` é **agrupado/atrasado** pelo iOS para economizar bateria — pode levar minutos ou ficar suprimido sem popup. `urgency: 'high'` (RFC 8030) força entrega imediata.
+- **Fix:** `enviarPushParaUsuarios` em `src/lib/push/servidor.ts` passou a enviar `{ TTL: 3600, urgency: 'high' }` para todas as notificações de protocolo. Para Web Push em geral, manter `high` em notificações disparadas por ação humana é o padrão recomendado.
+- **Validação:** próximo pedido aberto pelo Leonardo deve chegar instantaneamente no iPhone do Marco.
+
 ### Sessão - 2026-05-21 - Push de protocolo não chegava: tirada a dependência de senha operacional
 - **Sintoma:** Marco (ADMIN_MASTER) instalou PWA no iPhone e ativou notificações, mas quando Leonardo (operador) abriu um pedido pelo Mac, o iPhone do Marco bloqueado em cima da mesa **não tocou**.
 - **Diagnóstico (SQL + Railway):**
