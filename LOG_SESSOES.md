@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Envase caixas: fluxo simples 2→3 + qty informada
+- **UI** (`/producao-envase-caixa`): 3 passos — (1) ler baldes QR, (2) quantas caixas saíram (pré-preenchido pela média **2 baldes → 3 caixas**, botões ±), (3) registrar e imprimir. Produtos balde/caixa pré-selecionados; config em «Ajustes (supervisor)».
+- **Serviço:** `registrarEnvaseCaixasComBalde` passa a receber `numCaixas` explícito (sem exigir múltiplo de baldes); helper `producao-envase-ratio.ts`.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-21 - Separar por Loja: admin excluir SEP em trânsito
 - **Contexto:** remessa teste Santa Cruz (16/05, 7 baldes SEP `f30e5b8b…`, `IN_TRANSIT`) criada em **Separar por Loja** (`WAREHOUSE_STORE`, lote `SEP-d49ef93f…`).
 - **Serviço:** `cancelarRemessaMatrizParaLoja` aceita `adminForcarCancelamento` (`IN_TRANSIT`, sem `recebido`, recusa `modo_bip_loja`).

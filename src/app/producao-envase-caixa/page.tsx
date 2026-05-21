@@ -2,7 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Boxes, CheckCircle, ChevronDown, ChevronUp, Loader2, Package, Printer, Server, Trash2, Eye } from 'lucide-react';
+import {
+  Boxes,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Minus,
+  Package,
+  Plus,
+  Printer,
+  Server,
+  Trash2,
+  Eye,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -25,8 +38,24 @@ import {
   type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
+import {
+  ENVASE_MEDIA_BALDES_REF,
+  ENVASE_MEDIA_CAIXAS_REF,
+  calcularCaixasEsperadasEnvase,
+  textoMediaEnvase,
+} from '@/lib/producao-envase-ratio';
 
 type BaldeEscaneado = { id: string; token_qr: string; token_short: string | null; nomeProduto: string };
+
+function acharProdutoBaldePadrao(produtos: Produto[]): string {
+  const hit = produtos.find((p) => /açaí.*balde|acai.*balde/i.test(p.nome));
+  return hit?.id ?? '';
+}
+
+function acharProdutoCaixaPadrao(produtos: Produto[]): string {
+  const envase = produtos.find((p) => /caixa.*açaí|caixa.*acai|açaí.*caixa|acai.*caixa/i.test(p.nome));
+  return envase?.id ?? '';
+}
 
 export default function ProducaoEnvaseCaixaPage() {
   const { usuario } = useAuth();
@@ -58,11 +87,12 @@ export default function ProducaoEnvaseCaixaPage() {
 
   const [produtoCaixaId, setProdutoCaixaId] = useState('');
   const [produtoBaldeId, setProdutoBaldeId] = useState('');
-  const [baldesPorCaixaStr, setBaldesPorCaixaStr] = useState('2');
   const [diasValidadeStr, setDiasValidadeStr] = useState('7');
   const [localId, setLocalId] = useState('');
   const [observacoes, setObservacoes] = useState('');
   const [baldesEscaneados, setBaldesEscaneados] = useState<BaldeEscaneado[]>([]);
+  const [numCaixasStr, setNumCaixasStr] = useState('');
+  const [caixasEditadasManual, setCaixasEditadasManual] = useState(false);
   const [tokenManual, setTokenManual] = useState('');
   const [mostrarManual, setMostrarManual] = useState(false);
   const [buscandoQr, setBuscandoQr] = useState(false);
@@ -77,13 +107,13 @@ export default function ProducaoEnvaseCaixaPage() {
     numeroLote: number;
     numCaixas: number;
     numBaldes: number;
-    baldesPorCaixa: number;
+    caixasEsperadas: number;
   } | null>(null);
 
   const [imprimindo, setImprimindo] = useState(false);
   const [imprimindoPi, setImprimindoPi] = useState(false);
   const [previsualizando, setPrevisualizando] = useState(false);
-  const [configAberta, setConfigAberta] = useState(true);
+  const [ajustesAbertos, setAjustesAbertos] = useState(false);
   const painelImpressaoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,12 +121,28 @@ export default function ProducaoEnvaseCaixaPage() {
     setLocalId((prev) => (prev ? prev : defaultWarehouseId));
   }, [defaultWarehouseId]);
 
-  const baldesPorCaixa = Math.floor(Number(baldesPorCaixaStr) || 0);
+  useEffect(() => {
+    if (produtosAcabado.length === 0) return;
+    setProdutoBaldeId((prev) => prev || acharProdutoBaldePadrao(produtosAcabado));
+    setProdutoCaixaId((prev) => prev || acharProdutoCaixaPadrao(produtosAcabado));
+  }, [produtosAcabado]);
+
   const diasValidade = Math.floor(Number(diasValidadeStr) || 0);
-  const numCaixasPrevistas =
-    baldesPorCaixa >= 1 && baldesEscaneados.length > 0 && baldesEscaneados.length % baldesPorCaixa === 0
-      ? baldesEscaneados.length / baldesPorCaixa
-      : null;
+  const numBaldes = baldesEscaneados.length;
+  const caixasEsperadas = calcularCaixasEsperadasEnvase(numBaldes);
+  const numCaixasInformadas = Math.floor(Number(numCaixasStr) || 0);
+  const bateMedia = numBaldes > 0 && numCaixasInformadas === caixasEsperadas;
+
+  useEffect(() => {
+    if (numBaldes <= 0) {
+      setNumCaixasStr('');
+      setCaixasEditadasManual(false);
+      return;
+    }
+    if (!caixasEditadasManual) {
+      setNumCaixasStr(String(caixasEsperadas));
+    }
+  }, [numBaldes, caixasEsperadas, caixasEditadasManual]);
 
   const nomeCaixa = produtosAcabado.find((p) => p.id === produtoCaixaId)?.nome ?? '—';
   const nomeBalde = produtosAcabado.find((p) => p.id === produtoBaldeId)?.nome ?? '—';
@@ -106,10 +152,16 @@ export default function ProducaoEnvaseCaixaPage() {
     Boolean(produtoBaldeId) &&
     produtoCaixaId !== produtoBaldeId &&
     Boolean(localId) &&
-    baldesPorCaixa >= 1 &&
     diasValidade >= 1 &&
-    baldesEscaneados.length > 0 &&
-    baldesEscaneados.length % baldesPorCaixa === 0;
+    numBaldes >= 1 &&
+    numCaixasInformadas >= 1;
+
+  const ajustarCaixas = (delta: number) => {
+    const base = numCaixasInformadas >= 1 ? numCaixasInformadas : caixasEsperadas || 1;
+    const next = Math.max(1, base + delta);
+    setNumCaixasStr(String(next));
+    setCaixasEditadasManual(true);
+  };
 
   const montarPayloadImpressao = (): EtiquetaParaImpressao[] => {
     const agora = new Date().toISOString();
@@ -136,11 +188,11 @@ export default function ProducaoEnvaseCaixaPage() {
     const t = raw.trim();
     if (!t) return;
     if (!produtoBaldeId) {
-      setErro('Selecione o produto balde antes de escanear.');
+      setErro('Produto balde não configurado. Abra «Ajustes» ou peça ao supervisor.');
       return;
     }
     if (!localId) {
-      setErro('Selecione o local (indústria).');
+      setErro('Local da indústria não definido.');
       return;
     }
     setErro('');
@@ -148,19 +200,19 @@ export default function ProducaoEnvaseCaixaPage() {
     try {
       const item = await getItemPorCodigoEscaneado(t);
       if (!item) {
-        setErro('QR não encontrado. Confira o código ou a rede.');
+        setErro('QR não encontrado. Leia de novo ou confira a etiqueta.');
         return;
       }
       if (item.produto_id !== produtoBaldeId) {
-        setErro(`Este QR é de «${item.produto?.nome ?? '?'}», não do balde selecionado («${nomeBalde}»).`);
+        setErro(`Este QR não é balde «${nomeBalde}».`);
         return;
       }
       if (item.estado !== 'EM_ESTOQUE') {
-        setErro(`Este balde não está em estoque (${item.estado}).`);
+        setErro('Este balde não está disponível no estoque.');
         return;
       }
       if (item.local_atual_id !== localId) {
-        setErro('Este balde não está no local selecionado.');
+        setErro('Este balde não está na indústria agora.');
         return;
       }
       const msgBloqueio = mensagemBloqueioEnvase(item.retorno_balde_status);
@@ -169,7 +221,7 @@ export default function ProducaoEnvaseCaixaPage() {
         return;
       }
       if (baldesEscaneados.some((b) => b.id === item.id)) {
-        setErro('Este balde já está na lista.');
+        setErro('Este balde já foi lido.');
         return;
       }
       setBaldesEscaneados((prev) => [
@@ -191,7 +243,10 @@ export default function ProducaoEnvaseCaixaPage() {
 
   const registrar = async () => {
     if (!formularioOk || !usuario?.id) return;
-    if (!window.confirm('Confirmar envase? Os baldes listados serão baixados e as caixas entrarão em estoque.')) return;
+    const msg = bateMedia
+      ? `Confirmar?\n\n${numBaldes} balde(s) → ${numCaixasInformadas} caixa(s)\n(Igual à média de hoje)`
+      : `Confirmar?\n\n${numBaldes} balde(s) → ${numCaixasInformadas} caixa(s)\nMédia seria ${caixasEsperadas} caixa(s)`;
+    if (!window.confirm(msg)) return;
     setSaving(true);
     setErro('');
     try {
@@ -201,7 +256,9 @@ export default function ProducaoEnvaseCaixaPage() {
         localId,
         produtoCaixaId,
         produtoBaldeId,
-        baldesPorCaixa,
+        numCaixas: numCaixasInformadas,
+        baldesReferencia: ENVASE_MEDIA_BALDES_REF,
+        caixasReferencia: ENVASE_MEDIA_CAIXAS_REF,
         diasValidade,
         observacoes: observacoes.trim() || null,
         itemIdsBalde: baldesEscaneados.map((b) => b.id),
@@ -211,12 +268,14 @@ export default function ProducaoEnvaseCaixaPage() {
         numeroLote: res.numeroLoteProducao,
         numCaixas: res.numCaixas,
         numBaldes: res.numBaldesConsumidos,
-        baldesPorCaixa: res.baldesPorCaixa,
+        caixasEsperadas: res.caixasEsperadas,
       });
       setNomeCaixaImpressao(nomeCaixa);
       setNomeLocalImpressao(warehouses.find((w) => w.id === localId)?.nome ?? 'Indústria');
       setEtiquetasPendentes(res.etiquetas);
       setBaldesEscaneados([]);
+      setNumCaixasStr('');
+      setCaixasEditadasManual(false);
       setObservacoes('');
       window.setTimeout(() => painelImpressaoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
     } catch (e: unknown) {
@@ -296,31 +355,20 @@ export default function ProducaoEnvaseCaixaPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-1 sm:px-0 space-y-5">
+    <div className="max-w-3xl mx-auto px-1 sm:px-0 space-y-5 pb-8">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
           <Boxes className="w-5 h-5 text-emerald-700" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Envase — caixas (saída)</h1>
-          <p className="text-sm text-gray-600">
-            Dia de produção: bipe baldes já triados na indústria; gera caixas com QR novos.
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900">Fazer caixas</h1>
+          <p className="text-sm text-gray-600">Leia os baldes → diga quantas caixas saíram → imprima as etiquetas.</p>
         </div>
       </div>
 
-      <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-3 text-sm text-amber-950 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <span>
-          Fluxo retorno:{' '}
-          <Link href="/coleta-baldes-loja" className="font-semibold underline">
-            Coleta na loja
-          </Link>
-          {' → '}
-          <Link href="/retorno-baldes-industria" className="font-semibold underline">
-            Triagem
-          </Link>
-          {' → envase (esta tela).'}
-        </span>
+      <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3 text-center">
+        <p className="text-xs uppercase tracking-wide text-emerald-800 font-semibold">Média de hoje</p>
+        <p className="text-2xl font-bold text-emerald-950 mt-0.5">{textoMediaEnvase()}</p>
       </div>
 
       {ultimoResumo && (
@@ -331,39 +379,28 @@ export default function ProducaoEnvaseCaixaPage() {
           </div>
           <ul className="list-disc list-inside space-y-0.5 text-green-950/90">
             <li>
-              <span className="font-medium">Produção (id):</span>{' '}
-              <code className="text-xs bg-white/80 px-1 rounded">{ultimoResumo.producaoId}</code> — copie para SQL /
-              suporte
+              Lote nº <span className="font-medium">{ultimoResumo.numeroLote}</span>
             </li>
             <li>
-              <span className="font-medium">Lote prod. nº:</span> {ultimoResumo.numeroLote}
-            </li>
-            <li>
-              <span className="font-medium">Caixas geradas:</span> {ultimoResumo.numCaixas}
-            </li>
-            <li>
-              <span className="font-medium">Baldes consumidos:</span> {ultimoResumo.numBaldes}
-            </li>
-            <li>
-              <span className="font-medium">Proporção usada:</span> {ultimoResumo.baldesPorCaixa} balde(s) / caixa
+              <span className="font-medium">{ultimoResumo.numBaldes}</span> balde(s) →{' '}
+              <span className="font-medium">{ultimoResumo.numCaixas}</span> caixa(s)
+              {ultimoResumo.numCaixas === ultimoResumo.caixasEsperadas ? (
+                <span className="text-green-700"> (bateu a média)</span>
+              ) : (
+                <span className="text-amber-800">
+                  {' '}
+                  (média era {ultimoResumo.caixasEsperadas})
+                </span>
+              )}
             </li>
           </ul>
-          <p className="text-xs text-green-800/90 pt-1">
-            Relatórios: filtre <code className="bg-white/70 px-1 rounded">producoes.tipo = &apos;ENVASE_CAIXA&apos;</code> e{' '}
-            <code className="bg-white/70 px-1 rounded">envase_produto_balde_id</code> no Supabase. Histórico geral em{' '}
-            <Link href="/producao" className="underline font-medium">
-              Produção
-            </Link>
-            .
-          </p>
         </div>
       )}
 
       {etiquetasPendentes.length > 0 && (
         <div ref={painelImpressaoRef} className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
           <p className="text-sm text-blue-900">
-            <strong>{etiquetasPendentes.length}</strong> etiqueta(s) 60×60 (caixa). Prévia ou impressão (navegador / Pi
-            indústria).
+            <strong>{etiquetasPendentes.length}</strong> etiqueta(s) de caixa prontas para imprimir.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" onClick={() => void previa()} disabled={previsualizando}>
@@ -372,7 +409,7 @@ export default function ProducaoEnvaseCaixaPage() {
             </Button>
             <Button type="button" variant="primary" onClick={() => void imprimirNavegador()} disabled={imprimindo}>
               {imprimindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
-              Navegador
+              Imprimir
             </Button>
             <Button
               type="button"
@@ -382,124 +419,41 @@ export default function ProducaoEnvaseCaixaPage() {
               disabled={imprimindoPi || piCfgLoading || !piPrintAvailable}
             >
               {imprimindoPi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Server className="w-4 h-4 mr-2" />}
-              Zebra / Pi
+              Zebra
             </Button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <button
-          type="button"
-          className="w-full flex items-center justify-between gap-2 px-5 py-3 text-left bg-slate-50 border-b border-gray-100"
-          onClick={() => setConfigAberta((v) => !v)}
-        >
-          <span className="text-sm font-semibold text-gray-900">
-            1. Configuração do envase
-            {!configAberta && produtoCaixaId && produtoBaldeId && (
-              <span className="font-normal text-gray-500 ml-2">
-                — {nomeCaixa} · {baldesPorCaixa} balde(s)/caixa
-              </span>
-            )}
-          </span>
-          {configAberta ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-        </button>
-        {configAberta && (
-          <div className="p-5 space-y-4">
-            <Select
-              label="Produto caixa (acabado)"
-              required
-              value={produtoCaixaId}
-              onChange={(e) => setProdutoCaixaId(e.target.value)}
-              options={[
-                { value: '', label: 'Selecione…' },
-                ...produtosAcabado.map((p) => ({ value: p.id, label: p.nome })),
-              ]}
-            />
-            <Select
-              label="Produto balde (matéria-prima)"
-              required
-              value={produtoBaldeId}
-              onChange={(e) => setProdutoBaldeId(e.target.value)}
-              options={[
-                { value: '', label: 'Selecione…' },
-                ...produtosAcabado.map((p) => ({ value: p.id, label: p.nome })),
-              ]}
-            />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                label="Baldes por caixa (inteiro ≥ 1)"
-                type="number"
-                min={1}
-                step={1}
-                value={baldesPorCaixaStr}
-                onChange={(e) => setBaldesPorCaixaStr(e.target.value)}
-                required
-              />
-              <Input
-                label="Validade caixa (dias)"
-                type="number"
-                min={1}
-                step={1}
-                value={diasValidadeStr}
-                onChange={(e) => setDiasValidadeStr(e.target.value)}
-                required
-              />
-            </div>
-            <Select
-              label="Local (indústria — caixas nascem aqui)"
-              required
-              value={localId}
-              onChange={(e) => setLocalId(e.target.value)}
-              disabled={Boolean(defaultWarehouseId)}
-              options={[{ value: '', label: 'Selecione…' }, ...warehouses.map((w) => ({ value: w.id, label: w.nome }))]}
-            />
-            <Input label="Observações (opcional)" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} />
-          </div>
-        )}
-      </div>
-
+      {/* Passo 1 — bipar baldes */}
       <div className="bg-white rounded-xl border-2 border-emerald-200 p-5 space-y-4">
-        <p className="text-sm font-semibold text-gray-900">2. Bipar baldes no estoque da indústria</p>
-
-        <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-sm text-slate-800 space-y-1">
-          <p>
-            <span className="font-semibold">Resumo:</span> {baldesEscaneados.length} balde(s)
-            {numCaixasPrevistas != null ? (
-              <>
-                {' '}
-                → <span className="font-semibold text-emerald-800">{numCaixasPrevistas}</span> caixa(s) (
-                {baldesPorCaixa} balde(s)/caixa)
-              </>
-            ) : baldesEscaneados.length > 0 ? (
-              <span className="text-amber-800"> — complete até múltiplo de «baldes por caixa».</span>
-            ) : (
-              <span className="text-gray-500"> — escaneie os baldes triados.</span>
-            )}
-          </p>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-lg font-bold text-gray-900">1. Ler baldes</p>
+          <span className="text-3xl font-bold tabular-nums text-emerald-700">{numBaldes}</span>
         </div>
 
-        <QRScanner onScan={(code) => void processarCodigo(code)} label="Ativar leitor de QR (câmera)" />
+        <QRScanner onScan={(code) => void processarCodigo(code)} label="Ligar câmera e ler QR do balde" />
+
         {!mostrarManual ? (
           <Button type="button" variant="outline" className="w-full" onClick={() => setMostrarManual(true)}>
-            Digitar código manualmente
+            Digitar código
           </Button>
         ) : (
           <div className="flex gap-2">
             <Input
-              placeholder="Token ou QR"
+              placeholder="Código do balde"
               value={tokenManual}
               onChange={(e) => setTokenManual(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void processarCodigo(tokenManual)}
             />
             <Button type="button" variant="primary" onClick={() => void processarCodigo(tokenManual)} disabled={buscandoQr}>
-              {buscandoQr ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Buscar'}
+              {buscandoQr ? <Loader2 className="w-4 h-4 animate-spin" /> : 'OK'}
             </Button>
           </div>
         )}
 
         {baldesEscaneados.length > 0 && (
-          <ul className="max-h-52 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded-lg">
+          <ul className="max-h-40 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded-lg">
             {baldesEscaneados.map((b, i) => (
               <li key={b.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
                 <span className="text-gray-500 tabular-nums w-6">{i + 1}.</span>
@@ -517,27 +471,161 @@ export default function ProducaoEnvaseCaixaPage() {
             ))}
           </ul>
         )}
+      </div>
 
-        {erro && (
-          <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap">
-            {erro}
-          </p>
+      {/* Passo 2 — quantas caixas */}
+      <div
+        className={`bg-white rounded-xl border-2 p-5 space-y-4 ${numBaldes >= 1 ? 'border-emerald-200' : 'border-gray-200 opacity-60'}`}
+      >
+        <p className="text-lg font-bold text-gray-900">2. Quantas caixas saíram?</p>
+
+        {numBaldes >= 1 ? (
+          <>
+            <p className="text-sm text-gray-600">
+              Com <strong>{numBaldes}</strong> balde(s), a média de hoje dá{' '}
+              <strong className="text-emerald-800">{caixasEsperadas}</strong> caixa(s). Confira na mesa e ajuste se
+              precisar.
+            </p>
+
+            <div className="flex items-center justify-center gap-4 py-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-14 w-14 rounded-full p-0"
+                aria-label="Menos uma caixa"
+                onClick={() => ajustarCaixas(-1)}
+                disabled={numCaixasInformadas <= 1 && caixasEsperadas <= 1}
+              >
+                <Minus className="w-6 h-6" />
+              </Button>
+              <div className="text-center min-w-[5rem]">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  className="w-full text-center text-4xl font-bold tabular-nums text-gray-900 border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400 rounded-lg"
+                  value={numCaixasStr}
+                  onChange={(e) => {
+                    setNumCaixasStr(e.target.value);
+                    setCaixasEditadasManual(true);
+                  }}
+                  aria-label="Quantidade de caixas"
+                />
+                <p className="text-xs text-gray-500 mt-1">caixas</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-14 w-14 rounded-full p-0"
+                aria-label="Mais uma caixa"
+                onClick={() => ajustarCaixas(1)}
+              >
+                <Plus className="w-6 h-6" />
+              </Button>
+            </div>
+
+            {bateMedia ? (
+              <p className="text-sm text-center text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2 font-medium">
+                Bateu a média ({textoMediaEnvase()})
+              </p>
+            ) : numCaixasInformadas >= 1 ? (
+              <p className="text-sm text-center text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Diferente da média — esperado <strong>{caixasEsperadas}</strong>, informado{' '}
+                <strong>{numCaixasInformadas}</strong>. Tudo bem se a mesa conferir.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-sm text-gray-500">Leia pelo menos 1 balde no passo 1.</p>
         )}
+      </div>
 
-        <Button
+      {erro && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 whitespace-pre-wrap">
+          {erro}
+        </p>
+      )}
+
+      <Button
+        type="button"
+        variant="primary"
+        className="w-full min-h-[56px] text-lg bg-emerald-600 hover:bg-emerald-700"
+        disabled={!formularioOk || saving || !usuario?.id}
+        onClick={() => void registrar()}
+      >
+        {saving ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Package className="w-5 h-5 mr-2" />}
+        3. Registrar e gerar etiquetas das caixas
+      </Button>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <button
           type="button"
-          variant="primary"
-          className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-700"
-          disabled={!formularioOk || saving || !usuario?.id}
-          onClick={() => void registrar()}
+          className="w-full flex items-center justify-between gap-2 px-5 py-3 text-left bg-slate-50 border-b border-gray-100"
+          onClick={() => setAjustesAbertos((v) => !v)}
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Package className="w-4 h-4 mr-2" />}
-          3. Registrar envase e gerar caixas
-        </Button>
-        {!formularioOk && (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-            Configure produtos e proporção (passo 1) e bipe baldes até o total ser múltiplo de «baldes por caixa».
-          </p>
+          <span className="text-sm font-semibold text-gray-900">
+            Ajustes (supervisor)
+            {!ajustesAbertos && produtoCaixaId && produtoBaldeId && (
+              <span className="font-normal text-gray-500 ml-2">
+                — {nomeBalde} → {nomeCaixa}
+              </span>
+            )}
+          </span>
+          {ajustesAbertos ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        </button>
+        {ajustesAbertos && (
+          <div className="p-5 space-y-4">
+            <Select
+              label="Produto caixa"
+              required
+              value={produtoCaixaId}
+              onChange={(e) => setProdutoCaixaId(e.target.value)}
+              options={[
+                { value: '', label: 'Selecione…' },
+                ...produtosAcabado.map((p) => ({ value: p.id, label: p.nome })),
+              ]}
+            />
+            <Select
+              label="Produto balde"
+              required
+              value={produtoBaldeId}
+              onChange={(e) => setProdutoBaldeId(e.target.value)}
+              options={[
+                { value: '', label: 'Selecione…' },
+                ...produtosAcabado.map((p) => ({ value: p.id, label: p.nome })),
+              ]}
+            />
+            <Input
+              label="Validade da caixa (dias)"
+              type="number"
+              min={1}
+              step={1}
+              value={diasValidadeStr}
+              onChange={(e) => setDiasValidadeStr(e.target.value)}
+              required
+            />
+            <Select
+              label="Local (indústria)"
+              required
+              value={localId}
+              onChange={(e) => setLocalId(e.target.value)}
+              disabled={Boolean(defaultWarehouseId)}
+              options={[{ value: '', label: 'Selecione…' }, ...warehouses.map((w) => ({ value: w.id, label: w.nome }))]}
+            />
+            <Input label="Observações" value={observacoes} onChange={(e) => setObservacoes(e.target.value)} />
+            <p className="text-xs text-gray-500">
+              Retorno de loja:{' '}
+              <Link href="/coleta-baldes-loja" className="underline">
+                Coleta
+              </Link>
+              {' → '}
+              <Link href="/retorno-baldes-industria" className="underline">
+                Triagem
+              </Link>
+              .
+            </p>
+          </div>
         )}
       </div>
     </div>

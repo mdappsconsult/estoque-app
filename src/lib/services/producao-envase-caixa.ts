@@ -8,6 +8,11 @@ import { calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos } from '@/lib/datas/
 import { assertItensSemVinculoRemessaAberta } from './transferencias';
 import { baldePermitidoNoEnvase, mensagemBloqueioEnvase } from './retorno-baldes-loja';
 import type { EtiquetaGeradaProducao } from './producao';
+import {
+  ENVASE_MEDIA_BALDES_REF,
+  ENVASE_MEDIA_CAIXAS_REF,
+  calcularCaixasEsperadasEnvase,
+} from '@/lib/producao-envase-ratio';
 
 const IN_CHUNK = 100;
 
@@ -17,11 +22,14 @@ export interface RegistrarEnvaseCaixasInput {
   localId: string;
   produtoCaixaId: string;
   produtoBaldeId: string;
-  /** Quantos baldes inteiros viram uma caixa (ex.: 2). */
-  baldesPorCaixa: number;
+  /** Quantas caixas o operador informou ao final do envase. */
+  numCaixas: number;
+  /** Referência da média (ex.: 2 baldes → 3 caixas). Gravado em metadados. */
+  baldesReferencia?: number;
+  caixasReferencia?: number;
   diasValidade: number;
   observacoes?: string | null;
-  /** IDs dos itens (balde) na ordem escaneada; tamanho deve ser múltiplo de `baldesPorCaixa`. */
+  /** IDs dos itens (balde) na ordem escaneada. */
   itemIdsBalde: string[];
 }
 
@@ -81,7 +89,9 @@ export async function registrarEnvaseCaixasComBalde(
   numeroLoteProducao: number;
   numCaixas: number;
   numBaldesConsumidos: number;
-  baldesPorCaixa: number;
+  caixasEsperadas: number;
+  baldesReferencia: number;
+  caixasReferencia: number;
   produtoCaixaId: string;
   produtoBaldeId: string;
   etiquetas: EtiquetaGeradaProducao[];
@@ -92,10 +102,13 @@ export async function registrarEnvaseCaixasComBalde(
     localId,
     produtoCaixaId,
     produtoBaldeId,
-    baldesPorCaixa,
     diasValidade,
     observacoes,
   } = input;
+
+  const baldesReferencia = input.baldesReferencia ?? ENVASE_MEDIA_BALDES_REF;
+  const caixasReferencia = input.caixasReferencia ?? ENVASE_MEDIA_CAIXAS_REF;
+  const numCaixas = Math.floor(Number(input.numCaixas));
 
   const itemIdsBalde = [...new Set(input.itemIdsBalde.map((id) => id.trim()).filter(Boolean))];
   if (itemIdsBalde.length === 0) {
@@ -105,14 +118,15 @@ export async function registrarEnvaseCaixasComBalde(
     throw new Error('Há códigos duplicados na lista de baldes.');
   }
 
-  if (!Number.isInteger(baldesPorCaixa) || baldesPorCaixa < 1) {
-    throw new Error('«Baldes por caixa» deve ser um número inteiro ≥ 1.');
+  if (!Number.isInteger(numCaixas) || numCaixas < 1) {
+    throw new Error('Informe quantas caixas saíram (número inteiro ≥ 1).');
   }
 
-  if (itemIdsBalde.length % baldesPorCaixa !== 0) {
-    throw new Error(
-      `Quantidade de baldes (${itemIdsBalde.length}) não é múltipla de «baldes por caixa» (${baldesPorCaixa}). Ajuste os bips ou a proporção.`
-    );
+  if (!Number.isInteger(baldesReferencia) || baldesReferencia < 1) {
+    throw new Error('Referência de baldes inválida.');
+  }
+  if (!Number.isInteger(caixasReferencia) || caixasReferencia < 1) {
+    throw new Error('Referência de caixas inválida.');
   }
 
   if (!Number.isInteger(diasValidade) || diasValidade < 1) {
@@ -168,7 +182,14 @@ export async function registrarEnvaseCaixasComBalde(
   }
 
   const dataValidadeCalculada = calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos(diasValidade);
-  const numCaixas = itemIdsBalde.length / baldesPorCaixa;
+  const caixasEsperadas = calcularCaixasEsperadasEnvase(
+    itemIdsBalde.length,
+    baldesReferencia,
+    caixasReferencia
+  );
+
+  const notaMedia = `Média ${baldesReferencia} baldes → ${caixasReferencia} caixas. Esperado: ${caixasEsperadas}. Informado: ${numCaixas}.`;
+  const observacoesFinal = [observacoes?.trim(), notaMedia].filter(Boolean).join(' | ') || null;
 
   const { data: rpcNumero, error: rpcLoteErr } = await supabase.rpc('reservar_numero_lote_producao', {
     p_produto_id: produtoCaixaId,
@@ -191,10 +212,10 @@ export async function registrarEnvaseCaixasComBalde(
     num_baldes: numCaixas,
     local_id: localId,
     responsavel: responsavelNome,
-    observacoes: observacoes?.trim() || null,
+    observacoes: observacoesFinal,
     tipo: 'ENVASE_CAIXA' as const,
     envase_produto_balde_id: produtoBaldeId,
-    envase_baldes_por_caixa: baldesPorCaixa,
+    envase_baldes_por_caixa: baldesReferencia,
   };
 
   const { data: producaoRow, error: producaoErr } = await supabase
@@ -298,7 +319,10 @@ export async function registrarEnvaseCaixasComBalde(
       producao_id: producaoId,
       produto_caixa_id: produtoCaixaId,
       produto_balde_id: produtoBaldeId,
-      baldes_por_caixa: baldesPorCaixa,
+      baldes_referencia: baldesReferencia,
+      caixas_referencia: caixasReferencia,
+      caixas_esperadas: caixasEsperadas,
+      caixas_informadas: numCaixas,
       num_caixas: numCaixas,
       num_baldes_consumidos: itemIdsBalde.length,
       numero_lote_producao: numeroLoteProducao,
@@ -312,7 +336,9 @@ export async function registrarEnvaseCaixasComBalde(
     numeroLoteProducao,
     numCaixas,
     numBaldesConsumidos: itemIdsBalde.length,
-    baldesPorCaixa,
+    caixasEsperadas,
+    baldesReferencia,
+    caixasReferencia,
     produtoCaixaId,
     produtoBaldeId,
     etiquetas: itensGerados.map((item, idx) => ({
