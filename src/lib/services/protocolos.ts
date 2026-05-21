@@ -32,7 +32,10 @@ export interface Protocolo {
   gerente_id: string | null;
   motivo_recusa: string | null;
   observacao_fechamento: string | null;
+  /** DEPRECATED: registros antigos podem ter só esta coluna. Use `foto_paths`. */
   foto_path: string | null;
+  /** Até 3 fotos por protocolo (paths no bucket privado `protocolos-fotos`). */
+  foto_paths: string[];
   reaberto_de: string | null;
   created_at: string;
   aceito_em: string | null;
@@ -91,7 +94,7 @@ export function eGestao(perfil: PerfilUsuario): boolean {
 
 const SELECT_LISTA = `
   id, numero, titulo, descricao, local_id, prioridade, status, responsavel_externo,
-  aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, reaberto_de,
+  aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, foto_paths, reaberto_de,
   created_at, aceito_em, iniciado_em, concluido_em, fechado_em,
   autor:usuarios!aberto_por(id, nome),
   gerente:usuarios!gerente_id(id, nome),
@@ -196,10 +199,25 @@ export interface AbrirProtocoloInput {
   /** Se vier de operador é ignorado e gravado como MEDIA — só a secretaria define urgência. */
   prioridade?: Prioridade;
   local_id: string | null;
+  /** Até 3 fotos. Se vier `foto_path` legado, ele é movido para a primeira posição. */
+  foto_paths?: string[] | null;
+  /** DEPRECATED: use `foto_paths`. Mantido só pra não quebrar chamadas antigas. */
   foto_path?: string | null;
   aberto_por: string;
   perfil: PerfilUsuario;
   reaberto_de?: string | null;
+}
+
+const MAX_FOTOS_PROTOCOLO = 3;
+
+/** Normaliza qualquer combinação de `foto_paths` + `foto_path` (legado) em um array com no máximo 3. */
+function resolverFotoPaths(input: AbrirProtocoloInput): string[] {
+  const arr = (input.foto_paths ?? []).filter((p): p is string => !!p && typeof p === 'string');
+  if (arr.length === 0 && input.foto_path) arr.push(input.foto_path);
+  if (arr.length > MAX_FOTOS_PROTOCOLO) {
+    throw new Error(`Máximo de ${MAX_FOTOS_PROTOCOLO} fotos por pedido.`);
+  }
+  return arr;
 }
 
 export async function abrirProtocolo(input: AbrirProtocoloInput): Promise<Protocolo> {
@@ -208,6 +226,8 @@ export async function abrirProtocolo(input: AbrirProtocoloInput): Promise<Protoc
   if (!titulo) throw new Error('Faltou contar o que aconteceu (resumo curto).');
   if (titulo.length > 80) throw new Error('Resumo curto deve ter no máximo 80 caracteres.');
   if (!descricao) throw new Error('Faltou descrever os detalhes do que aconteceu.');
+
+  const fotoPaths = resolverFotoPaths(input);
 
   const ehGestao = eGestao(input.perfil);
   let prioridadeFinal: Prioridade = 'MEDIA';
@@ -236,7 +256,8 @@ export async function abrirProtocolo(input: AbrirProtocoloInput): Promise<Protoc
       descricao,
       prioridade: prioridadeFinal,
       local_id: localFinal,
-      foto_path: input.foto_path ?? null,
+      foto_path: fotoPaths[0] ?? null,
+      foto_paths: fotoPaths,
       aberto_por: input.aberto_por,
       reaberto_de: input.reaberto_de ?? null,
     })
@@ -254,7 +275,7 @@ export async function abrirProtocolo(input: AbrirProtocoloInput): Promise<Protoc
       prioridade: prioridadeFinal,
       por_gestao: ehGestao,
       titulo,
-      tem_foto: !!input.foto_path,
+      qtd_fotos: fotoPaths.length,
     },
   });
 
@@ -724,6 +745,8 @@ export async function abrirProtocoloComClient(
   if (!titulo || titulo.length > 80) throw new Error('Resumo curto inválido.');
   if (!descricao) throw new Error('Detalhes obrigatórios.');
 
+  const fotoPaths = resolverFotoPaths(input);
+
   const ehGestao = eGestao(input.perfil);
   let prioridadeFinal: Prioridade = 'MEDIA';
   if (ehGestao && input.prioridade) {
@@ -751,7 +774,8 @@ export async function abrirProtocoloComClient(
       descricao,
       prioridade: prioridadeFinal,
       local_id: localFinal,
-      foto_path: input.foto_path ?? null,
+      foto_path: fotoPaths[0] ?? null,
+      foto_paths: fotoPaths,
       aberto_por: input.aberto_por,
       reaberto_de: input.reaberto_de ?? null,
     })
@@ -770,7 +794,7 @@ export async function abrirProtocoloComClient(
         prioridade: prioridadeFinal,
         por_gestao: ehGestao,
         titulo,
-        tem_foto: !!input.foto_path,
+        qtd_fotos: fotoPaths.length,
       },
     },
     client

@@ -49,7 +49,7 @@ export async function POST(req: Request) {
 
     const { data: protocolo, error: pErr } = await admin
       .from('protocolos')
-      .select('id, numero, titulo, status, prioridade, aberto_por, local_id, foto_path, created_at')
+      .select('id, numero, titulo, status, prioridade, aberto_por, local_id, foto_path, foto_paths, created_at')
       .eq('id', protocoloId)
       .maybeSingle();
 
@@ -67,13 +67,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Falha ao excluir o pedido' }, { status: 500 });
     }
 
-    if (protocolo.foto_path) {
+    /** União para cobrir registros antigos (`foto_path`) + multi-foto (`foto_paths`). */
+    const fotosParaRemover = Array.from(
+      new Set<string>(
+        [...((protocolo.foto_paths as string[] | null) || []), protocolo.foto_path].filter(
+          (p): p is string => !!p
+        )
+      )
+    );
+    if (fotosParaRemover.length > 0) {
       const { error: storageErr } = await admin.storage
         .from('protocolos-fotos')
-        .remove([protocolo.foto_path]);
+        .remove(fotosParaRemover);
       if (storageErr) {
-        // Não bloqueia: o registro principal já foi removido e a foto fica órfã (snapshot na auditoria).
-        console.warn('Foto do protocolo não pôde ser removida do bucket:', storageErr);
+        // Não bloqueia: o registro principal já foi removido e fotos viram órfãs (snapshot na auditoria).
+        console.warn('Fotos do protocolo não puderam ser removidas do bucket:', storageErr);
       }
     }
 
@@ -89,8 +97,8 @@ export async function POST(req: Request) {
           status: protocolo.status,
           prioridade: protocolo.prioridade,
           aberto_por: protocolo.aberto_por,
-          tinha_foto: !!protocolo.foto_path,
-          foto_path: protocolo.foto_path,
+          qtd_fotos: fotosParaRemover.length,
+          foto_paths: fotosParaRemover,
           created_at: protocolo.created_at,
         },
       },

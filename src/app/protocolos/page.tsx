@@ -7,7 +7,6 @@ import {
   MapPin,
   Camera,
   X,
-  RefreshCw,
   AlertTriangle,
   Clock,
   Wrench,
@@ -583,11 +582,16 @@ function CardProtocolo({
             </span>
             <span>Aberto há {formatarTempoDesde(p.created_at)}</span>
             {ehGestao && p.autor?.nome && <span>por {p.autor.nome}</span>}
-            {p.foto_path && (
-              <span className="inline-flex items-center gap-1 text-gray-400">
-                <ImageIcon className="w-3 h-3" /> foto
-              </span>
-            )}
+            {(() => {
+              const qtdFotos = (p.foto_paths?.length ?? 0) || (p.foto_path ? 1 : 0);
+              if (qtdFotos === 0) return null;
+              return (
+                <span className="inline-flex items-center gap-1 text-gray-400">
+                  <ImageIcon className="w-3 h-3" />
+                  {qtdFotos > 1 ? `${qtdFotos} fotos` : 'foto'}
+                </span>
+              );
+            })()}
           </div>
           {(atrasadoAceitar || atrasadoFechar) && (
             <div className="mt-2 flex flex-wrap gap-2">
@@ -630,6 +634,13 @@ interface ModalAbrirProps {
   onCriou: () => void | Promise<void>;
 }
 
+const MAX_FOTOS_PEDIDO = 3;
+
+interface FotoPedido {
+  arquivo: File;
+  previewUrl: string;
+}
+
 function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: ModalAbrirProps) {
   const { usuario } = useAuth();
   const [titulo, setTitulo] = useState('');
@@ -637,8 +648,8 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
   // Operador NÃO escolhe prioridade (a secretaria define depois). Gestão pode escolher na hora.
   const [prioridade, setPrioridade] = useState<Prioridade>('MEDIA');
   const [localId, setLocalId] = useState<string>('');
-  const [arquivo, setArquivo] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  /** Até 3 fotos. Cada item carrega o `File` original (será comprimido no envio) + preview blob URL. */
+  const [fotos, setFotos] = useState<FotoPedido[]>([]);
   const [enviando, setEnviando] = useState(false);
 
   const inputCameraRef = useRef<HTMLInputElement | null>(null);
@@ -646,28 +657,40 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
 
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      for (const f of fotos) URL.revokeObjectURL(f.previewUrl);
     };
-  }, [previewUrl]);
+    // Limpa todos os blobs ao desmontar (`fotos` mudou). Cobertura por slot é feita em `removerFoto`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!usuario) return null;
 
-  const trocarFoto = (file: File | null) => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    if (file) {
-      setArquivo(file);
-      setPreviewUrl(URL.createObjectURL(file));
-    } else {
-      setArquivo(null);
-      setPreviewUrl(null);
+  const adicionarFoto = (file: File | null) => {
+    if (!file) return;
+    if (fotos.length >= MAX_FOTOS_PEDIDO) {
+      alert(`Máximo de ${MAX_FOTOS_PEDIDO} fotos por pedido.`);
+      return;
     }
+    if (!file.type.startsWith('image/')) {
+      alert('Selecione uma imagem (JPG, PNG ou WebP).');
+      return;
+    }
+    setFotos((prev) => [...prev, { arquivo: file, previewUrl: URL.createObjectURL(file) }]);
     // Permite selecionar o mesmo arquivo de novo (`change` não dispara em mesma file).
     if (inputCameraRef.current) inputCameraRef.current.value = '';
     if (inputGaleriaRef.current) inputGaleriaRef.current.value = '';
   };
 
+  const removerFoto = (idx: number) => {
+    setFotos((prev) => {
+      const alvo = prev[idx];
+      if (alvo) URL.revokeObjectURL(alvo.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
   const onInputArquivoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    trocarFoto(e.target.files?.[0] || null);
+    adicionarFoto(e.target.files?.[0] || null);
   };
 
   const abrirCamera = () => {
@@ -693,8 +716,8 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
 
     setEnviando(true);
     try {
-      let fotoPath: string | null = null;
-      if (arquivo) {
+      const fotoPaths: string[] = [];
+      if (fotos.length > 0) {
         const loginOp = usuario.login_operacional?.trim() || '';
         if (!loginOp) {
           alert(
@@ -710,26 +733,29 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
           return;
         }
 
-        const comprimida = await comprimirFotoProtocolo(arquivo);
-        const res = await fetch('/api/operacional/upload-protocolo-foto', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            login: loginOp,
-            senha,
-            imageBase64: comprimida.base64,
-            mimeType: comprimida.mimeType,
-          }),
-        });
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          detalhe?: string;
-          path?: string;
-        };
-        if (!res.ok || !body.path) {
-          throw new Error(body.error || 'Não consegui enviar a foto agora, tenta de novo.');
+        // Upload sequencial — mais simples de mostrar progresso e tratar erro do que paralelo.
+        for (const foto of fotos) {
+          const comprimida = await comprimirFotoProtocolo(foto.arquivo);
+          const res = await fetch('/api/operacional/upload-protocolo-foto', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              login: loginOp,
+              senha,
+              imageBase64: comprimida.base64,
+              mimeType: comprimida.mimeType,
+            }),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            detalhe?: string;
+            path?: string;
+          };
+          if (!res.ok || !body.path) {
+            throw new Error(body.error || 'Não consegui enviar uma das fotos agora, tenta de novo.');
+          }
+          fotoPaths.push(body.path);
         }
-        fotoPath = body.path;
       }
 
       const localFinal = ehGestao ? (localId || null) : null;
@@ -739,7 +765,7 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
         descricao: descricao.trim(),
         prioridade: ehGestao ? prioridade : undefined,
         local_id: localFinal,
-        foto_path: fotoPath,
+        foto_paths: fotoPaths,
         aberto_por: usuario.id,
         perfil: usuario.perfil,
       });
@@ -826,7 +852,7 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Tem foto? <span className="text-gray-400 font-normal">(opcional)</span>
+            Fotos <span className="text-gray-400 font-normal">(até {MAX_FOTOS_PEDIDO}, opcional)</span>
           </label>
 
           <input
@@ -845,14 +871,44 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
             onChange={onInputArquivoChange}
           />
 
-          {!previewUrl ? (
+          {fotos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {fotos.map((f, idx) => (
+                <div
+                  key={`${f.previewUrl}-${idx}`}
+                  className="relative aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={f.previewUrl}
+                    alt={`Foto ${idx + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removerFoto(idx)}
+                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-white/90 hover:bg-white text-red-600 shadow inline-flex items-center justify-center"
+                    aria-label={`Remover foto ${idx + 1}`}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-medium text-white">
+                    {idx + 1}/{MAX_FOTOS_PEDIDO}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {fotos.length < MAX_FOTOS_PEDIDO ? (
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={abrirCamera}
                 className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl text-gray-600 inline-flex items-center justify-center gap-2 hover:border-red-400 hover:text-red-500 touch-manipulation"
               >
-                <Camera className="w-5 h-5" /> Tirar foto
+                <Camera className="w-5 h-5" />{' '}
+                {fotos.length === 0 ? 'Tirar foto' : `Tirar mais uma (${fotos.length}/${MAX_FOTOS_PEDIDO})`}
               </button>
               <button
                 type="button"
@@ -863,30 +919,9 @@ function ModalAbrirProtocolo({ isOpen, onClose, locais, ehGestao, onCriou }: Mod
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={previewUrl}
-                alt="Foto"
-                className="w-full max-h-72 object-contain rounded-xl border border-gray-200"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={abrirCamera}
-                  className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-700 text-sm inline-flex items-center justify-center gap-1 hover:bg-gray-50 touch-manipulation"
-                >
-                  <RefreshCw className="w-4 h-4" /> Outra foto
-                </button>
-                <button
-                  type="button"
-                  onClick={() => trocarFoto(null)}
-                  className="flex-1 py-2 border border-red-300 text-red-600 rounded-lg text-sm inline-flex items-center justify-center gap-1 hover:bg-red-50 touch-manipulation"
-                >
-                  <Trash2 className="w-4 h-4" /> Remover
-                </button>
-              </div>
-            </div>
+            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+              Limite de {MAX_FOTOS_PEDIDO} fotos atingido. Remova uma para trocar.
+            </p>
           )}
         </div>
 
@@ -935,7 +970,9 @@ function ModalDetalheProtocolo({
   const { usuario } = useAuth();
   const [protocolo, setProtocolo] = useState<ProtocoloComEmbed | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntrada[]>([]);
-  const [fotoUrl, setFotoUrl] = useState<string | null>(null);
+  /** URLs assinadas das fotos, na mesma ordem de `protocolo.foto_paths`. */
+  const [fotosUrls, setFotosUrls] = useState<string[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [comentario, setComentario] = useState('');
   const [acaoEmAndamento, setAcaoEmAndamento] = useState(false);
 
@@ -1010,26 +1047,57 @@ function ModalDetalheProtocolo({
     };
   }, [protocoloId, carregar]);
 
+  /** Caminhos efetivos: usa `foto_paths` (novo) e cai em `foto_path` (legado) se array vier vazio. */
+  const fotosPaths = useMemo<string[]>(() => {
+    if (!protocolo) return [];
+    const arr = (protocolo.foto_paths || []).filter((p): p is string => !!p);
+    if (arr.length > 0) return arr;
+    return protocolo.foto_path ? [protocolo.foto_path] : [];
+  }, [protocolo]);
+
   useEffect(() => {
-    if (!protocolo?.foto_path) {
-      setFotoUrl(null);
+    if (fotosPaths.length === 0) {
+      setFotosUrls([]);
       return;
     }
     let cancelado = false;
-    fetch('/api/operacional/foto-protocolo-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: protocolo.foto_path }),
-    })
-      .then(async (r) => {
+    Promise.all(
+      fotosPaths.map(async (path) => {
+        const r = await fetch('/api/operacional/foto-protocolo-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+        });
         const j = (await r.json().catch(() => ({}))) as { url?: string };
-        if (!cancelado && j.url) setFotoUrl(j.url);
+        return j.url ?? '';
+      })
+    )
+      .then((urls) => {
+        if (!cancelado) setFotosUrls(urls.filter(Boolean));
       })
       .catch(() => {});
     return () => {
       cancelado = true;
     };
-  }, [protocolo?.foto_path]);
+  }, [fotosPaths]);
+
+  /** Fecha o lightbox com Esc; ‹/› navega entre fotos quando há mais de uma. */
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxIndex(null);
+      if (e.key === 'ArrowRight' && fotosUrls.length > 0) {
+        setLightboxIndex((i) => (i === null ? 0 : (i + 1) % fotosUrls.length));
+      }
+      if (e.key === 'ArrowLeft' && fotosUrls.length > 0) {
+        setLightboxIndex((i) =>
+          i === null ? 0 : (i - 1 + fotosUrls.length) % fotosUrls.length
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxIndex, fotosUrls.length]);
 
   if (!usuario || !protocolo) {
     return (
@@ -1307,13 +1375,101 @@ function ModalDetalheProtocolo({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Pedido #${p.numero}`} size="xl">
       <div className="p-5 space-y-4">
-        {fotoUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={fotoUrl}
-            alt="Foto do problema"
-            className="w-full max-h-80 object-contain rounded-xl border border-gray-200 bg-gray-50"
-          />
+        {fotosUrls.length > 0 && (
+          <div
+            className={
+              fotosUrls.length === 1
+                ? 'grid grid-cols-1'
+                : 'grid grid-cols-2 sm:grid-cols-3 gap-2'
+            }
+          >
+            {fotosUrls.map((url, idx) => (
+              <button
+                key={url}
+                type="button"
+                onClick={() => setLightboxIndex(idx)}
+                className={
+                  fotosUrls.length === 1
+                    ? 'block w-full rounded-xl border border-gray-200 bg-gray-50 overflow-hidden hover:opacity-90 transition'
+                    : 'relative aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden hover:opacity-90 transition'
+                }
+                aria-label={`Abrir foto ${idx + 1} em tamanho real`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`Foto ${idx + 1} do problema`}
+                  className={
+                    fotosUrls.length === 1
+                      ? 'w-full max-h-80 object-contain'
+                      : 'w-full h-full object-cover'
+                  }
+                />
+                {fotosUrls.length > 1 && (
+                  <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-medium text-white">
+                    {idx + 1}/{fotosUrls.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {lightboxIndex !== null && fotosUrls[lightboxIndex] && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center"
+            onClick={() => setLightboxIndex(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Foto em tamanho real"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={fotosUrls[lightboxIndex]}
+              alt={`Foto ${lightboxIndex + 1} em tamanho real`}
+              className="max-w-[95vw] max-h-[90vh] object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setLightboxIndex(null)}
+              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 hover:bg-white text-gray-900 inline-flex items-center justify-center"
+              aria-label="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            {fotosUrls.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxIndex(
+                      (lightboxIndex - 1 + fotosUrls.length) % fotosUrls.length
+                    );
+                  }}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/90 hover:bg-white text-gray-900 inline-flex items-center justify-center text-xl"
+                  aria-label="Foto anterior"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxIndex((lightboxIndex + 1) % fotosUrls.length);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/90 hover:bg-white text-gray-900 inline-flex items-center justify-center text-xl"
+                  aria-label="Próxima foto"
+                >
+                  ›
+                </button>
+                <span className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/90 text-xs font-medium text-gray-900">
+                  {lightboxIndex + 1} / {fotosUrls.length}
+                </span>
+              </>
+            )}
+          </div>
         )}
 
         <div className="flex flex-wrap items-center gap-2">
