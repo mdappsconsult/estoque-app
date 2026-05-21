@@ -39,3 +39,11 @@ Ao finalizar qualquer tarefa relevante neste projeto, atualize os dois arquivos:
 - Escrever em português claro.
 - Evitar texto longo; usar bullets curtos.
 - Não duplicar histórico no contexto atual.
+
+## Commits
+
+- **Agrupar doc no MESMO commit do código** que originou a mudança.
+  - Atualizar `CONTEXTO_ATUAL.md` e `LOG_SESSOES.md` antes do `git commit` final.
+  - **Evitar** commit isolado «docs(log): atualizar LOG» depois do push do código — cada push em `main` dispara um deploy no Railway (~2 min) que não muda o app.
+  - Se já comitou o código e depois precisou ajustar só doc, considere `git commit --amend` (apenas se o commit ainda **não** foi pushed para `main`, conforme regra de segurança do projeto). Caso contrário, deixar para a próxima mudança real.
+- Não introduzir commits «só de processo» (renomes triviais, espaços em branco) entre o último commit funcional e o próximo trabalho real.

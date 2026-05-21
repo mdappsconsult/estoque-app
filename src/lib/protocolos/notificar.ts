@@ -1,6 +1,6 @@
 'use client';
 
-import { getSenhaOperacionalSession, getUsuarioLogado } from '@/lib/auth';
+import { getUsuarioLogado } from '@/lib/auth';
 
 export type AcaoNotificavel =
   | 'ABRIU'
@@ -15,6 +15,11 @@ export type AcaoNotificavel =
 /**
  * Dispara push em fire-and-forget após uma mutação bem-sucedida em protocolos.
  * Não bloqueia a UI: se a rede falhar, registra no console e segue.
+ *
+ * Autenticação: somente `usuarioId` do localStorage. O servidor valida que
+ * esse usuário existe/ativo e tem relação com o protocolo (autor ou gestão).
+ * Não depende mais da senha operacional do `sessionStorage` — antes, qualquer
+ * aba reaberta perdia a senha e o disparo ficava silenciosamente em "no-op".
  */
 export function notificarProtocoloEmBackground(
   protocoloId: string,
@@ -23,9 +28,8 @@ export function notificarProtocoloEmBackground(
 ): void {
   if (typeof window === 'undefined') return;
   const usuario = getUsuarioLogado();
-  const senha = getSenhaOperacionalSession();
-  const loginOp = usuario?.login_operacional?.trim() || '';
-  if (!loginOp || !senha) {
+  if (!usuario?.id) {
+    console.warn('[push] sem usuário logado, ignorando disparo de', acao, protocoloId);
     return;
   }
   void fetch('/api/push/disparar-protocolo', {
@@ -33,8 +37,7 @@ export function notificarProtocoloEmBackground(
     headers: { 'Content-Type': 'application/json' },
     keepalive: true,
     body: JSON.stringify({
-      login: loginOp,
-      senha,
+      usuarioId: usuario.id,
       protocoloId,
       acao,
       detalhe: detalhe ?? null,

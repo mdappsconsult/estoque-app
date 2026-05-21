@@ -1,5 +1,18 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Push de protocolo não chegava: tirada a dependência de senha operacional
+- **Sintoma:** Marco (ADMIN_MASTER) instalou PWA no iPhone e ativou notificações, mas quando Leonardo (operador) abriu um pedido pelo Mac, o iPhone do Marco bloqueado em cima da mesa **não tocou**.
+- **Diagnóstico (SQL + Railway):**
+  - `push_subscriptions` continha as inscrições do Marco (iPhone) e do Leonardo (Mac); Ludi (MANAGER) e Kim (ADMIN_MASTER) ainda **não inscritos**.
+  - Auditoria do pedido #2 confirmou `ABRIR_PROTOCOLO` por Leonardo, mas `railway logs` do app não mostrava nenhuma chamada a `/api/push/disparar-protocolo` (sem `[push] dispatch`/`error`).
+  - **Causa raiz:** `notificarProtocoloEmBackground` exigia `getSenhaOperacionalSession()` (sessionStorage). Como a sessionStorage some quando a aba é fechada, o Leonardo (com aba reaberta) tinha senha vazia e a função saía **silenciosamente** (`return` sem log). Resultado: zero chamadas no servidor.
+- **Correção:**
+  - **Cliente** (`src/lib/protocolos/notificar.ts`): manda só `usuarioId` (do `localStorage` via `getUsuarioLogado()`). Sem senha. Loga `console.warn` se não houver usuário.
+  - **API** (`src/app/api/push/disparar-protocolo`): autentica pelo `usuarioId`, valida que o usuário existe e está ativo, e exige relação com o pedido (autor, gerente ou perfil de gestão). Adiciona logs `[push] dispatch` e `[push] result` para visibilidade no `railway logs`.
+  - **Inscrever/cancelar push** continuam exigindo senha operacional — esse fluxo só roda no ato do «Ativar avisos», onde a senha está fresca.
+- **Trade-off de segurança:** qualquer usuário ativo do app pode forçar o disparo de push para um pedido que ele possa enxergar. Para uso interno com poucos usuários, é aceitável. Caso evolua, mover insert do protocolo para uma rota servidor que dispare push internamente.
+- **Validação:** próxima abertura de pedido por Leonardo deve aparecer em `railway logs` como `[push] dispatch …` e Marco deve receber o popup.
+
 ### Sessão - 2026-05-21 - Deploy do push: build no Railway falhou por `@types/web-push` ausente
 - **Sintoma:** push do commit `82c911b` → deploy `1e49c495` Railway **FAILED**.
 - **Erro do build (`railway logs --build`):** `./src/lib/push/servidor.ts:1:21 — Could not find a declaration file for module 'web-push'.`

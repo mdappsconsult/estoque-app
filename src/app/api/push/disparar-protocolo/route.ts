@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseAdmin } from '@/lib/supabase/admin';
-import { validarCredencialOperacional } from '@/lib/services/operacional-auth-server';
 import { enviarPushParaUsuarios, type PayloadPush } from '@/lib/push/servidor';
 import { errMessage } from '@/lib/errMessage';
 import type { PerfilUsuario } from '@/types/database';
@@ -20,8 +19,7 @@ type AcaoProtocolo =
   | 'MUDOU_PRIORIDADE';
 
 type Body = {
-  login?: string;
-  senha?: string;
+  usuarioId?: string;
   protocoloId?: string;
   acao?: AcaoProtocolo;
   /** Texto extra (ex.: comentário, motivo, prioridade nova). */
@@ -30,16 +28,6 @@ type Body = {
 
 const PERFIS_GESTAO: PerfilUsuario[] = ['MANAGER', 'ADMIN_MASTER'];
 
-/**
- * Calcula destinatários de cada ação:
- * - ABRIU: toda gestão (MANAGER + ADMIN_MASTER) ativa.
- * - ACEITOU/RECUSOU/INICIOU/MUDOU_PRIORIDADE: autor do protocolo (se houver).
- * - CONCLUIU: autor + toda gestão (alguém precisa fechar; secretaria precisa saber).
- * - FECHOU: autor.
- * - COMENTOU: "o outro lado" → se quem comentou é gestão, autor recebe;
- *             se quem comentou é operador, toda gestão recebe.
- * Sempre remove `acaoUsuarioId` para não notificar quem disparou.
- */
 async function destinatarios(
   admin: ReturnType<typeof createSupabaseAdmin>,
   protocolo: { aberto_por: string; gerente_id: string | null },
@@ -164,23 +152,49 @@ function montarPayload(
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
-    const auth = await validarCredencialOperacional(body.login ?? '', body.senha ?? '');
-    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
+    const usuarioId = (body.usuarioId || '').trim();
     const protocoloId = (body.protocoloId || '').trim();
     const acao = body.acao;
-    if (!protocoloId || !acao) {
-      return NextResponse.json({ error: 'protocoloId e acao são obrigatórios.' }, { status: 400 });
+    if (!usuarioId || !protocoloId || !acao) {
+      return NextResponse.json(
+        { error: 'usuarioId, protocoloId e acao são obrigatórios.' },
+        { status: 400 }
+      );
     }
 
     const admin = createSupabaseAdmin();
+
+    // Valida que quem disparou existe e está ativo (sem isso é spam aberto).
+    const { data: ator } = await admin
+      .from('usuarios')
+      .select('id, nome, perfil, status')
+      .eq('id', usuarioId)
+      .maybeSingle();
+    if (!ator || ator.status !== 'ativo') {
+      console.warn('[push] disparo recusado: usuario invalido ou inativo', { usuarioId });
+      return NextResponse.json({ error: 'Usuário inválido.' }, { status: 401 });
+    }
+
     const { data: p, error } = await admin
       .from('protocolos')
       .select('id, numero, titulo, prioridade, status, aberto_por, gerente_id, local:locais(nome)')
       .eq('id', protocoloId)
       .maybeSingle();
     if (error || !p) {
+      console.warn('[push] protocolo nao encontrado', { protocoloId, error });
       return NextResponse.json({ error: 'Protocolo não encontrado.' }, { status: 404 });
+    }
+
+    // Bloqueio mínimo de spam: só o autor, o gerente ou alguém de gestão pode disparar.
+    const ehGestao = PERFIS_GESTAO.includes(ator.perfil as PerfilUsuario);
+    const ehAutor = p.aberto_por === usuarioId;
+    const ehGerente = !!p.gerente_id && p.gerente_id === usuarioId;
+    if (!ehGestao && !ehAutor && !ehGerente) {
+      console.warn('[push] disparo recusado: sem relacao com protocolo', {
+        usuarioId,
+        protocoloId,
+      });
+      return NextResponse.json({ error: 'Sem permissão para esse pedido.' }, { status: 403 });
     }
 
     const localNome =
@@ -191,8 +205,8 @@ export async function POST(req: Request) {
       admin,
       { aberto_por: p.aberto_por as string, gerente_id: (p.gerente_id as string) || null },
       acao,
-      auth.usuario.id,
-      auth.usuario.perfil
+      ator.id as string,
+      ator.perfil as PerfilUsuario
     );
 
     const payload = montarPayload(
@@ -204,13 +218,29 @@ export async function POST(req: Request) {
         status: String(p.status),
         local_nome: localNome,
       },
-      auth.usuario.nome || 'Alguém',
+      String(ator.nome || 'Alguém'),
       body.detalhe ?? null
     );
 
+    console.log('[push] dispatch', {
+      acao,
+      protocolo: p.numero,
+      ator: ator.nome,
+      destinatarios: dest.length,
+    });
+
     const r = await enviarPushParaUsuarios(dest, payload);
+
+    console.log('[push] result', {
+      acao,
+      protocolo: p.numero,
+      ...r,
+      destinatarios: dest.length,
+    });
+
     return NextResponse.json({ ok: true, ...r, destinatarios: dest.length });
   } catch (e) {
+    console.error('[push] erro inesperado', e);
     return NextResponse.json({ error: errMessage(e, 'Falha ao disparar push') }, { status: 500 });
   }
 }
