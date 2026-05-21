@@ -1,5 +1,14 @@
 import { Usuario } from '@/types/database';
 
+/**
+ * Perfis cujo escopo natural é a loja `local_padrao_id`: aparecem em filtros de recebimento,
+ * estoque etc. Inclui o **Ajudante de recebimento** (`RECEIVING_ASSIST`), que só usa `/recebimento`
+ * mas precisa do mesmo filtro de loja para enxergar apenas remessas do destino dele.
+ */
+export function perfilEscopoLojaDestino(perfil: Usuario['perfil'] | undefined | null): boolean {
+  return perfil === 'OPERATOR_STORE' || perfil === 'RECEIVING_ASSIST';
+}
+
 /** Escopo da tela Validades: loja, indústria (local padrão) ou visão consolidada (gerência). */
 export type EscopoValidades =
   | { tipo: 'local'; localId: string; contexto: 'loja' | 'industria' }
@@ -44,11 +53,12 @@ export function escopoValidadesPorPerfil(usuario: Usuario | null): EscopoValidad
 }
 
 /**
- * UUID da loja (`STORE`) quando o usuário é operador de loja com `local_padrao_id`.
- * Usado para escopo único em estoque, recebimento, validades etc. — nunca listar indústria/outras lojas.
+ * UUID da loja (`STORE`) quando o usuário é operador de loja / ajudante de recebimento com
+ * `local_padrao_id`. Usado para escopo único em estoque, recebimento, validades etc. — nunca listar
+ * indústria/outras lojas.
  */
 export function idLocalLojaOperadora(usuario: Usuario | null): string | null {
-  if (usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id) {
+  if (usuario && perfilEscopoLojaDestino(usuario.perfil) && usuario.local_padrao_id) {
     return usuario.local_padrao_id;
   }
   return null;
@@ -58,7 +68,7 @@ export function idLocalLojaOperadora(usuario: Usuario | null): string | null {
 export function filtrarItensPorLojaOperadora<
   T extends { local_atual_id: string | null },
 >(itens: T[], usuario: Usuario | null): T[] {
-  if (usuario?.perfil !== 'OPERATOR_STORE') {
+  if (!perfilEscopoLojaDestino(usuario?.perfil)) {
     return itens;
   }
   const L = idLocalLojaOperadora(usuario);
@@ -69,14 +79,15 @@ export function filtrarItensPorLojaOperadora<
 }
 
 /**
- * Recebimento: operadora de loja só vê transferências IN_TRANSIT cujo destino é a própria loja.
- * Sem `local_padrao_id` não mostra nada (evita vazar entregas de outras lojas por sessão antiga/cadastro incompleto).
+ * Recebimento: operador de loja / ajudante de recebimento só vê transferências IN_TRANSIT cujo
+ * destino é a própria loja. Sem `local_padrao_id` não mostra nada (evita vazar entregas de outras
+ * lojas por sessão antiga/cadastro incompleto).
  */
 export function filtrarRecebimentoPorLoja<T extends { destino_id: string }>(
   transferencias: T[],
   usuario: Usuario | null
 ): T[] {
-  if (!usuario || usuario.perfil !== 'OPERATOR_STORE') {
+  if (!usuario || !perfilEscopoLojaDestino(usuario.perfil)) {
     return transferencias;
   }
   if (!usuario.local_padrao_id) {
@@ -107,7 +118,7 @@ export function transferenciaDisponivelParaRecebimento<
 export function filtrarRemessasMatrizAguardandoMotorista<
   T extends { destino_id: string; status: string; tipo: string },
 >(transferencias: T[], usuario: Usuario | null): T[] {
-  if (!usuario || usuario.perfil !== 'OPERATOR_STORE' || !usuario.local_padrao_id) {
+  if (!usuario || !perfilEscopoLojaDestino(usuario.perfil) || !usuario.local_padrao_id) {
     return [];
   }
   const L = usuario.local_padrao_id;

@@ -16,6 +16,7 @@ const perfilLabel: Record<string, string> = {
   OPERATOR_WAREHOUSE: 'Operador Indústria',
   OPERATOR_WAREHOUSE_DRIVER: 'Indústria + motorista',
   OPERATOR_STORE: 'Operador Loja',
+  RECEIVING_ASSIST: 'Ajudante de recebimento',
   DRIVER: 'Motorista',
 };
 

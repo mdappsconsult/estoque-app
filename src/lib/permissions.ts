@@ -3,7 +3,7 @@ import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usu
 
 // Mapa padrão rota -> perfis permitidos (usado como base e fallback)
 export const ROUTE_PERMISSIONS: Record<string, string[]> = {
-  '/': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
+  '/': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'RECEIVING_ASSIST', 'DRIVER'],
   '/login': ['*'],
   '/qrcode': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
   '/entrada-compra': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
@@ -22,7 +22,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/envio-direto-producao': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/viagem-aceite': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'DRIVER', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/acompanhamento-viagens': ['ADMIN_MASTER', 'MANAGER'],
-  '/recebimento': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE'],
+  '/recebimento': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE', 'RECEIVING_ASSIST'],
   '/transferencia-loja': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE'],
   '/baixa-diaria': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE'],
   '/perdas': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE'],
@@ -42,7 +42,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/cadastros/locais': ['ADMIN_MASTER', 'MANAGER'],
   '/cadastros/usuarios': ['ADMIN_MASTER'],
   '/contagem-loja': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_STORE'],
-  '/configuracoes/perfil': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
+  '/configuracoes/perfil': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'RECEIVING_ASSIST', 'DRIVER'],
   '/configuracoes/impressoras': ['ADMIN_MASTER', 'MANAGER'],
   '/configuracoes/permissoes': ['ADMIN_MASTER'],
   '/configuracoes/quiosque': ['ADMIN_MASTER', 'MANAGER'],
@@ -61,6 +61,7 @@ export const PERFIS_COLUNA: { value: string; label: string; short: string }[] = 
   { value: 'OPERATOR_WAREHOUSE', label: 'Operador indústria', short: 'Ind.' },
   { value: 'OPERATOR_WAREHOUSE_DRIVER', label: 'Indústria + motorista', short: 'Ind.+Mot.' },
   { value: 'OPERATOR_STORE', label: 'Operador loja', short: 'Loja' },
+  { value: 'RECEIVING_ASSIST', label: 'Ajudante de recebimento', short: 'Ajud. Rec.' },
   { value: 'DRIVER', label: 'Motorista', short: 'Mot.' },
 ];
 

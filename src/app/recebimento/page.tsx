@@ -17,6 +17,7 @@ import {
 } from '@/lib/services/transferencias';
 import {
   filtrarRecebimentoPorLoja,
+  perfilEscopoLojaDestino,
   transferenciaDisponivelParaRecebimento,
 } from '@/lib/operador-loja-scope';
 import { supabase } from '@/lib/supabase';
@@ -94,17 +95,18 @@ export default function RecebimentoPage() {
   const [avisoRemessaEncerrada, setAvisoRemessaEncerrada] = useState<string | null>(null);
   const scanEmAndamentoRef = useRef(false);
 
-  /** Só a loja: busca no PostgREST já filtrada por destino — evita truncar/paginar o quadro geral e perder remessas novas. */
+  /** Operador de loja e ajudante de recebimento: busca no PostgREST já filtrada por destino — evita
+   * truncar/paginar o quadro geral e perder remessas novas. */
+  const escopoLoja = perfilEscopoLojaDestino(usuario?.perfil);
   const filtrosDestinoLoja = useMemo(() => {
-    if (usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id) {
+    if (escopoLoja && usuario?.local_padrao_id) {
       return [{ column: 'destino_id' as const, value: usuario.local_padrao_id }];
     }
     return undefined;
-  }, [usuario?.perfil, usuario?.local_padrao_id]);
+  }, [escopoLoja, usuario?.local_padrao_id]);
 
   const consultaRecebimentoHabilitada =
-    usuario != null &&
-    (usuario.perfil !== 'OPERATOR_STORE' || Boolean(usuario.local_padrao_id));
+    usuario != null && (!escopoLoja || Boolean(usuario.local_padrao_id));
 
   const { data: transferencias, loading } = useRealtimeQuery<TransRow>({
     table: 'transferencias',
@@ -210,7 +212,7 @@ export default function RecebimentoPage() {
 
   /** Só informativo: encerradas não entram no <Select>. Ex.: Silvania — dia 9 em divergência. */
   const encerradasRecentesNaLoja = useMemo(() => {
-    if (usuario?.perfil !== 'OPERATOR_STORE' || !usuario.local_padrao_id) return [];
+    if (!escopoLoja || !usuario?.local_padrao_id) return [];
     const dias = 14;
     const lim = Date.now() - dias * 24 * 60 * 60 * 1000;
     return transferencias
@@ -221,7 +223,7 @@ export default function RecebimentoPage() {
           new Date(t.created_at).getTime() >= lim
       )
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [transferencias, usuario]);
+  }, [transferencias, usuario, escopoLoja]);
 
   useEffect(() => {
     if (remessasIdsConferencia.length === 0 || loading) return;
@@ -720,7 +722,7 @@ export default function RecebimentoPage() {
         </div>
       </div>
 
-      {usuario?.local_padrao_id && (usuario.perfil === 'OPERATOR_STORE' || usuario.perfil === 'MANAGER' || usuario.perfil === 'ADMIN_MASTER') && (
+      {usuario?.local_padrao_id && (usuario.perfil === 'OPERATOR_STORE' || usuario.perfil === 'RECEIVING_ASSIST' || usuario.perfil === 'MANAGER' || usuario.perfil === 'ADMIN_MASTER') && (
         <RecebimentoDiretoCard
           destinoId={usuario.local_padrao_id}
           destinoNome="sua loja"
@@ -756,7 +758,7 @@ export default function RecebimentoPage() {
         </div>
       )}
 
-      {encerradasRecentesNaLoja.length > 0 && usuario?.perfil === 'OPERATOR_STORE' && (
+      {encerradasRecentesNaLoja.length > 0 && escopoLoja && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 mb-4 text-sm text-slate-800">
           <p className="font-semibold text-slate-900">Remessas já encerradas (últimos 14 dias)</p>
           <p className="mt-1 text-slate-700 leading-relaxed">
@@ -784,7 +786,7 @@ export default function RecebimentoPage() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4 space-y-3">
-        {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
+        {escopoLoja && usuario?.local_padrao_id && (
           <p className="text-xs text-gray-600">
             Lista remessas da indústria para a sua loja (após <strong>Separar por Loja</strong>) e entregas loja→loja em
             trânsito. Só escaneie QRs que constam na remessa escolhida.
@@ -802,7 +804,7 @@ export default function RecebimentoPage() {
                   setModoMultiRemessas(true);
                   setErro('');
                   setMostrarEntradaManual(false);
-                  if (usuario?.perfil === 'OPERATOR_STORE') {
+                  if (escopoLoja) {
                     setRemessasIdsConferencia(pendentes.map((t) => t.id));
                   } else {
                     setRemessasIdsConferencia([]);
@@ -836,7 +838,7 @@ export default function RecebimentoPage() {
               Marque as que chegaram misturadas e escaneie os QRs em qualquer ordem. Ao confirmar, cada remessa é
               encerrada com os itens dela.
             </p>
-            {usuario?.perfil !== 'OPERATOR_STORE' && (
+            {!escopoLoja && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5">
                 Agrupe só remessas com o <strong>mesmo destino</strong> (mesma loja).
               </p>
@@ -917,6 +919,7 @@ export default function RecebimentoPage() {
           usuarioId={usuario.id}
           podeEncerrarComFalta={
             usuario.perfil === 'OPERATOR_STORE' ||
+            usuario.perfil === 'RECEIVING_ASSIST' ||
             usuario.perfil === 'ADMIN_MASTER' ||
             usuario.perfil === 'MANAGER'
           }
@@ -1110,7 +1113,7 @@ export default function RecebimentoPage() {
         <div className="text-center py-12 text-gray-400">
           <Store className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>Nenhuma entrega para receber agora</p>
-          {usuario?.perfil === 'OPERATOR_STORE' && usuario.local_padrao_id && (
+          {escopoLoja && usuario?.local_padrao_id && (
             <>
               <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto">
                 Só aparecem aqui pedidos com destino na <span className="font-medium">sua loja</span>{' '}
@@ -1123,7 +1126,7 @@ export default function RecebimentoPage() {
               </p>
             </>
           )}
-          {usuario?.perfil === 'OPERATOR_STORE' && !usuario.local_padrao_id && (
+          {escopoLoja && !usuario?.local_padrao_id && (
             <p className="text-xs text-amber-700 mt-2 max-w-xs mx-auto">
               Seu usuário não tem loja padrão cadastrada. Peça ao administrador para vincular sua loja em
               cadastro de usuários.

@@ -613,6 +613,7 @@ export type Database = {
             | 'OPERATOR_WAREHOUSE'
             | 'OPERATOR_WAREHOUSE_DRIVER'
             | 'OPERATOR_STORE'
+            | 'RECEIVING_ASSIST'
             | 'DRIVER';
           local_padrao_id: string | null;
           /** Login na tela de entrada (único quando preenchido). Senha fica só em `credenciais_login_operacional`. */
@@ -630,6 +631,7 @@ export type Database = {
             | 'OPERATOR_WAREHOUSE'
             | 'OPERATOR_WAREHOUSE_DRIVER'
             | 'OPERATOR_STORE'
+            | 'RECEIVING_ASSIST'
             | 'DRIVER';
           local_padrao_id?: string | null;
           login_operacional?: string | null;
@@ -646,6 +648,7 @@ export type Database = {
             | 'OPERATOR_WAREHOUSE'
             | 'OPERATOR_WAREHOUSE_DRIVER'
             | 'OPERATOR_STORE'
+            | 'RECEIVING_ASSIST'
             | 'DRIVER';
           local_padrao_id?: string | null;
           login_operacional?: string | null;

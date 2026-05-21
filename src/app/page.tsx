@@ -163,6 +163,12 @@ const homeSectionsByProfile: Partial<Record<PerfilUsuario, HomeSection[]>> = {
       items: ['/estoque', '/validades', '/baixa-diaria', '/perdas'],
     },
   ],
+  RECEIVING_ASSIST: [
+    {
+      title: 'Ajudar no recebimento',
+      items: ['/recebimento'],
+    },
+  ],
   DRIVER: [
     {
       title: 'Transporte',

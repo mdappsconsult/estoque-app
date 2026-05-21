@@ -19,8 +19,16 @@ const PERFIS = [
   { value: 'OPERATOR_WAREHOUSE', label: 'Operador Indústria' },
   { value: 'OPERATOR_WAREHOUSE_DRIVER', label: 'Indústria + motorista' },
   { value: 'OPERATOR_STORE', label: 'Operador Loja' },
+  { value: 'RECEIVING_ASSIST', label: 'Ajudante de recebimento' },
   { value: 'DRIVER', label: 'Motorista' },
 ];
+
+/** Perfis que só atuam dentro de uma loja (escopo `local_padrao_id` obrigatório do tipo STORE). */
+const PERFIS_VINCULADOS_LOJA: ReadonlyArray<Usuario['perfil']> = [
+  'OPERATOR_STORE',
+  'RECEIVING_ASSIST',
+];
+const ehPerfilDeLoja = (perfil: Usuario['perfil']) => PERFIS_VINCULADOS_LOJA.includes(perfil);
 
 const perfilBadge = (perfil: string) => {
   const map: Record<string, 'error' | 'warning' | 'info' | 'success' | 'default'> = {
@@ -29,6 +37,7 @@ const perfilBadge = (perfil: string) => {
     OPERATOR_WAREHOUSE: 'info',
     OPERATOR_WAREHOUSE_DRIVER: 'info',
     OPERATOR_STORE: 'success',
+    RECEIVING_ASSIST: 'success',
     DRIVER: 'default',
   };
   return map[perfil] || 'default';
@@ -40,7 +49,7 @@ function idsLocaisPermitidosParaPerfil(
   perfil: Usuario['perfil'],
   lista: Local[]
 ): Set<string> {
-  if (perfil === 'OPERATOR_STORE') {
+  if (ehPerfilDeLoja(perfil)) {
     return new Set(lista.filter((l) => l.tipo === 'STORE').map((l) => l.id));
   }
   if (perfil === 'OPERATOR_WAREHOUSE' || perfil === 'OPERATOR_WAREHOUSE_DRIVER') {
@@ -151,8 +160,8 @@ export default function UsuariosPage() {
   };
 
   const handleSave = async () => {
-    if (form.perfil === 'OPERATOR_STORE' && !form.local_padrao_id.trim()) {
-      alert('Operador de loja precisa ter uma loja de atuação selecionada.');
+    if (ehPerfilDeLoja(form.perfil) && !form.local_padrao_id.trim()) {
+      alert('Esse perfil precisa ter uma loja de atuação selecionada.');
       return;
     }
     try {
@@ -202,35 +211,33 @@ export default function UsuariosPage() {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 text-red-500 animate-spin" /></div>;
   }
 
-  const localLabel =
-    form.perfil === 'OPERATOR_STORE'
-      ? 'Loja de atuação'
-      : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
-        ? 'Indústria padrão'
-        : 'Local padrão';
+  const localLabel = ehPerfilDeLoja(form.perfil)
+    ? 'Loja de atuação'
+    : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
+      ? 'Indústria padrão'
+      : 'Local padrão';
 
-  const localOptions =
-    form.perfil === 'OPERATOR_STORE'
+  const localOptions = ehPerfilDeLoja(form.perfil)
+    ? [
+        { value: '', label: 'Selecione a loja…' },
+        ...locais
+          .filter((l) => l.tipo === 'STORE')
+          .map((l) => ({ value: l.id, label: l.nome })),
+      ]
+    : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
       ? [
-          { value: '', label: 'Selecione a loja…' },
+          { value: '', label: 'Nenhum' },
           ...locais
-            .filter((l) => l.tipo === 'STORE')
+            .filter((l) => l.tipo === 'WAREHOUSE')
             .map((l) => ({ value: l.id, label: l.nome })),
         ]
-      : form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER'
-        ? [
-            { value: '', label: 'Nenhum' },
-            ...locais
-              .filter((l) => l.tipo === 'WAREHOUSE')
-              .map((l) => ({ value: l.id, label: l.nome })),
-          ]
-        : [
-            { value: '', label: 'Nenhum' },
-            ...locais.map((l) => ({
-              value: l.id,
-              label: `${l.nome} (${l.tipo === 'WAREHOUSE' ? 'Indústria' : 'Loja'})`,
-            })),
-          ];
+      : [
+          { value: '', label: 'Nenhum' },
+          ...locais.map((l) => ({
+            value: l.id,
+            label: `${l.nome} (${l.tipo === 'WAREHOUSE' ? 'Indústria' : 'Loja'})`,
+          })),
+        ];
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -288,7 +295,7 @@ export default function UsuariosPage() {
           />
           <Select
             label={localLabel}
-            required={form.perfil === 'OPERATOR_STORE'}
+            required={ehPerfilDeLoja(form.perfil)}
             options={localOptions}
             value={form.local_padrao_id}
             onChange={(e) => setForm({ ...form, local_padrao_id: e.target.value })}
@@ -296,6 +303,12 @@ export default function UsuariosPage() {
           {form.perfil === 'OPERATOR_STORE' && (
             <p className="text-xs text-gray-500 -mt-2">
               Obrigatório: recebimentos consideram só remessas destinadas a esta loja.
+            </p>
+          )}
+          {form.perfil === 'RECEIVING_ASSIST' && (
+            <p className="text-xs text-gray-500 -mt-2">
+              Ajuda no recebimento da loja. Só vê o card <strong>Receber Entrega</strong> e bipa
+              remessas destinadas a esta loja.
             </p>
           )}
           {(form.perfil === 'OPERATOR_WAREHOUSE' || form.perfil === 'OPERATOR_WAREHOUSE_DRIVER') && (
@@ -339,7 +352,7 @@ export default function UsuariosPage() {
             variant="primary"
             className="w-full"
             onClick={handleSave}
-            disabled={!form.nome || !form.telefone || (form.perfil === 'OPERATOR_STORE' && !form.local_padrao_id)}
+            disabled={!form.nome || !form.telefone || (ehPerfilDeLoja(form.perfil) && !form.local_padrao_id)}
           >
             {editando ? 'Salvar' : 'Criar'}
           </Button>
