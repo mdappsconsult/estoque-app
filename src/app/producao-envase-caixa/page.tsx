@@ -2,20 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import {
-  Boxes,
-  CheckCircle,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  Minus,
-  Package,
-  Plus,
-  Printer,
-  Server,
-  Trash2,
-  Eye,
-} from 'lucide-react';
+import { Boxes, CheckCircle, ChevronDown, ChevronUp, History, Loader2, Minus, Package, Plus, Printer, Server, Trash2, Eye } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -25,16 +12,17 @@ import { useRealtimeQuery } from '@/hooks/useRealtimeQuery';
 import { usePiPrintBridgeConfig } from '@/hooks/usePiPrintBridgeConfig';
 import { supabase } from '@/lib/supabase';
 import { getItemPorCodigoEscaneado } from '@/lib/services/itens';
-import { registrarEnvaseCaixasComBalde } from '@/lib/services/producao-envase-caixa';
+import { registrarEnvaseCaixasComBalde, HISTORICO_ENVASE_SELECT, mapearHistoricoEnvaseCaixaRows, type EnvaseHistoricoResumo } from '@/lib/services/producao-envase-caixa';
+import { buscarEtiquetasProducaoParaReimpressao, excluirProducao } from '@/lib/services/producao';
 import { mensagemBloqueioEnvase } from '@/lib/services/retorno-baldes-loja';
 import type { EtiquetaGeradaProducao } from '@/lib/services/producao';
+import { isAdmin } from '@/lib/auth';
 import { errMessage } from '@/lib/errMessage';
 import type { Local, Produto } from '@/types/database';
 import {
   abrirPreviaEtiquetasEmJanela,
   confirmarImpressao,
   FORMATO_ETIQUETA_INDUSTRIA,
-  imprimirEtiquetasEmJobUnico,
   type EtiquetaParaImpressao,
 } from '@/lib/printing/label-print';
 import { enviarEtiquetasParaPiEmMultiplosJobs } from '@/lib/printing/pi-print-ws-client';
@@ -47,14 +35,27 @@ import {
 
 type BaldeEscaneado = { id: string; token_qr: string; token_short: string | null; nomeProduto: string };
 
+/** Padrões operacionais indústria (envase caixas). */
+const ENVASE_DIAS_VALIDADE_PADRAO = 120;
+
 function acharProdutoBaldePadrao(produtos: Produto[]): string {
-  const hit = produtos.find((p) => /açaí.*balde|acai.*balde/i.test(p.nome));
-  return hit?.id ?? '';
+  const balde11 = produtos.find(
+    (p) => /11\s*l/i.test(p.nome) && /balde/i.test(p.nome) && /açaí|acai/i.test(p.nome)
+  );
+  if (balde11?.id) return balde11.id;
+  const baldeAcai = produtos.find((p) => /açaí.*balde|acai.*balde|balde.*açaí|balde.*acai/i.test(p.nome));
+  return baldeAcai?.id ?? '';
 }
 
 function acharProdutoCaixaPadrao(produtos: Produto[]): string {
-  const envase = produtos.find((p) => /caixa.*açaí|caixa.*acai|açaí.*caixa|acai.*caixa/i.test(p.nome));
-  return envase?.id ?? '';
+  const caixa10 = produtos.find(
+    (p) => /10\s*l/i.test(p.nome) && /caixa/i.test(p.nome) && /açaí|acai/i.test(p.nome)
+  );
+  if (caixa10?.id) return caixa10.id;
+  const envase = produtos.find((p) => /envase/i.test(p.nome) && /caixa.*açaí|caixa.*acai/i.test(p.nome));
+  if (envase?.id) return envase.id;
+  const generico = produtos.find((p) => /caixa.*açaí|caixa.*acai|açaí.*caixa|acai.*caixa/i.test(p.nome));
+  return generico?.id ?? '';
 }
 
 export default function ProducaoEnvaseCaixaPage() {
@@ -87,7 +88,7 @@ export default function ProducaoEnvaseCaixaPage() {
 
   const [produtoCaixaId, setProdutoCaixaId] = useState('');
   const [produtoBaldeId, setProdutoBaldeId] = useState('');
-  const [diasValidadeStr, setDiasValidadeStr] = useState('7');
+  const [diasValidadeStr, setDiasValidadeStr] = useState(String(ENVASE_DIAS_VALIDADE_PADRAO));
   const [localId, setLocalId] = useState('');
   const [observacoes, setObservacoes] = useState('');
   const [baldesEscaneados, setBaldesEscaneados] = useState<BaldeEscaneado[]>([]);
@@ -115,11 +116,48 @@ export default function ProducaoEnvaseCaixaPage() {
     caixasEsperadas: number;
   } | null>(null);
 
-  const [imprimindo, setImprimindo] = useState(false);
   const [imprimindoPi, setImprimindoPi] = useState(false);
   const [previsualizando, setPrevisualizando] = useState(false);
   const [ajustesAbertos, setAjustesAbertos] = useState(false);
+  const [reimpressaoProducaoId, setReimpressaoProducaoId] = useState<string | null>(null);
+  const [excluindoProducaoId, setExcluindoProducaoId] = useState<string | null>(null);
+  /** Oculta linha na hora após exclusão (antes do refetch do histórico). */
+  const [historicoIdsOcultos, setHistoricoIdsOcultos] = useState<Set<string>>(() => new Set());
+  const [producaoIdEtiquetasCarregadas, setProducaoIdEtiquetasCarregadas] = useState<string | null>(null);
+  const podeExcluirEnvase = isAdmin(usuario);
   const painelImpressaoRef = useRef<HTMLDivElement>(null);
+
+  const filtroHistoricoEnvase = useMemo(() => {
+    const base = [{ column: 'tipo' as const, value: 'ENVASE_CAIXA' }];
+    const perfil = usuario?.perfil;
+    if (perfil === 'OPERATOR_WAREHOUSE' || perfil === 'OPERATOR_WAREHOUSE_DRIVER') {
+      const lid = usuario?.local_padrao_id?.trim();
+      if (lid) return [...base, { column: 'local_id' as const, value: lid }];
+    }
+    return base;
+  }, [usuario]);
+
+  const {
+    data: historicoEnvase,
+    loading: historicoLoading,
+    error: historicoError,
+    refetch: refetchHistoricoEnvase,
+  } = useRealtimeQuery<EnvaseHistoricoResumo>({
+    table: 'producoes',
+    select: HISTORICO_ENVASE_SELECT,
+    filters: filtroHistoricoEnvase,
+    orderBy: { column: 'created_at', ascending: false },
+    maxRows: 80,
+    enabled: Boolean(usuario),
+    transform: mapearHistoricoEnvaseCaixaRows,
+    preserveDataWhileRefetching: true,
+    refetchDebounceMs: 400,
+  });
+
+  const historicoEnvaseVisivel = useMemo(
+    () => historicoEnvase.filter((row) => !historicoIdsOcultos.has(row.id)),
+    [historicoEnvase, historicoIdsOcultos]
+  );
 
   useEffect(() => {
     if (!defaultWarehouseId) return;
@@ -303,6 +341,7 @@ export default function ProducaoEnvaseCaixaPage() {
       setNomeCaixaImpressao(nomeCaixa);
       setNomeLocalImpressao(warehouses.find((w) => w.id === localId)?.nome ?? 'Indústria');
       setEtiquetasPendentes(res.etiquetas);
+      setProducaoIdEtiquetasCarregadas(res.producaoId);
       baldesIdsRef.current = new Set();
       setBaldesEscaneados([]);
       setNumCaixasStr('');
@@ -316,29 +355,10 @@ export default function ProducaoEnvaseCaixaPage() {
     }
   };
 
-  const imprimirNavegador = async () => {
-    if (etiquetasPendentes.length === 0) return;
-    if (!confirmarImpressao(etiquetasPendentes.length, FORMATO_ETIQUETA_INDUSTRIA)) return;
-    setImprimindo(true);
-    try {
-      const ok = await imprimirEtiquetasEmJobUnico(montarPayloadImpressao(), FORMATO_ETIQUETA_INDUSTRIA);
-      if (!ok) throw new Error('Não foi possível abrir a impressão. Libere pop-ups.');
-      const ids = etiquetasPendentes.map((e) => e.id);
-      const { error } = await supabase.from('etiquetas').update({ impressa: true }).in('id', ids);
-      if (error) throw error;
-      setEtiquetasPendentes([]);
-      alert('Etiquetas enviadas para impressão.');
-    } catch (e: unknown) {
-      alert(errMessage(e, 'Falha ao imprimir'));
-    } finally {
-      setImprimindo(false);
-    }
-  };
-
   const imprimirPi = async () => {
     if (etiquetasPendentes.length === 0) return;
     if (!piPrintAvailable || !piConnection) {
-      alert('Configure a ponte indústria em Configurações → Impressoras.');
+      alert('Zebra indisponível. Configure em Configurações → Impressoras ou use o histórico abaixo para tentar de novo.');
       return;
     }
     if (!confirmarImpressao(etiquetasPendentes.length, FORMATO_ETIQUETA_INDUSTRIA)) return;
@@ -353,11 +373,79 @@ export default function ProducaoEnvaseCaixaPage() {
       const { error } = await supabase.from('etiquetas').update({ impressa: true }).in('id', ids);
       if (error) throw error;
       setEtiquetasPendentes([]);
-      alert('Etiquetas enviadas para a Zebra (Pi / indústria).');
+      alert('Etiquetas enviadas para a Zebra (60×60).');
+      setProducaoIdEtiquetasCarregadas(null);
     } catch (e: unknown) {
-      alert(errMessage(e, 'Falha ao imprimir na Pi'));
+      alert(
+        `${errMessage(e, 'Falha ao imprimir na Zebra.')}\n\nAs etiquetas continuam salvas — use «Envases registrados» abaixo → Reimprimir.`
+      );
     } finally {
       setImprimindoPi(false);
+    }
+  };
+
+  const carregarEtiquetasHistorico = async (row: EnvaseHistoricoResumo) => {
+    setReimpressaoProducaoId(row.id);
+    try {
+      const list = await buscarEtiquetasProducaoParaReimpressao(row.id);
+      setNomeCaixaImpressao(row.produtoCaixaNome);
+      setNomeLocalImpressao(row.localNome);
+      setEtiquetasPendentes(
+        list.map((e) => ({
+          id: e.id,
+          produtoId: produtoCaixaId,
+          dataProducao: e.dataProducao,
+          dataValidade: e.dataValidade,
+          lote: e.lote,
+          tokenQr: e.tokenQr,
+          tokenShort: e.tokenShort,
+          numeroLoteProducao: e.numeroLoteProducao,
+          sequenciaNoLote: e.sequenciaNoLote,
+          numBaldesLote: e.numBaldesLote,
+          dataLoteProducaoIso: e.dataLoteProducaoIso,
+        }))
+      );
+      setProducaoIdEtiquetasCarregadas(row.id);
+      window.setTimeout(() => painelImpressaoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    } catch (e: unknown) {
+      alert(errMessage(e, 'Não foi possível carregar as etiquetas deste envase.'));
+    } finally {
+      setReimpressaoProducaoId(null);
+    }
+  };
+
+  const handleExcluirEnvase = async (row: EnvaseHistoricoResumo) => {
+    if (!usuario?.id || !podeExcluirEnvase) return;
+    const ok = window.confirm(
+      `Excluir este envase?\n\n` +
+        `Lote ${row.numeroLoteProducao ?? '—'} · ${row.numBaldesConsumidos} balde(s) → ${row.numCaixas} caixa(s)\n\n` +
+        `Só funciona se todas as caixas ainda estiverem na indústria e os baldes puderem voltar ao estoque.`
+    );
+    if (!ok) return;
+    setExcluindoProducaoId(row.id);
+    try {
+      const r = await excluirProducao(row.id, usuario.id);
+      setHistoricoIdsOcultos((prev) => new Set(prev).add(row.id));
+      if (ultimoResumo?.producaoId === row.id) setUltimoResumo(null);
+      if (producaoIdEtiquetasCarregadas === row.id) {
+        setEtiquetasPendentes([]);
+        setProducaoIdEtiquetasCarregadas(null);
+      }
+      await refetchHistoricoEnvase();
+      setHistoricoIdsOcultos((prev) => {
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
+      alert(
+        `Envase excluído.\n` +
+          `${r.qrsAcabadoRevertidos} caixa(s) removidas.\n` +
+          (r.insumosQrRevertidos > 0 ? `${r.insumosQrRevertidos} balde(s) devolvido(s) ao estoque.` : '')
+      );
+    } catch (e: unknown) {
+      alert(errMessage(e, 'Não foi possível excluir este envase.'));
+    } finally {
+      setExcluindoProducaoId(null);
     }
   };
 
@@ -429,30 +517,36 @@ export default function ProducaoEnvaseCaixaPage() {
       )}
 
       {etiquetasPendentes.length > 0 && (
-        <div ref={painelImpressaoRef} className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+        <div ref={painelImpressaoRef} className="rounded-xl border-2 border-blue-300 bg-blue-50 p-4 space-y-3">
           <p className="text-sm text-blue-900">
-            <strong>{etiquetasPendentes.length}</strong> etiqueta(s) de caixa prontas para imprimir.
+            <strong>{etiquetasPendentes.length}</strong> etiqueta(s) de caixa (60×60). Na indústria use a{' '}
+            <strong>Zebra</strong>.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => void previa()} disabled={previsualizando}>
-              {previsualizando ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
-              Ver prévia
-            </Button>
-            <Button type="button" variant="primary" onClick={() => void imprimirNavegador()} disabled={imprimindo}>
-              {imprimindo ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Printer className="w-4 h-4 mr-2" />}
-              Imprimir
-            </Button>
+          <p className="text-xs text-blue-800/90">
+            Se a impressão falhar, as etiquetas ficam salvas — role até «Envases registrados» e toque em{' '}
+            <strong>Reimprimir</strong>.
+          </p>
+          <div className="flex flex-col sm:flex-row flex-wrap gap-2">
             <Button
               type="button"
-              variant="outline"
-              className="border-emerald-800/40"
+              variant="primary"
+              className="min-h-[48px] flex-1 bg-emerald-700 hover:bg-emerald-800"
               onClick={() => void imprimirPi()}
               disabled={imprimindoPi || piCfgLoading || !piPrintAvailable}
             >
               {imprimindoPi ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Server className="w-4 h-4 mr-2" />}
-              Zebra
+              Imprimir na Zebra (60×60)
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void previa()} disabled={previsualizando}>
+              {previsualizando ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+              Ver prévia
             </Button>
           </div>
+          {!piPrintAvailable && !piCfgLoading && (
+            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Zebra/Pi não configurada. Ajuste em Configurações → Impressoras — ou reimprima depois pelo histórico.
+            </p>
+          )}
         </div>
       )}
 
@@ -588,6 +682,117 @@ export default function ProducaoEnvaseCaixaPage() {
         {saving ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Package className="w-5 h-5 mr-2" />}
         3. Registrar e gerar etiquetas das caixas
       </Button>
+
+      <details open className="bg-white rounded-xl border border-gray-200 overflow-hidden group">
+        <summary className="flex items-center justify-between gap-2 px-5 py-3 cursor-pointer list-none bg-slate-50 border-b border-gray-100">
+          <span className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <History className="w-4 h-4 text-gray-500" />
+            Envases registrados
+          </span>
+          <ChevronDown className="w-4 h-4 text-gray-500 group-open:rotate-180 transition-transform" />
+        </summary>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-gray-600">
+            Impressão falhou ou fechou a página? Toque em <strong>Reimprimir</strong> na linha do lote.
+            {podeExcluirEnvase ? (
+              <>
+                {' '}
+                Como administrador, você pode <strong>Excluir</strong> um envase errado (caixas ainda na
+                indústria).
+              </>
+            ) : (
+              <> Para excluir um lançamento errado, peça ao administrador.</>
+            )}
+          </p>
+          {historicoLoading && historicoEnvaseVisivel.length === 0 ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+            </div>
+          ) : historicoError ? (
+            <p className="text-sm text-red-700">{errMessage(historicoError, 'Erro ao carregar histórico.')}</p>
+          ) : historicoEnvaseVisivel.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4 text-center">Nenhum envase registrado ainda.</p>
+          ) : (
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-100">
+                    <th className="py-2 pr-2 font-medium whitespace-nowrap">Quando</th>
+                    <th className="py-2 pr-2 font-medium">Caixa</th>
+                    <th className="py-2 pr-2 font-medium text-right whitespace-nowrap">Baldes</th>
+                    <th className="py-2 pr-2 font-medium text-right whitespace-nowrap">Caixas</th>
+                    <th className="py-2 pr-2 font-medium text-right whitespace-nowrap">Lote</th>
+                    <th className="py-2 pr-2 font-medium whitespace-nowrap">Reimprimir</th>
+                    {podeExcluirEnvase && <th className="py-2 font-medium whitespace-nowrap">Excluir (admin)</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {historicoEnvaseVisivel.map((row) => (
+                    <tr key={row.id} className="border-b border-gray-50 hover:bg-gray-50/80">
+                      <td className="py-2 pr-2 whitespace-nowrap text-gray-800">
+                        {row.createdAt
+                          ? new Date(row.createdAt).toLocaleString('pt-BR', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'}
+                      </td>
+                      <td className="py-2 pr-2 max-w-[100px] truncate text-gray-800" title={row.produtoCaixaNome}>
+                        {row.produtoCaixaNome}
+                      </td>
+                      <td className="py-2 pr-2 text-right tabular-nums">{row.numBaldesConsumidos}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums font-medium">
+                        {row.contagemDisponivel ? row.qrsCaixa : row.numCaixas}
+                      </td>
+                      <td className="py-2 pr-2 text-right tabular-nums">
+                        {row.numeroLoteProducao ?? '—'}
+                      </td>
+                      <td className="py-2 pr-2 whitespace-nowrap">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="text-[11px] px-2 py-1 min-h-0 h-auto"
+                          disabled={reimpressaoProducaoId === row.id}
+                          onClick={() => void carregarEtiquetasHistorico(row)}
+                        >
+                          {reimpressaoProducaoId === row.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <Printer className="w-3.5 h-3.5 mr-1 inline" />
+                              Reimprimir
+                            </>
+                          )}
+                        </Button>
+                      </td>
+                      {podeExcluirEnvase && (
+                        <td className="py-2 whitespace-nowrap">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="text-[11px] px-2 py-1 min-h-0 h-auto text-red-700 border-red-300 hover:bg-red-50"
+                            disabled={excluindoProducaoId === row.id}
+                            onClick={() => void handleExcluirEnvase(row)}
+                          >
+                            {excluindoProducaoId === row.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <>
+                                <Trash2 className="w-3.5 h-3.5 mr-1 inline" />
+                                Excluir
+                              </>
+                            )}
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </details>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <button

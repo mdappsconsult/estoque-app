@@ -7,7 +7,11 @@ import { recalcularEstoqueProdutos } from './estoque-sync';
 import { calcularDataValidadeIsoMeiaNoiteBrAposDiasCorridos } from '@/lib/datas/validade-producao-br';
 import { assertItensSemVinculoRemessaAberta } from './transferencias';
 import { baldePermitidoNoEnvase, mensagemBloqueioEnvase } from './retorno-baldes-loja';
-import type { EtiquetaGeradaProducao } from './producao';
+import {
+  agregarItensAcabadoPorProducaoIds,
+  contarInsumosPorProducaoIds,
+  type EtiquetaGeradaProducao,
+} from './producao';
 import {
   ENVASE_MEDIA_BALDES_REF,
   ENVASE_MEDIA_CAIXAS_REF,
@@ -355,4 +359,66 @@ export async function registrarEnvaseCaixasComBalde(
       dataLoteProducaoIso: dataLoteProducaoIso || new Date().toISOString(),
     })),
   };
+}
+
+export const HISTORICO_ENVASE_SELECT = [
+  'id',
+  'created_at',
+  'produto_id',
+  'quantidade',
+  'num_baldes',
+  'local_id',
+  'responsavel',
+  'envase_baldes_por_caixa',
+  'envase_produto_balde_id',
+  'produtos!produto_id(nome)',
+  'produtos_balde:produtos!envase_produto_balde_id(nome)',
+  'locais(nome)',
+].join(', ');
+
+export type EnvaseHistoricoResumo = {
+  id: string;
+  createdAt: string;
+  produtoCaixaNome: string;
+  produtoBaldeNome: string;
+  localNome: string;
+  numeroLoteProducao: number | null;
+  numCaixas: number;
+  numBaldesConsumidos: number;
+  responsavel: string;
+  qrsCaixa: number;
+  contagemDisponivel: boolean;
+};
+
+export async function mapearHistoricoEnvaseCaixaRows(
+  rows: Record<string, unknown>[]
+): Promise<EnvaseHistoricoResumo[]> {
+  const ids = rows.map((r) => String(r.id ?? ''));
+  const [aggItens, aggInsumo] = await Promise.all([
+    agregarItensAcabadoPorProducaoIds(ids),
+    contarInsumosPorProducaoIds(ids),
+  ]);
+  const { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel } = aggItens;
+
+  return rows.map((r) => {
+    const prodCaixa = r.produtos as { nome?: string } | null;
+    const prodBalde = r.produtos_balde as { nome?: string } | null;
+    const locais = r.locais as { nome?: string } | null;
+    const id = String(r.id);
+    const numCaixas = Math.floor(Number(r.quantidade ?? r.num_baldes ?? 0));
+    const numBaldesConsumidos = aggInsumo.insumosPorProducao.get(id) ?? 0;
+    return {
+      id,
+      createdAt: String(r.created_at ?? ''),
+      produtoCaixaNome: prodCaixa?.nome?.trim() || '—',
+      produtoBaldeNome: prodBalde?.nome?.trim() || '—',
+      localNome: locais?.nome?.trim() || '—',
+      numeroLoteProducao: loteNumeroPorProducao.get(id) ?? null,
+      numCaixas,
+      numBaldesConsumidos,
+      responsavel: String(r.responsavel ?? '').trim() || '—',
+      qrsCaixa: qrsPorProducao.get(id) ?? 0,
+      contagemDisponivel: contagemAcabadoDisponivel,
+    };
+  });
 }

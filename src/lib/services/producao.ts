@@ -83,7 +83,7 @@ export type ProducaoHistoricoResumo = {
  * Conta QRs do acabado por produção e tenta obter número do lote via primeira etiqueta do lote (mesmo dado da face impressa).
  * Não propaga erro de rede: retorna `contagemAcabadoDisponivel: false` para o chamador tratar.
  */
-async function agregarItensAcabadoPorProducaoIds(producaoIds: string[]): Promise<{
+export async function agregarItensAcabadoPorProducaoIds(producaoIds: string[]): Promise<{
   qrsPorProducao: Map<string, number>;
   loteNumeroPorProducao: Map<string, number | null>;
   contagemAcabadoDisponivel: boolean;
@@ -156,7 +156,7 @@ async function agregarItensAcabadoPorProducaoIds(producaoIds: string[]): Promise
   return { qrsPorProducao, loteNumeroPorProducao, contagemAcabadoDisponivel };
 }
 
-async function contarInsumosPorProducaoIds(producaoIds: string[]): Promise<{
+export async function contarInsumosPorProducaoIds(producaoIds: string[]): Promise<{
   insumosPorProducao: Map<string, number>;
   contagemInsumoDisponivel: boolean;
 }> {
@@ -768,13 +768,17 @@ export async function excluirProducao(
 
   const { data: prod, error: ePr } = await supabase
     .from('producoes')
-    .select('id, produto_id, local_id, num_baldes, numero_lote_producao, created_at')
+    .select(
+      'id, produto_id, local_id, num_baldes, numero_lote_producao, created_at, tipo, envase_produto_balde_id'
+    )
     .eq('id', pid)
     .single();
   if (ePr) throw ePr;
   if (!prod) throw new Error('Produção não encontrada.');
   const localProducao = prod.local_id as string;
   const produtoAcabadoId = prod.produto_id as string;
+  const ehEnvaseCaixa = String(prod.tipo || '') === 'ENVASE_CAIXA';
+  const rotuloAcabado = ehEnvaseCaixa ? 'caixa(s)' : 'balde(s)';
 
   // 1. Itens do acabado: tudo precisa estar EM_ESTOQUE no local da produção.
   const { data: itensAcabado, error: eItens } = await supabase
@@ -789,7 +793,7 @@ export async function excluirProducao(
   );
   if (baldesForaIndustria.length > 0) {
     throw new Error(
-      `Não é possível excluir: ${baldesForaIndustria.length} balde(s) desta produção já saíram da indústria (em remessa, recebidos por loja ou baixados).`
+      `Não é possível excluir: ${baldesForaIndustria.length} ${rotuloAcabado} desta produção já saíram da indústria (em remessa, recebidos por loja ou baixados).`
     );
   }
 
@@ -803,7 +807,7 @@ export async function excluirProducao(
       if (eV) throw eV;
       if (vinc && vinc.length > 0) {
         throw new Error(
-          'Não é possível excluir: algum balde já está vinculado a uma remessa (Separar por Loja ou Envio direto). Cancele a remessa antes.'
+          `Não é possível excluir: alguma ${ehEnvaseCaixa ? 'caixa' : 'unidade'} já está vinculada a uma remessa (Separar por Loja ou Envio direto). Cancele a remessa antes.`
         );
       }
       const { data: baixasJa, error: eB } = await supabase
@@ -813,7 +817,9 @@ export async function excluirProducao(
         .limit(1);
       if (eB) throw eB;
       if (baixasJa && baixasJa.length > 0) {
-        throw new Error('Não é possível excluir: algum balde já foi baixado (consumido).');
+        throw new Error(
+          `Não é possível excluir: alguma ${ehEnvaseCaixa ? 'caixa' : 'unidade'} já foi baixada (consumida).`
+        );
       }
       const { data: perdasJa, error: eP } = await supabase
         .from('perdas')
@@ -822,7 +828,9 @@ export async function excluirProducao(
         .limit(1);
       if (eP) throw eP;
       if (perdasJa && perdasJa.length > 0) {
-        throw new Error('Não é possível excluir: algum balde foi marcado como perda/descarte.');
+        throw new Error(
+          `Não é possível excluir: alguma ${ehEnvaseCaixa ? 'caixa' : 'unidade'} foi marcada como perda/descarte.`
+        );
       }
     }
   }
@@ -848,7 +856,7 @@ export async function excluirProducao(
     for (const slice of chunkIds(insumosItemIds, EXCLUIR_PROD_CHUNK)) {
       const { error: eUp } = await supabase
         .from('itens')
-        .update({ estado: 'EM_ESTOQUE' })
+        .update({ estado: 'EM_ESTOQUE', local_atual_id: localProducao })
         .in('id', slice);
       if (eUp) throw eUp;
     }
@@ -927,6 +935,9 @@ export async function excluirProducao(
 
   // 6. Recalcular agregados de estoque.
   const produtosParaSync = [produtoAcabadoId, ...produtosInsumosParaSync].filter(Boolean);
+  if (ehEnvaseCaixa && prod.envase_produto_balde_id) {
+    produtosParaSync.push(String(prod.envase_produto_balde_id));
+  }
   await recalcularEstoqueProdutos([...new Set(produtosParaSync)]);
 
   await registrarAuditoria({
@@ -936,6 +947,8 @@ export async function excluirProducao(
     detalhes: {
       producao_id: pid,
       produto_id: produtoAcabadoId,
+      tipo: prod.tipo ?? null,
+      eh_envase_caixa: ehEnvaseCaixa,
       numero_lote_producao: prod.numero_lote_producao ?? null,
       num_baldes: prod.num_baldes ?? null,
       qrs_acabado_revertidos: itemIdsAcabado.length,

@@ -1,5 +1,21 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Envase: padrões 10L + balde 11L + validade 120 dias
+- **UI `/producao-envase-caixa`:** pré-seleção **Caixa açaí 10L** e **Açaí Balde 11L**; validade padrão **120 dias** (antes 7).
+- **Validação:** `npm run lint` e `npm run build` OK.
+
+### Sessão - 2026-05-21 - Correção envase: 5kg → caixa 10L (lote 1, 20:32)
+- **Pedido:** envase de 21/05 20:32 (14 baldes → 21 caixas) estava como **Açaí Caixa 5kg**; corrigir para **Caixa açaí 10L (envase)**.
+- **Banco (MCP):** `producoes`/`itens`/`etiquetas` `ec3ed0fe-…` atualizados; estoque recalculado; auditoria `CORRIGIR_PRODUTO_ENVASE_CAIXA`. SQL: `docs/consultas-sql/correcao-envase-caixa-5kg-para-10l-2026-05-21.sql`.
+- **UI:** pré-seleção de produto caixa em `/producao-envase-caixa` passa a preferir **10L (envase)**.
+
+### Sessão - 2026-05-21 - Envase: histórico, reimpressão Zebra e exclusão admin
+- **Pedido:** funcionário registrou envase mas etiquetas Zebra 60×60 não saíram; precisa reimprimir depois; admin excluir se lançou errado.
+- **UI `/producao-envase-caixa`:** seção **Envases registrados** (realtime, aberta) com data, baldes→caixas, lote; **Reimprimir** (Zebra Pi) e **Excluir** (`ADMIN_MASTER`). Após excluir, lista atualiza na hora (refetch + remoção otimista).
+- **Serviço:** `excluirProducao` estendido para `ENVASE_CAIXA` (restaura baldes consumidos); `HISTORICO_ENVASE_SELECT` + mapeamento em `producao-envase-caixa.ts`.
+- **Impressão:** painel pós-registro prioriza só Zebra 60×60; alerta se falhar + orientação ao histórico.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-21 - Envase: anti-duplicata no bip de balde
 - **Fix:** `/producao-envase-caixa` — cooldown + lock + Set síncrono evitam o mesmo QR contar várias vezes na câmera.
 - **Validação:** `npm run lint` OK.
