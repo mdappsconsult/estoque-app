@@ -1,5 +1,17 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Push chegava como «controle de estoque / Notificação» (placeholder do iOS)
+- **Sintoma:** após o fix de `urgency: 'high'`, a push começou a chegar no iPhone, mas com texto genérico «controle de estoque2 / Notificação» — não o título/corpo do pedido.
+- **Diagnóstico:** quando o Service Worker recebe um push e a Promise do `showNotification` rejeita (ou o SW não chama `showNotification` dentro do timeout), o iOS injeta uma notificação **placeholder** com o nome do PWA. No nosso caso, `showNotification` provavelmente rejeitava por causa do `icon: '/branding/acai-do-kim-logo.png'` (916×754, não-quadrado — iOS exige PNG quadrado, idealmente 192×192).
+- **Fix no Service Worker (`public/sw.js` v2):**
+  - Removidos `icon` e `badge` (até termos PNGs quadrados gerados).
+  - Parse defensivo do payload: tenta `event.data.json()`; se falhar, tenta `text()` + `JSON.parse`.
+  - Fallback no `.catch(...)` do `showNotification` para mostrar versão simples sem ornamentos.
+- **Fix no cliente para o SW atualizar no iOS:**
+  - `obterRegistration()` agora chama `existente.update()` antes de retornar.
+  - `PushBanner.sincronizar()` faz `reg.update()` sempre que `/protocolos` é aberta — iPhones com PWA instalado tendem a manter o `/sw.js` em cache durante dias.
+- **Próximo teste:** Marco abre o PWA → entra em `/protocolos` (dispara `update()`); o SW novo entra em ativação. A próxima push de Leonardo deve mostrar título e corpo certos.
+
 ### Sessão - 2026-05-21 - Push chegava no Apple mas iOS suprimia: `urgency: 'high'`
 - **Sintoma após o fix da senha:** servidor confirmou `[push] result { enviadas: 1, falhas: 0 }` (Apple Push aceitou com 201), mas o iPhone do Marco continuou silencioso.
 - **Teste isolado:** disparei uma push manual via `node -e` direto no endpoint do Marco com `urgency: 'high'` → **chegou**. Mesmo payload via API (com `urgency` default = normal) → não chega.

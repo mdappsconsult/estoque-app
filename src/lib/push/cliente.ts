@@ -69,7 +69,17 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
 
 async function obterRegistration(): Promise<ServiceWorkerRegistration> {
   const existente = await navigator.serviceWorker.getRegistration(SW_PATH);
-  if (existente) return existente;
+  if (existente) {
+    // Força revalidação do sw.js no servidor — iOS PWA costuma manter o SW
+    // antigo em cache durante dias. Sem isso, atualizações no `push` listener
+    // (texto da notificação, parse do payload) demoram a aparecer.
+    try {
+      await existente.update();
+    } catch {
+      // update() pode falhar offline; tudo bem, segue com o registro existente
+    }
+    return existente;
+  }
   return navigator.serviceWorker.register(SW_PATH);
 }
 

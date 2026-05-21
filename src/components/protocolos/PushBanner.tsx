@@ -31,6 +31,18 @@ export default function PushBanner() {
     setErro(null);
     if (typeof window === 'undefined') return;
 
+    // Força revalidação do sw.js sempre que /protocolos for aberta — garante
+    // que iPhones com SW antigo em cache peguem novas versões do listener push
+    // (sem precisar de reinstalar o PWA).
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        if (reg) await reg.update();
+      } catch {
+        // silencioso: rede ruim ou contexto sem permissão
+      }
+    }
+
     if (window.localStorage.getItem(DISMISS_KEY) === '1') {
       setEstado({ tipo: 'oculto' });
       return;

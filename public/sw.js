@@ -1,6 +1,7 @@
 // Service Worker para Web Push (notificações de protocolos).
-// Mínimo possível: só os listeners `push` e `notificationclick`.
-// Não cacheia rotas — Next.js cuida disso.
+// VERSÃO 2 — sem icon/badge (iOS rejeita ícones não-quadrados e a promessa do
+// showNotification falha, fazendo o iOS mostrar uma notificação placeholder
+// genérica "controle de estoque / Notificação" em vez do conteúdo real).
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
@@ -11,30 +12,45 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let payload = {
-    titulo: 'Açaí do Kim',
-    corpo: 'Você tem um aviso novo',
-    url: '/protocolos',
-    tag: 'protocolo',
-  };
-  try {
-    if (event.data) {
-      const data = event.data.json();
-      payload = { ...payload, ...data };
+  let titulo = 'Açaí do Kim';
+  let corpo = 'Você tem um aviso novo';
+  let url = '/protocolos';
+  let tag = 'protocolo';
+
+  if (event.data) {
+    let data = null;
+    try {
+      data = event.data.json();
+    } catch {
+      try {
+        const raw = event.data.text();
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        data = null;
+      }
     }
-  } catch {
-    // Mantém o payload padrão se vier corrompido.
+    if (data && typeof data === 'object') {
+      if (typeof data.titulo === 'string' && data.titulo.trim()) titulo = data.titulo;
+      if (typeof data.corpo === 'string' && data.corpo.trim()) corpo = data.corpo;
+      if (typeof data.url === 'string' && data.url.trim()) url = data.url;
+      if (typeof data.tag === 'string' && data.tag.trim()) tag = data.tag;
+    }
   }
 
   const opcoes = {
-    body: payload.corpo,
-    icon: '/branding/acai-do-kim-logo.png',
-    badge: '/branding/acai-do-kim-logo.png',
-    tag: payload.tag,
+    body: corpo,
+    tag,
     renotify: true,
-    data: { url: payload.url },
+    data: { url },
   };
-  event.waitUntil(self.registration.showNotification(payload.titulo, opcoes));
+
+  event.waitUntil(
+    self.registration.showNotification(titulo, opcoes).catch((err) => {
+      // Em último caso, mostra algo simples para o usuário não ficar sem aviso.
+      console.warn('[sw] showNotification falhou:', err);
+      return self.registration.showNotification(titulo, { body: corpo });
+    })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -47,7 +63,6 @@ self.addEventListener('notificationclick', (event) => {
         for (const cliente of lista) {
           try {
             const u = new URL(cliente.url);
-            // Se já tiver uma janela do app aberta, foca nela e leva para a URL.
             if (u.origin === self.location.origin) {
               cliente.focus();
               if ('navigate' in cliente) return cliente.navigate(url);
