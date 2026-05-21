@@ -1,5 +1,9 @@
 # Log de Sessões
 
+### Sessão - 2026-05-21 - Envase: anti-duplicata no bip de balde
+- **Fix:** `/producao-envase-caixa` — cooldown + lock + Set síncrono evitam o mesmo QR contar várias vezes na câmera.
+- **Validação:** `npm run lint` OK.
+
 ### Sessão - 2026-05-21 - Envase caixas: fluxo simples 2→3 + qty informada
 - **UI** (`/producao-envase-caixa`): 3 passos — (1) ler baldes QR, (2) quantas caixas saíram (pré-preenchido pela média **2 baldes → 3 caixas**, botões ±), (3) registrar e imprimir. Produtos balde/caixa pré-selecionados; config em «Ajustes (supervisor)».
 - **Serviço:** `registrarEnvaseCaixasComBalde` passa a receber `numCaixas` explícito (sem exigir múltiplo de baldes); helper `producao-envase-ratio.ts`.
