@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - PWA estoque: nome «Controle de Estoque»
+- **Bug:** atalho na tela inicial aparecia como «controledeestoque» (sem espaços/capitalização).
+- **Correção:** `manifest.webmanifest` + `layout.tsx` (`title`, `applicationName`, `appleWebApp.title`, meta `apple-mobile-web-app-title`) → **Controle de Estoque**.
+- **Validação:** `npm run build` OK.
+
 ### Sessão - 2026-05-22 - Ícone Kim Protocolo: margem segura iOS
 - **Bug:** logo no atalho parecia maior que o ícone (corte nas bordas do squircle).
 - **Correção:** `generate-kim-protocol-icons.mjs` escala logo a ~65% do quadrado (padding); ícones regenerados.

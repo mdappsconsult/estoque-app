@@ -7,16 +7,19 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
-    default: "controle de estoque",
-    template: "%s — controle de estoque",
+    default: "Controle de Estoque",
+    template: "%s — Controle de Estoque",
   },
   description: "Controle de estoque por unidade com QR e auditoria — Açaí do Kim",
-  applicationName: "controle de estoque",
+  applicationName: "Controle de Estoque",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "controle de estoque",
+    title: "Controle de Estoque",
     statusBarStyle: "default",
+  },
+  other: {
+    "apple-mobile-web-app-title": "Controle de Estoque",
   },
   icons: {
     apple: [{ url: "/branding/acai-do-kim-logo.png", type: "image/png" }],

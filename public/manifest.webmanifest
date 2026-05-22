@@ -1,6 +1,6 @@
 {
-  "name": "controle de estoque",
-  "short_name": "controle de estoque",
+  "name": "Controle de Estoque",
+  "short_name": "Controle de Estoque",
   "description": "Controle de estoque por unidade com QR — Açaí do Kim",
   "start_url": "/",
   "display": "standalone",
