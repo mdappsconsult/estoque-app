@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, LogIn, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
@@ -16,7 +16,7 @@ import {
   isAppPedidosMode,
 } from '@/lib/app-pedidos-mode';
 
-export default function LoginPage() {
+function LoginForm() {
   const { login } = useAuth();
   const searchParams = useSearchParams();
   const appPedidosQuery = searchParams.get('app') === 'pedidos';
@@ -101,5 +101,22 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-gray-50">
+      <LogoKim className="max-h-16 w-auto opacity-90" priority />
+      <div className="w-8 h-8 border-3 border-red-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginForm />
+    </Suspense>
   );
 }

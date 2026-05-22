@@ -134,10 +134,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     </>
   );
 
-  if (pedidosMode) {
-    return <ProtocoloAlertProvider>{shell}</ProtocoloAlertProvider>;
-  }
-
   return (
     <ValidadeAlertProvider>
       <ProtocoloAlertProvider>{shell}</ProtocoloAlertProvider>
