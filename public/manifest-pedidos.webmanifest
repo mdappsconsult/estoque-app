@@ -1,0 +1,23 @@
+{
+  "name": "Kim Protocol",
+  "short_name": "Kim Protocol",
+  "description": "Abrir e acompanhar protocolos da operação — Açaí do Kim",
+  "start_url": "/app-pedidos",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/branding/kim-protocol/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/branding/kim-protocol/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ]
+}

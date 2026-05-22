@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   QrCode, PackageCheck, Truck, Archive, Boxes, AlertTriangle, BarChart3,
   ChefHat, Store, ClipboardCheck, Search, Timer, FileText, Settings, MapPin, Users, Shield, Printer,
@@ -12,6 +14,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usuario-industria';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
+import { useAppPedidosMode } from '@/hooks/useAppPedidosMode';
 import { PerfilUsuario } from '@/types/database';
 
 type HomeFeature = {
@@ -255,10 +258,16 @@ const defaultSections: HomeSection[] = [
 
 export default function Home() {
   const { usuario } = useAuth();
+  const router = useRouter();
+  const pedidosMode = useAppPedidosMode();
   const permissionsMap = useEffectivePermissionsMap();
   const sections = usuario
     ? homeSectionsByProfile[usuario.perfil] ?? defaultSections
     : defaultSections;
+
+  useEffect(() => {
+    if (pedidosMode) router.replace('/protocolos');
+  }, [pedidosMode, router]);
 
   return (
     <div className="max-w-7xl mx-auto">

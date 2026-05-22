@@ -1,5 +1,20 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - Kim Protocol: nome e ícone PWA
+- **Pedido:** atalho instalado com nome **Kim Protocol** e ícone preenchendo o quadrado (sem bordas vazias).
+- **Entrega:** `APP_PEDIDOS_NOME` → Kim Protocol; ícones 180/192/512 em `public/branding/kim-protocol/` (script `npm run icons:kim-protocol`); manifest + metadata `/app-pedidos` apontam para os novos assets.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
+### Sessão - 2026-05-22 - Fix Kim Protocolo: logout/login voltava à home
+- **Bug:** após sair e entrar de novo no PWA, ia para `/` com todos os cards.
+- **Correção:** modo persistido em **`localStorage`** (antes `sessionStorage`); helpers `loginUrlAppPedidos` / `destinoPosLogin`; logout em header e perfil preserva `?app=pedidos`; home redireciona para `/protocolos` no modo protocolo.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
+### Sessão - 2026-05-22 - App enxuto «Kim Protocolo» (mesmo deploy)
+- **Pedido:** app separado na experiência do funcionário para protocolos, compartilhando projeto e hospedagem Railway.
+- **Entrega:** rota `/app-pedidos`, manifest PWA `manifest-pedidos.webmanifest` (nome **Kim Protocolo**), modo sessão em `sessionStorage` restringindo rotas a `/protocolos` + perfil; header/login adaptados; constante `APP_PEDIDOS_NOME` em `src/lib/app-pedidos-mode.ts`.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-21 - Envase: padrões 10L + balde 11L + validade 120 dias
 - **UI `/producao-envase-caixa`:** pré-seleção **Caixa açaí 10L** e **Açaí Balde 11L**; validade padrão **120 dias** (antes 7).
 - **Validação:** `npm run lint` e `npm run build` OK.

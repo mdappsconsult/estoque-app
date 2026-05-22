@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { updateUsuario } from '@/lib/services/usuarios';
 import { useRouter } from 'next/navigation';
 import { errMessage } from '@/lib/errMessage';
+import { loginUrlAppPedidos } from '@/lib/app-pedidos-mode';
 
 const perfilLabel: Record<string, string> = {
   ADMIN_MASTER: 'Admin Master',
@@ -49,8 +50,9 @@ export default function PerfilPage() {
   };
 
   const handleLogout = () => {
+    const loginUrl = loginUrlAppPedidos();
     logout();
-    router.push('/login');
+    router.push(loginUrl);
   };
 
   if (!usuario) {

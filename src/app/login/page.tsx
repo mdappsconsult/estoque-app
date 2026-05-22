@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Loader2, LogIn, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -8,13 +9,26 @@ import { LogoKim } from '@/components/branding/LogoKim';
 import { useAuth } from '@/hooks/useAuth';
 import { autenticarOperacional } from '@/lib/services/acesso';
 import { setSenhaOperacionalSession } from '@/lib/auth';
+import {
+  activateAppPedidosMode,
+  APP_PEDIDOS_NOME,
+  destinoPosLogin,
+  isAppPedidosMode,
+} from '@/lib/app-pedidos-mode';
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const searchParams = useSearchParams();
+  const appPedidosQuery = searchParams.get('app') === 'pedidos';
+  const modoProtocolo = appPedidosQuery || isAppPedidosMode();
   const [usuarioLogin, setUsuarioLogin] = useState('');
   const [senha, setSenha] = useState('');
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    if (appPedidosQuery) activateAppPedidosMode();
+  }, [appPedidosQuery]);
 
   const entrar = async () => {
     if (!usuarioLogin.trim() || !senha.trim()) return;
@@ -23,9 +37,10 @@ export default function LoginPage() {
 
     try {
       const usuario = await autenticarOperacional(usuarioLogin, senha);
+      if (appPedidosQuery) activateAppPedidosMode();
       setSenhaOperacionalSession(senha);
       login(usuario);
-      window.location.href = '/';
+      window.location.href = destinoPosLogin();
     } catch (err: unknown) {
       setErro(err instanceof Error ? err.message : 'Erro ao entrar');
     } finally {
@@ -38,14 +53,18 @@ export default function LoginPage() {
       <div className="w-full max-w-sm mx-auto p-6">
         <div className="text-center mb-8">
           <LogoKim className="max-h-36 w-auto mx-auto mb-3" priority />
-          <p className="text-gray-600 text-sm font-medium">Controle de estoque unitário</p>
+          <p className="text-gray-600 text-sm font-medium">
+            {modoProtocolo ? APP_PEDIDOS_NOME : 'Controle de estoque unitário'}
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
           <div className="text-center mb-2">
             <User className="w-8 h-8 text-red-500 mx-auto mb-2" />
             <h2 className="text-lg font-semibold text-gray-900">Entrar no sistema</h2>
-            <p className="text-sm text-gray-500">Acesso por usuário e senha</p>
+            <p className="text-sm text-gray-500">
+              {modoProtocolo ? 'Abrir e acompanhar protocolos' : 'Acesso por usuário e senha'}
+            </p>
           </div>
 
           <Input

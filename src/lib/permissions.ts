@@ -5,6 +5,7 @@ import { usuarioIndustriaSemConsultaEstoque } from '@/lib/printing/etiquetas-usu
 export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'RECEIVING_ASSIST', 'DRIVER'],
   '/login': ['*'],
+  '/app-pedidos': ['*'],
   '/qrcode': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER', 'OPERATOR_STORE', 'DRIVER'],
   '/entrada-compra': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
   '/entrada-compra-nota': ['ADMIN_MASTER', 'MANAGER', 'OPERATOR_WAREHOUSE', 'OPERATOR_WAREHOUSE_DRIVER'],
@@ -72,6 +73,7 @@ export const PERFIS_COLUNA: { value: string; label: string; short: string }[] = 
 export const ROUTE_UI_META: { path: string; label: string; section: string }[] = [
   { path: '/', label: 'Início', section: 'Geral' },
   { path: '/login', label: 'Login', section: 'Geral' },
+  { path: '/app-pedidos', label: 'Kim Protocol (entrada PWA)', section: 'Geral' },
   { path: '/qrcode', label: 'Scanner QR', section: 'Operações' },
   { path: '/entrada-compra', label: 'Registrar compra', section: 'Operações' },
   { path: '/entrada-compra-nota', label: 'Registrar compra (foto NF)', section: 'Operações' },
