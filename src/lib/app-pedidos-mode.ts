@@ -1,8 +1,8 @@
-/** App enxuto «Kim Protocol» — ativado ao abrir /app-pedidos (PWA ou link). */
+/** App enxuto «Kim Protocolo» — ativado ao abrir /app-pedidos (PWA ou link). */
 export const APP_PEDIDOS_MODE_KEY = 'estoque_app_pedidos_mode_v1';
 
 /** Nome exibido na PWA, login e header do app enxuto. */
-export const APP_PEDIDOS_NOME = 'Kim Protocol';
+export const APP_PEDIDOS_NOME = 'Kim Protocolo';
 
 /** Ícones PWA (quadrados, logo preenchendo o canvas). */
 export const APP_PEDIDOS_ICON_DIR = '/branding/kim-protocol';

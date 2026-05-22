@@ -1,6 +1,6 @@
 {
-  "name": "Kim Protocol",
-  "short_name": "Kim Protocol",
+  "name": "Kim Protocolo",
+  "short_name": "Kim Protocolo",
   "description": "Abrir e acompanhar protocolos da operação — Açaí do Kim",
   "start_url": "/app-pedidos",
   "display": "standalone",

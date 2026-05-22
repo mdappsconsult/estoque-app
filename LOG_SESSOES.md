@@ -1,5 +1,15 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - Nome PWA Kim Protocolo
+- **Pedido:** atalho com nome **Kim Protocolo** (não «controle de estoque» nem «Kim Protocol»).
+- **Correção:** `APP_PEDIDOS_NOME` + manifest; instalação deve ser feita em **`/app-pedidos`** (raiz `/` mantém manifest de estoque).
+- **Validação:** `npm run lint` e `npm run build` OK.
+
+### Sessão - 2026-05-22 - Fix crash Kim Protocol (ValidadeAlertProvider)
+- **Bug:** «Application error» em produção — `MobileHeader` chamava `useValidadeAlert` sem provider no modo Kim Protocol.
+- **Correção:** `AuthGuard` sempre monta `ValidadeAlertProvider`; login com `Suspense` em torno de `useSearchParams`.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-22 - Kim Protocol: nome e ícone PWA
 - **Pedido:** atalho instalado com nome **Kim Protocol** e ícone preenchendo o quadrado (sem bordas vazias).
 - **Entrega:** `APP_PEDIDOS_NOME` → Kim Protocol; ícones 180/192/512 em `public/branding/kim-protocol/` (script `npm run icons:kim-protocol`); manifest + metadata `/app-pedidos` apontam para os novos assets.

@@ -73,7 +73,7 @@ export const PERFIS_COLUNA: { value: string; label: string; short: string }[] = 
 export const ROUTE_UI_META: { path: string; label: string; section: string }[] = [
   { path: '/', label: 'Início', section: 'Geral' },
   { path: '/login', label: 'Login', section: 'Geral' },
-  { path: '/app-pedidos', label: 'Kim Protocol (entrada PWA)', section: 'Geral' },
+  { path: '/app-pedidos', label: 'Kim Protocolo (entrada PWA)', section: 'Geral' },
   { path: '/qrcode', label: 'Scanner QR', section: 'Operações' },
   { path: '/entrada-compra', label: 'Registrar compra', section: 'Operações' },
   { path: '/entrada-compra-nota', label: 'Registrar compra (foto NF)', section: 'Operações' },
