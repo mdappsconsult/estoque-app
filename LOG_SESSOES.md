@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - Push protocolos: notificação mais contextual
+- **Pedido:** na push a pessoa já saber o que está rolando (#pedido, loja, ação, resumo).
+- **Entrega:** `montarPushProtocolo` (título `Pedido #N · evento · loja` + corpo com quem/resumo/detalhe); recusa com motivo+comentário; urgência `de → para`; encerramento com observação.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-22 - PWA estoque: nome «Controle de Estoque»
 - **Bug:** atalho na tela inicial aparecia como «controledeestoque» (sem espaços/capitalização).
 - **Correção:** `manifest.webmanifest` + `layout.tsx` (`title`, `applicationName`, `appleWebApp.title`, meta `apple-mobile-web-app-title`) → **Controle de Estoque**.

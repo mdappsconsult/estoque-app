@@ -349,7 +349,9 @@ export async function recusarProtocolo(
     acao: 'RECUSAR_PROTOCOLO',
     detalhes: { protocolo_id: id, motivo: motivoT },
   });
-  notificarProtocoloEmBackground(id, 'RECUSOU', motivoT);
+  const previaRecusa =
+    comentarioT.length > 90 ? `${comentarioT.slice(0, 87).trimEnd()}…` : comentarioT;
+  notificarProtocoloEmBackground(id, 'RECUSOU', `${motivoT} — ${previaRecusa}`);
 }
 
 export async function iniciarExecucao(
@@ -466,7 +468,11 @@ export async function alterarPrioridade(
     ALTA: 'Importante',
     URGENTE: 'Urgente!',
   };
-  notificarProtocoloEmBackground(protocoloId, 'MUDOU_PRIORIDADE', labels[novaPrioridade]);
+  notificarProtocoloEmBackground(
+    protocoloId,
+    'MUDOU_PRIORIDADE',
+    `${labels[anterior]} → ${labels[novaPrioridade]}`
+  );
 }
 
 export async function fecharProtocolo(
@@ -496,7 +502,8 @@ export async function fecharProtocolo(
     acao: 'FECHAR_PROTOCOLO',
     detalhes: { protocolo_id: id, observacao: obs || null },
   });
-  notificarProtocoloEmBackground(id, 'FECHOU');
+  const previaObs = obs && obs.length > 90 ? `${obs.slice(0, 87).trimEnd()}…` : obs;
+  notificarProtocoloEmBackground(id, 'FECHOU', previaObs || null);
 }
 
 export async function adicionarComentario(

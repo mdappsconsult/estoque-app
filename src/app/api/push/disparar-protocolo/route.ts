@@ -1,28 +1,18 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseAdmin } from '@/lib/supabase/admin';
-import { enviarPushParaUsuarios, type PayloadPush } from '@/lib/push/servidor';
+import { enviarPushParaUsuarios } from '@/lib/push/servidor';
 import { errMessage } from '@/lib/errMessage';
 import type { PerfilUsuario } from '@/types/database';
 import {
-  PRIORIDADE_LABEL,
-  STATUS_LABEL,
-} from '@/lib/protocolos/ui-labels';
-
-type AcaoProtocolo =
-  | 'ABRIU'
-  | 'ACEITOU'
-  | 'RECUSOU'
-  | 'INICIOU'
-  | 'CONCLUIU'
-  | 'FECHOU'
-  | 'COMENTOU'
-  | 'MUDOU_PRIORIDADE';
+  montarPushProtocolo,
+  type AcaoPushProtocolo,
+} from '@/lib/protocolos/montar-push-protocolo';
 
 type Body = {
   usuarioId?: string;
   protocoloId?: string;
-  acao?: AcaoProtocolo;
-  /** Texto extra (ex.: comentário, motivo, prioridade nova). */
+  acao?: AcaoPushProtocolo;
+  /** Texto extra (comentário, motivo, técnico, urgência de→para, observação). */
   detalhe?: string | null;
 };
 
@@ -31,7 +21,7 @@ const PERFIS_GESTAO: PerfilUsuario[] = ['MANAGER', 'ADMIN_MASTER'];
 async function destinatarios(
   admin: ReturnType<typeof createSupabaseAdmin>,
   protocolo: { aberto_por: string; gerente_id: string | null },
-  acao: AcaoProtocolo,
+  acao: AcaoPushProtocolo,
   acaoUsuarioId: string,
   acaoUsuarioPerfil: PerfilUsuario
 ): Promise<string[]> {
@@ -58,95 +48,18 @@ async function destinatarios(
     } else {
       await incluirToda();
     }
-  } else if (acao === 'ACEITOU' || acao === 'RECUSOU' || acao === 'INICIOU' || acao === 'MUDOU_PRIORIDADE' || acao === 'FECHOU') {
+  } else if (
+    acao === 'ACEITOU' ||
+    acao === 'RECUSOU' ||
+    acao === 'INICIOU' ||
+    acao === 'MUDOU_PRIORIDADE' ||
+    acao === 'FECHOU'
+  ) {
     ids.add(protocolo.aberto_por);
   }
 
   ids.delete(acaoUsuarioId);
   return Array.from(ids);
-}
-
-function montarPayload(
-  acao: AcaoProtocolo,
-  protocolo: {
-    numero: number;
-    titulo: string;
-    prioridade: string;
-    status: string;
-    local_nome: string | null;
-  },
-  autorAcaoNome: string,
-  detalhe: string | null
-): PayloadPush {
-  const numero = `Pedido #${protocolo.numero}`;
-  const titulo = protocolo.titulo || '(sem título)';
-  const lugar = protocolo.local_nome || 'Administração';
-
-  if (acao === 'ABRIU') {
-    return {
-      titulo: `Novo pedido em ${lugar}`,
-      corpo: `${autorAcaoNome} abriu: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}-aberto`,
-    };
-  }
-  if (acao === 'ACEITOU') {
-    return {
-      titulo: `${numero} aceito`,
-      corpo: `${autorAcaoNome} aceitou: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  if (acao === 'RECUSOU') {
-    return {
-      titulo: `${numero} recusado`,
-      corpo: detalhe
-        ? `${autorAcaoNome} recusou — ${detalhe}`
-        : `${autorAcaoNome} recusou: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  if (acao === 'INICIOU') {
-    return {
-      titulo: `${numero} em execução`,
-      corpo: detalhe
-        ? `${autorAcaoNome} chamou ${detalhe} para resolver`
-        : `${autorAcaoNome} iniciou a execução: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  if (acao === 'CONCLUIU') {
-    return {
-      titulo: `${numero} pronto, conferir`,
-      corpo: `${autorAcaoNome} marcou pronto: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  if (acao === 'FECHOU') {
-    return {
-      titulo: `${numero} encerrado`,
-      corpo: `${autorAcaoNome} encerrou: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  if (acao === 'COMENTOU') {
-    return {
-      titulo: `${numero} — novo comentário`,
-      corpo: detalhe ? `${autorAcaoNome}: ${detalhe}` : `${autorAcaoNome} comentou em "${titulo}"`,
-      tag: `protocolo-${protocolo.numero}-comentario`,
-    };
-  }
-  if (acao === 'MUDOU_PRIORIDADE') {
-    return {
-      titulo: `${numero} agora é ${detalhe || 'outra urgência'}`,
-      corpo: `${autorAcaoNome} mudou a urgência: ${titulo}`,
-      tag: `protocolo-${protocolo.numero}`,
-    };
-  }
-  return {
-    titulo: numero,
-    corpo: `${STATUS_LABEL[protocolo.status as keyof typeof STATUS_LABEL] || protocolo.status} · ${PRIORIDADE_LABEL[protocolo.prioridade as keyof typeof PRIORIDADE_LABEL] || protocolo.prioridade}`,
-    tag: `protocolo-${protocolo.numero}`,
-  };
 }
 
 export async function POST(req: Request) {
@@ -164,7 +77,6 @@ export async function POST(req: Request) {
 
     const admin = createSupabaseAdmin();
 
-    // Valida que quem disparou existe e está ativo (sem isso é spam aberto).
     const { data: ator } = await admin
       .from('usuarios')
       .select('id, nome, perfil, status')
@@ -185,7 +97,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Protocolo não encontrado.' }, { status: 404 });
     }
 
-    // Bloqueio mínimo de spam: só o autor, o gerente ou alguém de gestão pode disparar.
     const ehGestao = PERFIS_GESTAO.includes(ator.perfil as PerfilUsuario);
     const ehAutor = p.aberto_por === usuarioId;
     const ehGerente = !!p.gerente_id && p.gerente_id === usuarioId;
@@ -209,7 +120,7 @@ export async function POST(req: Request) {
       ator.perfil as PerfilUsuario
     );
 
-    const payload = montarPayload(
+    const payload = montarPushProtocolo(
       acao,
       {
         numero: Number(p.numero),
@@ -227,6 +138,7 @@ export async function POST(req: Request) {
       protocolo: p.numero,
       ator: ator.nome,
       destinatarios: dest.length,
+      titulo: payload.titulo,
     });
 
     const r = await enviarPushParaUsuarios(dest, payload);
