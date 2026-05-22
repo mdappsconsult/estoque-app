@@ -1,10 +1,10 @@
 /**
- * Nome do PWA «Controle de Estoque».
- * iOS remove espaços comuns no rótulo do ícone — usamos NBSP (\u00A0) nos metadados PWA.
+ * Nome do PWA «Controle de Estoque» na tela inicial do celular.
+ * iOS remove qualquer espaço (inclusive NBSP) no rótulo do ícone — usamos «·» entre palavras.
  */
-export const APP_ESTOQUE_NOME_PWA = 'Controle\u00A0de\u00A0Estoque';
+export const APP_ESTOQUE_NOME_PWA = 'Controle·Estoque';
 
-/** Texto legível na UI do app (espaços normais). */
+/** Texto legível dentro do app (espaços normais). */
 export const APP_ESTOQUE_NOME = 'Controle de Estoque';
 
 export const APP_ESTOQUE_ICON_DIR = '/branding/estoque-app';

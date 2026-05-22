@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - PWA estoque: rótulo iOS Controle·Estoque
+- **Bug:** NBSP não adiantou — iOS ainda mostrava «ControledeEstoque» no ícone.
+- **Correção:** nome PWA/título da página **`Controle·Estoque`** (ponto médio); UI interna mantém «Controle de Estoque».
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-22 - PWA estoque: nome com espaços no iOS + ícone quadrado
 - **Bug:** atalho mostrava «ControledeEstoq…» (espaços removidos pelo iOS).
 - **Correção:** NBSP em manifest/`apple-mobile-web-app-title`; ícones 180/192/512 em `public/branding/estoque-app/` + `public/apple-touch-icon.png` (`npm run icons:estoque`).

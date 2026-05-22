@@ -13,7 +13,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: {
-    default: APP_ESTOQUE_NOME,
+    default: APP_ESTOQUE_NOME_PWA,
     template: `%s — ${APP_ESTOQUE_NOME}`,
   },
   description: "Controle de estoque por unidade com QR e auditoria — Açaí do Kim",
