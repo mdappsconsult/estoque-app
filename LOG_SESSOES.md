@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - Ícone Kim Protocolo: margem segura iOS
+- **Bug:** logo no atalho parecia maior que o ícone (corte nas bordas do squircle).
+- **Correção:** `generate-kim-protocol-icons.mjs` escala logo a ~65% do quadrado (padding); ícones regenerados.
+- **Validação:** script OK; deploy pendente push.
+
 ### Sessão - 2026-05-22 - Nome PWA Kim Protocolo
 - **Pedido:** atalho com nome **Kim Protocolo** (não «controle de estoque» nem «Kim Protocol»).
 - **Correção:** `APP_PEDIDOS_NOME` + manifest; instalação deve ser feita em **`/app-pedidos`** (raiz `/` mantém manifest de estoque).

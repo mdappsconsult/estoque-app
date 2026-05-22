@@ -1,5 +1,5 @@
 /**
- * Gera ícones quadrados do Kim Protocol a partir do logo (trim + preenchimento total).
+ * Gera ícones quadrados do Kim Protocolo (trim + margem segura para iOS/Android).
  * Uso: node scripts/generate-kim-protocol-icons.mjs
  */
 import sharp from 'sharp';
@@ -11,6 +11,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const src = path.join(root, 'public/branding/acai-do-kim-logo.png');
 const outDir = path.join(root, 'public/branding/kim-protocol');
+
+/** Área útil do logo dentro do quadrado (~65% — margem extra para squircle iOS). */
+const SAFE_RATIO = 0.65;
 
 const sizes = [
   { name: 'apple-touch-icon.png', size: 180 },
@@ -25,8 +28,8 @@ async function buildSquareIcon(size) {
   const meta = await sharp(trimmed).metadata();
   const w = meta.width ?? size;
   const h = meta.height ?? size;
-  // Escala o logo ao máximo dentro do quadrado, sem cortar letras.
-  const scale = size / Math.max(w, h);
+  const maxInner = Math.round(size * SAFE_RATIO);
+  const scale = maxInner / Math.max(w, h);
   const innerW = Math.round(w * scale);
   const innerH = Math.round(h * scale);
   const resized = await sharp(trimmed).resize(innerW, innerH, { fit: 'fill' }).png().toBuffer();
@@ -43,7 +46,7 @@ await mkdir(outDir, { recursive: true });
 for (const { name, size } of sizes) {
   const buf = await buildSquareIcon(size);
   await sharp(buf).toFile(path.join(outDir, name));
-  console.log(`✓ ${name} (${size}×${size})`);
+  console.log(`✓ ${name} (${size}×${size}, logo ~${Math.round(SAFE_RATIO * 100)}%)`);
 }
 
 console.log(`Ícones em public/branding/kim-protocol/`);
