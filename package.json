@@ -19,6 +19,7 @@
     "railway:diagnose": "node scripts/railway-diagnose.mjs",
     "seed:operacional": "node scripts/seed-credenciais-operacionais.mjs",
     "icons:kim-protocol": "node scripts/generate-kim-protocol-icons.mjs",
+    "icons:estoque": "node scripts/generate-estoque-icons.mjs",
     "railway:prune-queued": "node scripts/railway-prune-queued.mjs",
     "test:historico-producao": "node scripts/test-historico-producao.mjs"
   },

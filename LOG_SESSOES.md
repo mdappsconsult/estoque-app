@@ -1,5 +1,10 @@
 # Log de Sessões
 
+### Sessão - 2026-05-22 - PWA estoque: nome com espaços no iOS + ícone quadrado
+- **Bug:** atalho mostrava «ControledeEstoq…» (espaços removidos pelo iOS).
+- **Correção:** NBSP em manifest/`apple-mobile-web-app-title`; ícones 180/192/512 em `public/branding/estoque-app/` + `public/apple-touch-icon.png` (`npm run icons:estoque`).
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-22 - Push protocolos: notificação mais contextual
 - **Pedido:** na push a pessoa já saber o que está rolando (#pedido, loja, ação, resumo).
 - **Entrega:** `montarPushProtocolo` (título `Pedido #N · evento · loja` + corpo com quem/resumo/detalhe); recusa com motivo+comentário; urgência `de → para`; encerramento com observação.
