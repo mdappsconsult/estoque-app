@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { PerfilUsuario, Usuario } from '@/types/database';
 import { registrarAuditoria } from './auditoria';
 import { notificarProtocoloEmBackground } from '@/lib/protocolos/notificar';
+import { STATUS_LABEL } from '@/lib/protocolos/ui-labels';
 
 // ----------------------------------------------------------------------------
 // Tipos
@@ -42,6 +43,8 @@ export interface Protocolo {
   iniciado_em: string | null;
   concluido_em: string | null;
   fechado_em: string | null;
+  /** Última mudança (status, prioridade, comentário) — badge de não lidos. */
+  atualizado_em: string;
 }
 
 export interface ProtocoloComEmbed extends Protocolo {
@@ -95,11 +98,91 @@ export function eGestao(perfil: PerfilUsuario): boolean {
 const SELECT_LISTA = `
   id, numero, titulo, descricao, local_id, prioridade, status, responsavel_externo,
   aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, foto_paths, reaberto_de,
-  created_at, aceito_em, iniciado_em, concluido_em, fechado_em,
+  created_at, aceito_em, iniciado_em, concluido_em, fechado_em, atualizado_em,
   autor:usuarios!aberto_por(id, nome),
   gerente:usuarios!gerente_id(id, nome),
   local:locais(id, nome, tipo)
 `;
+
+const STATUS_ABERTOS_GESTAO: StatusProtocolo[] = [
+  'ABERTO',
+  'ACEITO',
+  'EM_EXECUCAO',
+  'CONCLUIDO',
+];
+
+interface ProtocoloBadgeRow {
+  id: string;
+  created_at: string;
+  atualizado_em: string;
+}
+
+function protocoloEhNaoLido(
+  p: ProtocoloBadgeRow,
+  vistoEm: string | null | undefined
+): boolean {
+  const referencia = vistoEm ?? p.created_at;
+  return new Date(p.atualizado_em).getTime() > new Date(referencia).getTime();
+}
+
+async function buscarProtocolosEscopoBadge(usuario: Usuario): Promise<ProtocoloBadgeRow[]> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  let q: any = supabase
+    .from('protocolos')
+    .select('id, created_at, atualizado_em');
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  if (eGestao(usuario.perfil)) {
+    q = q.in('status', STATUS_ABERTOS_GESTAO);
+  } else if (eOperador(usuario.perfil)) {
+    q = q.eq('aberto_por', usuario.id).not('status', 'in', '(FECHADO,RECUSADO)');
+  } else {
+    return [];
+  }
+
+  const { data, error } = await q.limit(2000);
+  if (error) throw error;
+  return (data || []) as ProtocoloBadgeRow[];
+}
+
+async function buscarLeiturasUsuario(usuarioId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from('protocolo_leituras')
+    .select('protocolo_id, visto_em')
+    .eq('usuario_id', usuarioId)
+    .limit(5000);
+  if (error) throw error;
+  const map = new Map<string, string>();
+  for (const row of data || []) {
+    map.set(row.protocolo_id as string, row.visto_em as string);
+  }
+  return map;
+}
+
+export async function marcarProtocoloComoVisto(
+  usuarioId: string,
+  protocoloId: string
+): Promise<void> {
+  const { error } = await supabase.from('protocolo_leituras').upsert(
+    {
+      usuario_id: usuarioId,
+      protocolo_id: protocoloId,
+      visto_em: new Date().toISOString(),
+    },
+    { onConflict: 'usuario_id,protocolo_id' }
+  );
+  if (error) throw error;
+}
+
+export async function listarProtocolosNaoLidosIds(usuario: Usuario): Promise<string[]> {
+  const [protocolos, leituras] = await Promise.all([
+    buscarProtocolosEscopoBadge(usuario),
+    buscarLeiturasUsuario(usuario.id),
+  ]);
+  return protocolos
+    .filter((p) => protocoloEhNaoLido(p, leituras.get(p.id)))
+    .map((p) => p.id);
+}
 
 // ----------------------------------------------------------------------------
 // CRUD — leitura
@@ -172,21 +255,10 @@ export async function buscarProtocolo(id: string): Promise<ProtocoloComEmbed | n
   return (data as unknown as ProtocoloComEmbed) || null;
 }
 
+/** Contagem de pedidos com atividade não lida (msg nova ou mudança de status). */
 export async function contarProtocolosBadge(usuario: Usuario): Promise<number> {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  let q: any = supabase.from('protocolos').select('id', { count: 'exact', head: true });
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-
-  if (eGestao(usuario.perfil)) {
-    q = q.in('status', ['ABERTO', 'ACEITO', 'EM_EXECUCAO', 'CONCLUIDO']);
-  } else if (eOperador(usuario.perfil)) {
-    q = q.eq('aberto_por', usuario.id).not('status', 'in', '(FECHADO,RECUSADO)');
-  } else {
-    return 0;
-  }
-  const { count, error } = await q;
-  if (error) throw error;
-  return count ?? 0;
+  const ids = await listarProtocolosNaoLidosIds(usuario);
+  return ids.length;
 }
 
 // ----------------------------------------------------------------------------
@@ -281,6 +353,8 @@ export async function abrirProtocolo(input: AbrirProtocoloInput): Promise<Protoc
 
   notificarProtocoloEmBackground(data.id, 'ABRIU');
 
+  await marcarProtocoloComoVisto(input.aberto_por, data.id).catch(() => {});
+
   return data as Protocolo;
 }
 
@@ -306,6 +380,7 @@ export async function aceitarProtocolo(id: string, gerenteId: string): Promise<v
     detalhes: { protocolo_id: id },
   });
   notificarProtocoloEmBackground(id, 'ACEITOU');
+  await marcarProtocoloComoVisto(gerenteId, id).catch(() => {});
 }
 
 export async function recusarProtocolo(
@@ -352,6 +427,7 @@ export async function recusarProtocolo(
   const previaRecusa =
     comentarioT.length > 90 ? `${comentarioT.slice(0, 87).trimEnd()}…` : comentarioT;
   notificarProtocoloEmBackground(id, 'RECUSOU', `${motivoT} — ${previaRecusa}`);
+  await marcarProtocoloComoVisto(gerenteId, id).catch(() => {});
 }
 
 export async function iniciarExecucao(
@@ -385,6 +461,7 @@ export async function iniciarExecucao(
     detalhes: { protocolo_id: id, responsavel: respT },
   });
   notificarProtocoloEmBackground(id, 'INICIOU', respT);
+  await marcarProtocoloComoVisto(gerenteId, id).catch(() => {});
 }
 
 export async function marcarConcluido(
@@ -423,6 +500,7 @@ export async function marcarConcluido(
     detalhes: { protocolo_id: id, por_autor: ehAutor },
   });
   notificarProtocoloEmBackground(id, 'CONCLUIU');
+  await marcarProtocoloComoVisto(usuarioId, id).catch(() => {});
 }
 
 export async function alterarPrioridade(
@@ -473,6 +551,7 @@ export async function alterarPrioridade(
     'MUDOU_PRIORIDADE',
     `${labels[anterior]} → ${labels[novaPrioridade]}`
   );
+  await marcarProtocoloComoVisto(usuarioId, protocoloId).catch(() => {});
 }
 
 export async function fecharProtocolo(
@@ -504,6 +583,7 @@ export async function fecharProtocolo(
   });
   const previaObs = obs && obs.length > 90 ? `${obs.slice(0, 87).trimEnd()}…` : obs;
   notificarProtocoloEmBackground(id, 'FECHOU', previaObs || null);
+  await marcarProtocoloComoVisto(gerenteId, id).catch(() => {});
 }
 
 export async function adicionarComentario(
@@ -538,6 +618,81 @@ export async function adicionarComentario(
   });
   const previa = t.length > 120 ? t.slice(0, 117).trimEnd() + '…' : t;
   notificarProtocoloEmBackground(protocoloId, 'COMENTOU', previa);
+  await marcarProtocoloComoVisto(usuarioId, protocoloId).catch(() => {});
+}
+
+// ----------------------------------------------------------------------------
+// Reversão de status (admin)
+// ----------------------------------------------------------------------------
+
+const STATUS_ANTERIOR_ADMIN: Partial<Record<StatusProtocolo, StatusProtocolo>> = {
+  FECHADO: 'CONCLUIDO',
+  CONCLUIDO: 'EM_EXECUCAO',
+  EM_EXECUCAO: 'ACEITO',
+  ACEITO: 'ABERTO',
+};
+
+/** Volta um passo no fluxo — somente `ADMIN_MASTER`. */
+export async function reverterStatusProtocoloAdmin(
+  id: string,
+  usuarioId: string,
+  perfil: PerfilUsuario
+): Promise<void> {
+  if (perfil !== 'ADMIN_MASTER') {
+    throw new Error('Só administrador pode voltar o status de um pedido.');
+  }
+
+  const { data: atual, error: eGet } = await supabase
+    .from('protocolos')
+    .select('status, numero')
+    .eq('id', id)
+    .maybeSingle();
+  if (eGet) throw eGet;
+  if (!atual) throw new Error('Pedido não encontrado.');
+
+  const statusAtual = atual.status as StatusProtocolo;
+  const statusNovo = STATUS_ANTERIOR_ADMIN[statusAtual];
+  if (!statusNovo) {
+    throw new Error('Este status não pode ser revertido por aqui.');
+  }
+
+  const patch: Record<string, unknown> = { status: statusNovo };
+  if (statusAtual === 'FECHADO') {
+    patch.fechado_em = null;
+  } else if (statusAtual === 'CONCLUIDO') {
+    patch.concluido_em = null;
+  } else if (statusAtual === 'EM_EXECUCAO') {
+    patch.iniciado_em = null;
+    patch.responsavel_externo = null;
+  } else if (statusAtual === 'ACEITO') {
+    patch.aceito_em = null;
+    patch.gerente_id = null;
+  }
+
+  const { data, error } = await supabase
+    .from('protocolos')
+    .update(patch)
+    .eq('id', id)
+    .eq('status', statusAtual)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new Error('Não foi possível voltar o status — alguém pode ter alterado o pedido.');
+  }
+
+  await registrarAuditoria({
+    usuario_id: usuarioId,
+    acao: 'REVERTER_STATUS_PROTOCOLO',
+    detalhes: { protocolo_id: id, de: statusAtual, para: statusNovo, numero: atual.numero },
+  });
+
+  notificarProtocoloEmBackground(
+    id,
+    'REVERTEU',
+    `${STATUS_LABEL[statusAtual]} → ${STATUS_LABEL[statusNovo]}`
+  );
+  await marcarProtocoloComoVisto(usuarioId, id).catch(() => {});
 }
 
 // ----------------------------------------------------------------------------
@@ -648,7 +803,8 @@ export type TimelineEntradaTipo =
   | 'CONCLUIU'
   | 'FECHOU'
   | 'COMENTOU'
-  | 'MUDOU_PRIORIDADE';
+  | 'MUDOU_PRIORIDADE'
+  | 'REVERTEU';
 
 export interface TimelineEntrada {
   id: string;
@@ -668,6 +824,7 @@ const ACAO_PARA_TIPO: Record<string, TimelineEntradaTipo> = {
   MARCAR_CONCLUIDO_PROTOCOLO: 'CONCLUIU',
   FECHAR_PROTOCOLO: 'FECHOU',
   ALTERAR_PRIORIDADE_PROTOCOLO: 'MUDOU_PRIORIDADE',
+  REVERTER_STATUS_PROTOCOLO: 'REVERTEU',
 };
 
 interface AuditoriaRow {

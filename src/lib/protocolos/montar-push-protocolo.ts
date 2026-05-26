@@ -9,7 +9,8 @@ export type AcaoPushProtocolo =
   | 'CONCLUIU'
   | 'FECHOU'
   | 'COMENTOU'
-  | 'MUDOU_PRIORIDADE';
+  | 'MUDOU_PRIORIDADE'
+  | 'REVERTEU';
 
 export type ProtocoloPushInfo = {
   numero: number;
@@ -131,6 +132,18 @@ export function montarPushProtocolo(
         detalhe
           ? `${quem} mudou urgência de ${num} (${detalhe}) — ${resumo}`
           : `${quem} mudou urgência de ${num} — ${resumo}`,
+        MAX_CORPO
+      ),
+      tag: tagBase,
+    };
+  }
+  if (acao === 'REVERTEU') {
+    return {
+      titulo: tituloPedido(protocolo.numero, 'status alterado', lugar),
+      corpo: truncar(
+        detalhe
+          ? `${quem} voltou o status de ${num} (${detalhe}) — ${resumo}`
+          : `${quem} alterou o status de ${num} — ${resumo}`,
         MAX_CORPO
       ),
       tag: tagBase,

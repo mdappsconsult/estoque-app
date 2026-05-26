@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   CheckCircle,
   XCircle,
+  RotateCcw,
   Send,
   Trash2,
   Loader2,
@@ -59,6 +60,8 @@ import {
   PRAZOS_DEFAULT,
   PRIORIDADES,
   recusarProtocolo,
+  marcarProtocoloComoVisto,
+  reverterStatusProtocoloAdmin,
   type PrazosConfigMap,
   type Prioridade,
   type ProtocoloComEmbed,
@@ -80,8 +83,8 @@ export default function ProtocolosPage() {
     table: 'protocolos',
     select: `
       id, numero, titulo, descricao, local_id, prioridade, status, responsavel_externo,
-      aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, reaberto_de,
-      created_at, aceito_em, iniciado_em, concluido_em, fechado_em,
+      aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, foto_paths, reaberto_de,
+      created_at, aceito_em, iniciado_em, concluido_em, fechado_em, atualizado_em,
       autor:usuarios!aberto_por(id, nome),
       gerente:usuarios!gerente_id(id, nome),
       local:locais(id, nome, tipo)
@@ -240,9 +243,15 @@ export default function ProtocolosPage() {
           </h1>
           {ehGestao ? (
             <p className="text-sm text-gray-500 mt-0.5">
-              {contadorPendentesGestao === 0
-                ? 'Nenhum pedido esperando você.'
-                : `${contadorPendentesGestao} pedido${contadorPendentesGestao > 1 ? 's' : ''} esperando você`}
+              {alerta.total > 0 ? (
+                <span className="text-emerald-700 font-semibold">
+                  {alerta.total} com novidade{alerta.total > 1 ? 's' : ''}
+                </span>
+              ) : contadorPendentesGestao === 0 ? (
+                'Nenhum pedido esperando você.'
+              ) : (
+                `${contadorPendentesGestao} pedido${contadorPendentesGestao > 1 ? 's' : ''} em aberto`
+              )}
               {contadorAtrasados > 0 && (
                 <span className="ml-2 text-red-600 font-semibold">
                   · {contadorAtrasados} atrasado{contadorAtrasados > 1 ? 's' : ''}
@@ -250,7 +259,11 @@ export default function ProtocolosPage() {
               )}
             </p>
           ) : (
-            <p className="text-sm text-gray-500 mt-0.5">Meus pedidos abertos</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {alerta.total > 0
+                ? `${alerta.total} pedido${alerta.total > 1 ? 's' : ''} com novidade`
+                : 'Meus pedidos abertos'}
+            </p>
           )}
         </div>
         {podeAbrir && (
@@ -379,6 +392,7 @@ export default function ProtocolosPage() {
               ehGestao={ehGestao}
               usuarioId={usuario.id}
               prazos={prazos}
+              temNaoLido={alerta.naoLidosIds.has(p.id)}
               onClickDetalhe={() => setDetalheId(p.id)}
               onAcaoConcluida={aoConcluirAcao}
             />
@@ -434,6 +448,7 @@ interface CardProtocoloProps {
   ehGestao: boolean;
   usuarioId: string;
   prazos: PrazosConfigMap;
+  temNaoLido?: boolean;
   onClickDetalhe: () => void;
   onAcaoConcluida: () => Promise<void> | void;
 }
@@ -452,6 +467,7 @@ function CardProtocolo({
   ehGestao,
   usuarioId,
   prazos,
+  temNaoLido = false,
   onClickDetalhe,
   onAcaoConcluida,
 }: CardProtocoloProps) {
@@ -559,7 +575,11 @@ function CardProtocolo({
   return (
     <button
       onClick={onClickDetalhe}
-      className="w-full text-left bg-white rounded-xl border border-gray-200 hover:border-gray-300 p-4 shadow-sm transition-colors"
+      className={`w-full text-left bg-white rounded-xl border p-4 shadow-sm transition-colors ${
+        temNaoLido
+          ? 'border-emerald-400 ring-1 ring-emerald-100 hover:border-emerald-500'
+          : 'border-gray-200 hover:border-gray-300'
+      }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -569,13 +589,22 @@ function CardProtocolo({
               aria-label={PRIORIDADE_LABEL[p.prioridade]}
             />
             <span className="text-xs text-gray-400 font-mono">#{p.numero}</span>
+            {temNaoLido && (
+              <span
+                className="shrink-0 w-2.5 h-2.5 rounded-full bg-emerald-500"
+                aria-label="Novidade"
+                title="Mensagem ou atualização não lida"
+              />
+            )}
             {ehMeuPedido && ehGestao && (
               <span className="text-[10px] uppercase font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
                 Meu
               </span>
             )}
           </div>
-          <p className="font-semibold text-gray-900 truncate">{p.titulo}</p>
+          <p className={`truncate ${temNaoLido ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>
+            {p.titulo}
+          </p>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
             <span className="inline-flex items-center gap-1">
               <MapPin className="w-3 h-3" /> {lugar}
@@ -990,8 +1019,8 @@ function ModalDetalheProtocolo({
       .from('protocolos')
       .select(`
         id, numero, titulo, descricao, local_id, prioridade, status, responsavel_externo,
-        aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, reaberto_de,
-        created_at, aceito_em, iniciado_em, concluido_em, fechado_em,
+        aberto_por, gerente_id, motivo_recusa, observacao_fechamento, foto_path, foto_paths, reaberto_de,
+        created_at, aceito_em, iniciado_em, concluido_em, fechado_em, atualizado_em,
         autor:usuarios!aberto_por(id, nome),
         gerente:usuarios!gerente_id(id, nome),
         local:locais(id, nome, tipo)
@@ -1006,6 +1035,14 @@ function ModalDetalheProtocolo({
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  // Marca como lido ao abrir o detalhe (badge estilo WhatsApp).
+  useEffect(() => {
+    if (!usuario?.id || !isOpen) return;
+    void marcarProtocoloComoVisto(usuario.id, protocoloId)
+      .then(() => onAcaoConcluida())
+      .catch(() => {});
+  }, [usuario?.id, protocoloId, isOpen, onAcaoConcluida]);
 
   // Realtime: recarrega o detalhe + timeline sempre que esse protocolo ou um comentário
   // dele muda no banco. Evita ter que dar F5 quando outro usuário aceita/comenta/encerra.
@@ -1216,6 +1253,30 @@ function ModalDetalheProtocolo({
 
   /** Exclusão definitiva — só `ADMIN_MASTER`. Apaga banco + foto do bucket; mantém histórico em `auditoria`. */
   const ehAdminMaster = usuario.perfil === 'ADMIN_MASTER';
+  const podeReverterStatus =
+    ehAdminMaster &&
+    ['ACEITO', 'EM_EXECUCAO', 'CONCLUIDO', 'FECHADO'].includes(p.status);
+
+  const onReverterStatus = async () => {
+    if (!ehAdminMaster) return;
+    if (
+      !confirm(
+        `Voltar o status deste pedido um passo?\n\nStatus atual: ${STATUS_LABEL[p.status]}`
+      )
+    ) {
+      return;
+    }
+    setAcaoEmAndamento(true);
+    try {
+      await reverterStatusProtocoloAdmin(p.id, usuario.id, usuario.perfil);
+      await recarregar();
+    } catch (err) {
+      alert(errMessage(err, 'Erro ao voltar status'));
+    } finally {
+      setAcaoEmAndamento(false);
+    }
+  };
+
   const onExcluirProtocolo = async () => {
     if (!ehAdminMaster) return;
     if (
@@ -1582,7 +1643,18 @@ function ModalDetalheProtocolo({
         {acaoOperador}
 
         {ehAdminMaster && (
-          <div className="pt-1">
+          <div className="pt-1 space-y-2">
+            {podeReverterStatus && (
+              <button
+                type="button"
+                onClick={onReverterStatus}
+                disabled={acaoEmAndamento}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-amber-300 text-amber-800 hover:bg-amber-50 rounded-xl text-sm font-semibold disabled:opacity-50"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Voltar status (admin)
+              </button>
+            )}
             <button
               type="button"
               onClick={onExcluirProtocolo}
@@ -1592,8 +1664,8 @@ function ModalDetalheProtocolo({
               <Trash2 className="w-4 h-4" />
               Excluir pedido (admin)
             </button>
-            <p className="mt-1 text-[11px] text-gray-500">
-              Remove o pedido, comentários e foto. Não dá para desfazer. O histórico fica em auditoria.
+            <p className="text-[11px] text-gray-500">
+              «Voltar status» desfaz um passo (ex.: pronto → em execução). Excluir remove tudo — só auditoria fica.
             </p>
           </div>
         )}
@@ -1688,6 +1760,14 @@ function LinhaTimeline({ entrada }: { entrada: TimelineEntrada }) {
   } else if (t.tipo === 'COMENTOU') {
     icone = <Send className="w-4 h-4 text-gray-500" />;
     texto = `${t.usuario_nome || 'Alguém'} comentou`;
+  } else if (t.tipo === 'REVERTEU') {
+    icone = <RotateCcw className="w-4 h-4 text-amber-700" />;
+    const d = (t.detalhes as { de?: StatusProtocolo; para?: StatusProtocolo } | null) || {};
+    const de = d.de ? STATUS_LABEL[d.de] : null;
+    const para = d.para ? STATUS_LABEL[d.para] : null;
+    texto = `${t.usuario_nome || 'Admin'} voltou o status${
+      de && para ? ` de ${de} para ${para}` : ''
+    }`;
   }
 
   return (

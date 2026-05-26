@@ -14,10 +14,17 @@ import { useAuth } from '@/hooks/useAuth';
 import { useEffectivePermissionsMap } from '@/hooks/useEffectivePermissionsMap';
 import { hasAccessWithMap } from '@/lib/permissions';
 import { supabase } from '@/lib/supabase';
-import { contarProtocolosBadge, eGestao, eOperador } from '@/lib/services/protocolos';
+import {
+  contarProtocolosBadge,
+  eGestao,
+  eOperador,
+  listarProtocolosNaoLidosIds,
+} from '@/lib/services/protocolos';
 
 type ProtocoloAlertContextValue = {
+  /** Pedidos com msg/status não lidos (estilo WhatsApp). */
   total: number;
+  naoLidosIds: ReadonlySet<string>;
   loading: boolean;
   podeProtocolos: boolean;
   refetch: () => Promise<void>;
@@ -28,7 +35,13 @@ const ProtocoloAlertContext = createContext<ProtocoloAlertContextValue | null>(n
 export function useProtocoloAlert(): ProtocoloAlertContextValue {
   const ctx = useContext(ProtocoloAlertContext);
   if (!ctx) {
-    return { total: 0, loading: false, podeProtocolos: false, refetch: async () => {} };
+    return {
+      total: 0,
+      naoLidosIds: new Set(),
+      loading: false,
+      podeProtocolos: false,
+      refetch: async () => {},
+    };
   }
   return ctx;
 }
@@ -44,19 +57,25 @@ export function ProtocoloAlertProvider({ children }: { children: ReactNode }) {
   );
 
   const [total, setTotal] = useState(0);
+  const [naoLidosIds, setNaoLidosIds] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const carregar = useCallback(async () => {
     if (!usuario || !podeProtocolos) {
       setTotal(0);
+      setNaoLidosIds(new Set());
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const n = await contarProtocolosBadge(usuario);
+      const [n, ids] = await Promise.all([
+        contarProtocolosBadge(usuario),
+        listarProtocolosNaoLidosIds(usuario),
+      ]);
       setTotal(n);
+      setNaoLidosIds(new Set(ids));
     } catch {
       // silencioso — badge é informativo
     } finally {
@@ -71,17 +90,23 @@ export function ProtocoloAlertProvider({ children }: { children: ReactNode }) {
     return () => cancelAnimationFrame(id);
   }, [carregar]);
 
-  // Realtime: muda algo em protocolos -> recarrega contagem com debounce
+  // Realtime: protocolo ou comentário novo → recarrega contagem com debounce
   useEffect(() => {
     if (!podeProtocolos) return;
+    const schedule = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        void carregar();
+      }, 300);
+    };
     const ch = supabase
       .channel('protocolos-badge')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'protocolos' }, () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => {
-          void carregar();
-        }, 300);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'protocolos' }, schedule)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'protocolo_comentarios' },
+        schedule
+      )
       .subscribe();
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -96,8 +121,8 @@ export function ProtocoloAlertProvider({ children }: { children: ReactNode }) {
   }, [carregar]);
 
   const value = useMemo<ProtocoloAlertContextValue>(
-    () => ({ total, loading, podeProtocolos, refetch: carregar }),
-    [total, loading, podeProtocolos, carregar]
+    () => ({ total, naoLidosIds, loading, podeProtocolos, refetch: carregar }),
+    [total, naoLidosIds, loading, podeProtocolos, carregar]
   );
 
   return (

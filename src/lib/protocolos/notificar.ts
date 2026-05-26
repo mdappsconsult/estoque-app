@@ -10,7 +10,8 @@ export type AcaoNotificavel =
   | 'CONCLUIU'
   | 'FECHOU'
   | 'COMENTOU'
-  | 'MUDOU_PRIORIDADE';
+  | 'MUDOU_PRIORIDADE'
+  | 'REVERTEU';
 
 /**
  * Dispara push em fire-and-forget após uma mutação bem-sucedida em protocolos.

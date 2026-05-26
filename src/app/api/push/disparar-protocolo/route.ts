@@ -53,7 +53,8 @@ async function destinatarios(
     acao === 'RECUSOU' ||
     acao === 'INICIOU' ||
     acao === 'MUDOU_PRIORIDADE' ||
-    acao === 'FECHOU'
+    acao === 'FECHOU' ||
+    acao === 'REVERTEU'
   ) {
     ids.add(protocolo.aberto_por);
   }

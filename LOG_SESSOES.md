@@ -1,5 +1,11 @@
 # Log de Sessões
 
+### Sessão - 2026-05-26 - Protocolos: badge não lidos + reverter status admin
+- **Pedido:** badge estilo WhatsApp quando chega msg ou muda status; admin poder voltar status.
+- **Entrega:** coluna `atualizado_em` + tabela `protocolo_leituras` + triggers; badge no header/cards por novidade; leitura ao abrir detalhe; `reverterStatusProtocoloAdmin` (ADMIN_MASTER, um passo); push/timeline `REVERTEU`.
+- **Banco:** migração **`20260526120000_protocolos_leituras_atualizado_em.sql`** aplicada via MCP.
+- **Validação:** `npm run lint` e `npm run build` OK.
+
 ### Sessão - 2026-05-22 - PWA estoque: rótulo iOS Controle·Estoque
 - **Bug:** NBSP não adiantou — iOS ainda mostrava «ControledeEstoque» no ícone.
 - **Correção:** nome PWA/título da página **`Controle·Estoque`** (ponto médio); UI interna mantém «Controle de Estoque».
